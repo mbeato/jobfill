@@ -1,0 +1,22 @@
+<!doctype html>
+<meta charset="utf-8">
+<style>
+  body { font: 13px/1.45 system-ui, sans-serif; width: 320px; margin: 0; padding: 12px; }
+  button { width: 100%; padding: 8px; font-size: 14px; cursor: pointer; }
+  #status { margin-top: 10px; }
+  .row { display: flex; justify-content: space-between; gap: 8px; padding: 2px 0; border-bottom: 1px solid #eee; }
+  .row .s-filled { color: #2e7d32; }
+  .row .s-needs_manual, .row .s-verify, .row .s-partial, .row .s-error, .row .s-not_found { color: #e65100; }
+  .essay { background: #fff8dc; }
+  .muted { color: #777; }
+  #cost { margin-top: 8px; font-weight: 600; }
+  a { color: #555; font-size: 12px; }
+</style>
+<body>
+  <button id="fill">Fill this page</button>
+  <div id="status" class="muted">idle</div>
+  <div id="results"></div>
+  <div id="cost"></div>
+  <p><a href="#" id="opts">options</a> · review everything before you submit — jobfill never submits for you.</p>
+  <script src="popup.js"></script>
+</body>

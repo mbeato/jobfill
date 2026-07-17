@@ -1,0 +1,30 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>jobfill options</title>
+<style>
+  body { font: 14px/1.5 system-ui, sans-serif; max-width: 640px; margin: 32px auto; padding: 0 16px; }
+  label { display: block; font-weight: 600; margin: 18px 0 4px; }
+  input[type=password], textarea { width: 100%; box-sizing: border-box; padding: 6px; font-family: ui-monospace, monospace; }
+  textarea { height: 260px; }
+  .ok { color: #2e7d32; } .err { color: #c62828; } .muted { color: #777; }
+  button { margin-top: 8px; padding: 6px 14px; }
+</style>
+<body>
+  <h1>jobfill options</h1>
+
+  <label for="key">Anthropic API key</label>
+  <input type="password" id="key" placeholder="sk-ant-…">
+  <div id="keyState" class="muted"></div>
+
+  <label for="profile">Profile JSON</label>
+  <textarea id="profile" spellcheck="false" placeholder='{"contact": {…}, "work": […], …}'></textarea>
+  <div id="profileState" class="muted"></div>
+
+  <label for="resume">Resume PDF</label>
+  <input type="file" id="resume" accept="application/pdf">
+  <div id="resumeState" class="muted"></div>
+
+  <button id="save">Save</button>
+  <div id="saved"></div>
+  <script src="options.js"></script>
+</body>

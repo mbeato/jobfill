@@ -19,5 +19,12 @@ function pageContext() {
     url: location.href.slice(0, 300),
     title: (document.title || '').slice(0, 200),
     heading: (document.querySelector('h1, h2')?.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 200),
+    jd: jdText(),
   };
+}
+
+// best-effort job-description capture for resume tailoring
+function jdText() {
+  const el = document.querySelector('main, article, [class*="description"], [id*="description"]') || document.body;
+  return (el.innerText || '').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim().slice(0, 8000);
 }

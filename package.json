@@ -5,7 +5,8 @@
   "scripts": {
     "build": "esbuild extension/content/main.js --bundle --format=iife --outfile=extension/content.bundle.js",
     "watch": "esbuild extension/content/main.js --bundle --format=iife --outfile=extension/content.bundle.js --watch",
-    "test": "vitest run"
+    "test": "vitest run",
+    "helper": "bun helper/server.ts"
   },
   "devDependencies": {
     "esbuild": "^0.25.0",

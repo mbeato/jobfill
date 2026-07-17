@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "description": "Fill job applications from your own profile using your Anthropic API key.",
   "permissions": ["storage", "webNavigation"],
-  "host_permissions": ["https://api.anthropic.com/*"],
+  "host_permissions": ["https://api.anthropic.com/*", "http://127.0.0.1:7877/*"],
   "background": { "service_worker": "background.js", "type": "module" },
   "content_scripts": [
     {

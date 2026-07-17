@@ -33,8 +33,9 @@ function render(st) {
   const labels = {
     scraping: 'scanning the page…',
     mapping: `mapping ${st.fieldCount ?? ''} fields with claude…`,
+    tailoring: `tailoring resume for ${st.company || 'this role'}… (1-3 min)`,
     filling: 'filling…',
-    done: 'done — review highlighted fields',
+    done: `done — review highlighted fields${st.tailored ? ' · tailored resume attached' : st.tailorError ? ' · static resume (tailor failed)' : ''}`,
     error: `error: ${st.error}`,
   };
   $('status').textContent = labels[st.state] || st.state;

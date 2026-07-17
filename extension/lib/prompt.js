@@ -3,6 +3,8 @@ import { MODEL } from './anthropic.js';
 export const MAPPING_SCHEMA = {
   type: 'object',
   properties: {
+    company: { type: 'string' },
+    role: { type: 'string' },
     fields: {
       type: 'array',
       items: {
@@ -30,7 +32,7 @@ export const MAPPING_SCHEMA = {
       },
     },
   },
-  required: ['fields', 'skipped'],
+  required: ['company', 'role', 'fields', 'skipped'],
   additionalProperties: false,
 };
 
@@ -73,7 +75,9 @@ ESSAY VOICE (kind "essay")
 - confident without overselling. specific over generic — reference real work from the profile only.
 - 60-150 words unless the label or maxLength suggests otherwise.
 
-CONFIDENCE: 1.0 for direct profile copies, lower when interpreting (0.5-0.8 for judgment calls on options), always between 0 and 1.`;
+CONFIDENCE: 1.0 for direct profile copies, lower when interpreting (0.5-0.8 for judgment calls on options), always between 0 and 1.
+
+Also return "company" and "role" — the employer name and job title this application is for, inferred from pageContext (title, heading, jd text, url). Use "" when genuinely undeterminable.`;
 }
 
 export function parseMapping(response) {

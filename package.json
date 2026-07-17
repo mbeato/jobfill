@@ -1,0 +1,15 @@
+{
+  "name": "jobfill",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "esbuild extension/content/main.js --bundle --format=iife --outfile=extension/content.bundle.js",
+    "watch": "esbuild extension/content/main.js --bundle --format=iife --outfile=extension/content.bundle.js --watch",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "jsdom": "^26.0.0",
+    "vitest": "^3.0.0"
+  }
+}

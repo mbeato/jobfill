@@ -69,6 +69,14 @@ async function runFill(tabId) {
       }
     }
 
+    const { jobfillTotals } = await chrome.storage.local.get('jobfillTotals');
+    await chrome.storage.local.set({
+      jobfillTotals: {
+        spendUSD: (jobfillTotals?.spendUSD ?? 0) + cost,
+        fills: (jobfillTotals?.fills ?? 0) + 1,
+      },
+    });
+
     const labelById = new Map(fields.map(f => [f.id, f.label]));
     await setStatus({
       state: 'done',

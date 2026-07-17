@@ -17,6 +17,17 @@ chrome.storage.session.onChanged.addListener((changes) => {
 
 chrome.storage.session.get('jobfillStatus').then(({ jobfillStatus }) => render(jobfillStatus));
 
+renderTotals();
+chrome.storage.local.onChanged.addListener((changes) => {
+  if (changes.jobfillTotals) renderTotals();
+});
+
+async function renderTotals() {
+  const { jobfillTotals } = await chrome.storage.local.get('jobfillTotals');
+  if (!jobfillTotals?.fills) return;
+  $('totals').textContent = `all-time: $${jobfillTotals.spendUSD.toFixed(2)} across ${jobfillTotals.fills} fills`;
+}
+
 function render(st) {
   if (!st) return;
   const labels = {

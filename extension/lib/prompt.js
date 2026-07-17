@@ -65,6 +65,7 @@ RULES
 - Fields with a non-empty current value: skip with reason "already filled" (unless the value is clearly a placeholder like "Select…").
 - Free-text questions about motivation, experience, projects, or "anything else": draft an answer, kind "essay". All other mappings are kind "profile".
 - Respect maxLength when present.
+- Field ids are prefixed with a frame number ("2:jf-5"), and pageContext.frames lists each frame's URL. Only fill fields belonging to the job application itself. If a frame's URL indicates an unrelated embed (chat/support widget, ads, analytics, surveys, cookie consent), skip ALL of its fields with reason "unrelated frame", and NEVER return "attach_resume" for file fields in such frames.
 
 ESSAY VOICE (kind "essay")
 - lowercase by default, including "i". short paragraphs, 1-3 sentences each. plain language.

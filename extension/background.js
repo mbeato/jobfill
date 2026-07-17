@@ -14,6 +14,9 @@ async function setStatus(patch) {
 }
 
 async function runFill(tabId) {
+  // MV3 service workers idle out after ~30s without extension API activity; a periodic
+  // no-op storage read resets the timer so the long Claude call can't strand the run.
+  const heartbeat = setInterval(() => chrome.storage.session.get('jobfillStatus'), 20000);
   try {
     await chrome.storage.session.set({
       jobfillStatus: { state: 'scraping', tabId, startedAt: Date.now() },
@@ -38,7 +41,10 @@ async function runFill(tabId) {
     if (!fields.length) throw new Error('No fillable fields found on this page.');
 
     await setStatus({ state: 'mapping', fieldCount: fields.length });
-    const pageContext = perFrame[0].pageContext;
+    const pageContext = {
+      ...perFrame[0].pageContext,
+      frames: perFrame.map(f => ({ id: f.frameId, url: f.pageContext.url })),
+    };
     const response = await callClaude(apiKey, buildRequest(profile, fields, pageContext));
     const mapping = parseMapping(response);
     const cost = costUSD(response.usage);
@@ -50,12 +56,17 @@ async function runFill(tabId) {
         .filter(m => m.id.startsWith(`${f.frameId}:`))
         .map(m => ({ ...m, id: m.id.slice(String(f.frameId).length + 1) }));
       if (!frameMapping.length) continue;
-      const resp = await chrome.tabs.sendMessage(
-        tabId,
-        { type: 'jobfill.fill', mapping: frameMapping, attachments: { resume } },
-        { frameId: f.frameId },
-      );
-      for (const r of resp?.results || []) results.push({ ...r, id: `${f.frameId}:${r.id}` });
+      try {
+        const resp = await chrome.tabs.sendMessage(
+          tabId,
+          { type: 'jobfill.fill', mapping: frameMapping, attachments: { resume } },
+          { frameId: f.frameId },
+        );
+        for (const r of resp?.results || []) results.push({ ...r, id: `${f.frameId}:${r.id}` });
+      } catch {
+        // frame navigated or was removed during the Claude call — report its fields, keep going
+        for (const m of frameMapping) results.push({ id: `${f.frameId}:${m.id}`, status: 'frame_error' });
+      }
     }
 
     const labelById = new Map(fields.map(f => [f.id, f.label]));
@@ -67,5 +78,7 @@ async function runFill(tabId) {
     });
   } catch (e) {
     await setStatus({ state: 'error', error: String(e?.message || e) });
+  } finally {
+    clearInterval(heartbeat);
   }
 }

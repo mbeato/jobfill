@@ -79,6 +79,47 @@ describe('applyMapping', () => {
     expect(el.files[0].name).toBe('resume.pdf');
   });
 
+  it('clicks a nameless single radio instead of overwriting its value', async () => {
+    mount(`<label><input type="radio" value="acknowledge">I acknowledge the terms</label>`);
+    const [f] = collectFields(document);
+    const el = document.querySelector('input');
+    const results = await applyMapping([{ id: f.id, value: 'yes', kind: 'profile', confidence: 1 }], {});
+    expect(el.checked).toBe(true);
+    expect(el.value).toBe('acknowledge'); // submit value must be untouched
+    expect(results[0].status).toBe('filled');
+  });
+
+  it('reports stale when the element was detached after scraping', async () => {
+    mount(`<input type="text" aria-label="First Name">`);
+    const [f] = collectFields(document);
+    document.querySelector('input').remove(); // SPA re-render tore the node out
+    const results = await applyMapping([{ id: f.id, value: 'Example', kind: 'profile', confidence: 1 }], {});
+    expect(results[0].status).toBe('stale');
+  });
+
+  it('re-resolves by data attribute when a tagged replacement node exists', async () => {
+    mount(`<input type="text" aria-label="First Name">`);
+    const [f] = collectFields(document);
+    const old = document.querySelector('input');
+    const clone = old.cloneNode(true); // keeps data-jobfill-id, like a DOM morph
+    old.replaceWith(clone);
+    const results = await applyMapping([{ id: f.id, value: 'Example', kind: 'profile', confidence: 1 }], {});
+    expect(results[0].status).toBe('filled');
+    expect(clone.value).toBe('Example');
+  });
+
+  it('combobox fallback never clicks options that pre-existed the typing', async () => {
+    mount(`
+      <div role="listbox"><div role="option" id="unrelated">New Jersey</div></div>
+      <input type="text" role="combobox" aria-label="Location">`);
+    const [f] = collectFields(document);
+    let clicked = false;
+    document.getElementById('unrelated').addEventListener('click', () => { clicked = true; });
+    const results = await applyMapping([{ id: f.id, value: 'New York', kind: 'profile', confidence: 1 }], {});
+    expect(clicked).toBe(false);
+    expect(results[0].status).toBe('verify'); // typed text left for the user to confirm
+  });
+
   it('reports not_found for unknown ids', async () => {
     mount(`<input type="text" aria-label="X">`);
     collectFields(document);

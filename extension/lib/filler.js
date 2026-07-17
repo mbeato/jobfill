@@ -6,9 +6,14 @@ const LOWCONF_STYLE = '3px solid #f57c00'; // orange — verify
 export async function applyMapping(mapping, attachments = {}) {
   const results = [];
   for (const m of mapping) {
-    const entry = getEntry(m.id);
+    let entry = getEntry(m.id);
     if (!entry) {
       results.push({ id: m.id, status: 'not_found' });
+      continue;
+    }
+    entry = resolveEntry(entry, m.id);
+    if (!entry) {
+      results.push({ id: m.id, status: 'stale' });
       continue;
     }
     let status;
@@ -28,6 +33,17 @@ export async function applyMapping(mapping, attachments = {}) {
   return results;
 }
 
+// SPA forms can re-render between scrape and fill; never write into detached nodes.
+function resolveEntry(entry, id) {
+  if (entry.els) {
+    const live = entry.els.filter(e => e.isConnected);
+    return live.length ? { els: live } : null;
+  }
+  if (entry.el.isConnected) return entry;
+  const fresh = entry.el.ownerDocument?.querySelector(`[data-jobfill-id="${id}"]`);
+  return fresh ? { el: fresh } : null;
+}
+
 async function fillOne(entry, m, attachments) {
   if (entry.els) return fillGroup(entry.els, m.value);
   const el = entry.el;
@@ -36,6 +52,15 @@ async function fillOne(entry, m, attachments) {
   if (el instanceof HTMLInputElement && el.type === 'checkbox') {
     const want = /^(true|yes|1)$/i.test(String(m.value));
     if (el.checked !== want) el.click();
+    return 'filled';
+  }
+  if (el instanceof HTMLInputElement && el.type === 'radio') {
+    // nameless radio that escaped grouping — check it, never overwrite its submit value
+    const affirm = /^(true|yes|1)$/i.test(String(m.value))
+      || matches(optionText(el), m.value)
+      || matches(el.value, m.value);
+    if (!affirm) return 'needs_manual';
+    if (!el.checked) el.click();
     return 'filled';
   }
   if (isComboboxEl(el)) return fillCombobox(el, String(m.value));
@@ -66,13 +91,17 @@ function fillSelect(el, value) {
 }
 
 async function fillCombobox(el, value) {
+  const doc = el.ownerDocument;
+  // snapshot pre-existing options so the fallback can't click some unrelated widget
+  const before = new Set([...doc.querySelectorAll('[role="option"]')]);
   el.focus();
   setNativeValue(el, value);
   await sleep(700); // let the widget fetch/filter options
-  const doc = el.ownerDocument;
   const listId = el.getAttribute('aria-controls') || el.getAttribute('aria-owns');
   let opts = listId ? [...(doc.getElementById(listId)?.querySelectorAll('[role="option"]') ?? [])] : [];
-  if (!opts.length) opts = [...doc.querySelectorAll('[role="option"]')].filter(isVisible);
+  if (!opts.length) {
+    opts = [...doc.querySelectorAll('[role="option"]')].filter(isVisible).filter(o => !before.has(o));
+  }
   const target = bestOption(opts, o => o.textContent, value);
   if (target) {
     target.click();

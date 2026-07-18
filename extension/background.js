@@ -1,5 +1,6 @@
 import { buildRequest, parseMapping } from './lib/prompt.js';
 import { callClaude, costUSD } from './lib/anthropic.js';
+import { enforceIdentity } from './lib/identity.js';
 
 const HELPER = 'http://127.0.0.1:7877';
 
@@ -62,6 +63,12 @@ async function runFill(tabId) {
     const response = await callClaude(apiKey, buildRequest(profile, fields, pageContext));
     const mapping = parseMapping(response);
     const cost = costUSD(response.usage);
+
+    const identity = enforceIdentity(mapping, fields, profile);
+    mapping.fields = identity.fields;
+    mapping.skipped = identity.skipped;
+    const corrections = identity.corrections;
+    if (corrections.length) console.info('jobfill identity corrections', corrections);
 
     // Tailored resume via local helper (headless Claude Code + pdflatex). Falls back
     // to the stored static resume if the helper is down, disabled, or errors.
@@ -142,6 +149,7 @@ async function runFill(tabId) {
       role: mapping.role,
       results: results.map(r => ({ ...r, label: labelById.get(r.id) || r.id })),
       skipped: mapping.skipped.map(s => ({ ...s, label: labelById.get(s.id) || s.id })),
+      corrections: corrections.map(c => ({ ...c, label: labelById.get(c.id) || c.id })),
     });
   } catch (e) {
     await setStatus({ state: 'error', error: String(e?.message || e) });

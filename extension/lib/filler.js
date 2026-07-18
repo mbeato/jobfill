@@ -72,7 +72,9 @@ function verifyStuck(entry, m) {
   }
   if (el instanceof HTMLInputElement && (el.type === 'radio' || el.type === 'file')) return undefined;
   if (isComboboxEl(el)) return undefined;
-  return matches(el.value, String(m.value));
+  const digits = s => String(s ?? '').replace(/\D/g, '');
+  return matches(el.value, String(m.value))
+    || (digits(m.value).length >= 7 && digits(el.value) === digits(m.value));
 }
 
 async function fillOne(entry, m, attachments) {

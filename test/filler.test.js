@@ -166,6 +166,24 @@ describe('applyMapping', () => {
     expect('stuck' in results[0]).toBe(false);
   });
 
+  it('flags stuck: true when a masked tel input reformats the value (not a revert)', async () => {
+    mount(`<input type="text" aria-label="Phone">`);
+    const [f] = collectFields(document);
+    const el = document.querySelector('input');
+    el.addEventListener('input', () => { el.value = '(555) 555-0100'; }); // mask reformat
+    const results = await applyMapping([{ id: f.id, value: '555-555-0100', kind: 'profile', confidence: 1 }], {});
+    expect(results[0].stuck).toBe(true);
+  });
+
+  it('flags stuck: false when a tel input is reverted to a genuinely different number', async () => {
+    mount(`<input type="text" aria-label="Phone">`);
+    const [f] = collectFields(document);
+    const el = document.querySelector('input');
+    el.addEventListener('input', () => { el.value = '(999) 999-9999'; }); // different number, not a mask
+    const results = await applyMapping([{ id: f.id, value: '555-555-0100', kind: 'profile', confidence: 1 }], {});
+    expect(results[0].stuck).toBe(false);
+  });
+
   it('flags stuck: true when a select lands on the intended option', async () => {
     mount(`<select aria-label="Country"><option value="">--</option><option value="us">United States</option></select>`);
     const [f] = collectFields(document);

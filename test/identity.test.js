@@ -152,4 +152,20 @@ describe('enforceIdentity', () => {
     expect(out.corrections).toHaveLength(0);
   });
 
+  it('does not inject into a field the model skipped as unrelated frame', () => {
+    const fields = [field({ id: '0:jf-16', type: 'email', label: 'Email' })];
+    const mapping = { fields: [], skipped: [{ id: '0:jf-16', reason: 'unrelated frame' }] };
+    const out = enforceIdentity(mapping, fields, profile);
+    expect(out.fields).toHaveLength(0);
+    expect(out.skipped).toEqual([{ id: '0:jf-16', reason: 'unrelated frame' }]);
+    expect(out.corrections).toHaveLength(0);
+  });
+
+  it('still injects an identity field skipped for a non-frame reason', () => {
+    const fields = [field({ id: '0:jf-17', type: 'email', label: 'Email' })];
+    const mapping = { fields: [], skipped: [{ id: '0:jf-17', reason: 'already filled' }] };
+    const out = enforceIdentity(mapping, fields, profile);
+    expect(out.fields).toEqual([{ id: '0:jf-17', value: 'you@example.edu', kind: 'profile', confidence: 1 }]);
+    expect(out.skipped).toHaveLength(0);
+  });
 });

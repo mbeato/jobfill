@@ -43,9 +43,10 @@ export function enforceIdentity(mapping, fields, profile) {
 
     const idx = byId.get(descriptor.id);
     if (idx === undefined) {
+      const skipIdx = skipped.findIndex(s => s.id === descriptor.id);
+      if (skipIdx !== -1 && /unrelated frame/i.test(skipped[skipIdx].reason || '')) continue;
       mappedFields.push({ id: descriptor.id, value: constant, kind: 'profile', confidence: 1 });
       byId.set(descriptor.id, mappedFields.length - 1);
-      const skipIdx = skipped.findIndex(s => s.id === descriptor.id);
       if (skipIdx !== -1) skipped.splice(skipIdx, 1);
       corrections.push({ id: descriptor.id, category, from: null, to: constant });
     } else {

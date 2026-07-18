@@ -4,8 +4,10 @@ const PHONE_RE = /\b(phone|mobile|cell)\b/i;
 const LINKEDIN_RE = /linkedin/i;
 const GITHUB_RE = /github/i;
 const PORTFOLIO_RE = /\b(portfolio|personal (web ?site|website)|personal site)\b/i;
+const TEXT_TYPES = new Set(['text', 'email', 'tel', 'url', 'textarea']);
 
 export function identityCategory(descriptor) {
+  if (!TEXT_TYPES.has(descriptor.type)) return null;
   const label = descriptor.label || '';
   if (EXCLUDE_RE.test(label)) return null;
   if (descriptor.type === 'email' || EMAIL_RE.test(label)) return 'email';

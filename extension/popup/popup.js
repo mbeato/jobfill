@@ -36,11 +36,27 @@ function render(st) {
     tailoring: `tailoring resume for ${st.company || 'this role'}… (1-3 min)`,
     filling: 'filling…',
     done: `done — review highlighted fields${st.tailored ? ' · tailored resume attached' : st.tailorError ? ' · static resume (tailor failed)' : ''}`,
+    duplicate: 'already applied to this job',
     error: `error: ${st.error}`,
   };
   $('status').textContent = labels[st.state] || st.state;
-  $('status').className = st.state === 'error' ? '' : 'muted';
+  $('status').className = st.state === 'error' || st.state === 'duplicate' ? '' : 'muted';
   $('cost').textContent = st.cost ? `api cost ~$${st.cost.toFixed(3)}` : '';
+
+  if (st.state === 'duplicate' && st.prior) {
+    const when = new Date(st.prior.created_at).toLocaleDateString(undefined, {
+      year: 'numeric', month: 'short', day: 'numeric',
+    });
+    $('results').innerHTML = `<div class="row s-duplicate">
+      <span>you already applied to ${esc(st.prior.company)}${st.prior.role ? ' · ' + esc(st.prior.role) : ''} on ${esc(when)}</span>
+    </div>
+    <div class="row"><span class="muted">${esc(st.prior.url)}</span></div>
+    <button id="fillAnyway">Fill anyway</button>`;
+    $('fillAnyway').addEventListener('click', () => {
+      chrome.runtime.sendMessage({ type: 'jobfill.run', tabId: st.tabId, force: true });
+    });
+    return;
+  }
 
   const rows = [];
   for (const r of st.results || []) {

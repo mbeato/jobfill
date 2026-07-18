@@ -44,6 +44,17 @@ function slugify(s: string) {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'unknown';
 }
 
+function normalizeUrl(u: string): string {
+  const raw = String(u ?? '').trim().slice(0, 300);
+  try {
+    const parsed = new URL(raw);
+    const path = parsed.pathname.replace(/\/$/, '');
+    return `${parsed.host.toLowerCase()}${path}`;
+  } catch {
+    return raw;
+  }
+}
+
 async function tailor(body: { company: string; role: string; jd: string; url?: string }) {
   if (!body.jd || body.jd.length < 200) throw new Error('Job description too short to tailor against.');
   const slug = slugify(body.company);
@@ -120,7 +131,11 @@ Bun.serve({
         return new Response(Bun.file(join(HERE, 'dashboard.html')), { headers: { 'content-type': 'text/html' } });
       }
       if (pathname === '/applications' && req.method === 'GET') {
-        return json(db.query('SELECT * FROM applications ORDER BY created_at DESC').all());
+        const rows = db.query('SELECT * FROM applications ORDER BY created_at DESC').all() as { url: string }[];
+        const urlParam = new URL(req.url).searchParams.get('url');
+        if (urlParam === null) return json(rows);
+        const target = normalizeUrl(urlParam);
+        return json(rows.filter(row => normalizeUrl(row.url) === target));
       }
       if (pathname === '/applications' && req.method === 'POST') {
         const b = await req.json();

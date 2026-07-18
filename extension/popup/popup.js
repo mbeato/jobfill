@@ -47,6 +47,9 @@ function render(st) {
     rows.push(`<div class="row ${r.kind === 'essay' ? 'essay' : ''}">
       <span>${esc(r.label)}</span><span class="s-${r.status}">${r.status}${r.kind === 'essay' ? ' · essay' : ''}</span>
     </div>`);
+    if (r.stuck === false) {
+      rows.push(`<div class="row"><span class="s-didnt_stick">${esc(r.label)}: didn't stick — check this field</span></div>`);
+    }
   }
   for (const s of st.skipped || []) {
     rows.push(`<div class="row"><span>${esc(s.label)}</span><span class="muted">skipped: ${esc(s.reason)}</span></div>`);

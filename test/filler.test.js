@@ -126,4 +126,85 @@ describe('applyMapping', () => {
     const results = await applyMapping([{ id: 'jf-999', value: 'x', kind: 'profile', confidence: 1 }], {});
     expect(results[0].status).toBe('not_found');
   });
+
+  it('flags stuck: true when a filled text value persists', async () => {
+    mount(`<input type="text" aria-label="Email">`);
+    const [f] = collectFields(document);
+    const results = await applyMapping([{ id: f.id, value: 'max@x.com', kind: 'profile', confidence: 1 }], {});
+    expect(results[0].stuck).toBe(true);
+  });
+
+  it('flags stuck: false and outlines red when a controlled input reverts the value', async () => {
+    mount(`<input type="text" aria-label="First Name">`);
+    const [f] = collectFields(document);
+    const el = document.querySelector('input');
+    el.addEventListener('input', () => { el.value = ''; }); // simulate a controlled component resetting
+    const results = await applyMapping([{ id: f.id, value: 'Example', kind: 'profile', confidence: 1 }], {});
+    expect(results[0].status).toBe('filled');
+    expect(results[0].stuck).toBe(false);
+    expect(el.style.outline).toContain('#d32f2f');
+  });
+
+  it('flags stuck: true when a select lands on the intended option', async () => {
+    mount(`<select aria-label="Country"><option value="">--</option><option value="us">United States</option></select>`);
+    const [f] = collectFields(document);
+    const results = await applyMapping([{ id: f.id, value: 'united states', kind: 'profile', confidence: 1 }], {});
+    expect(results[0].stuck).toBe(true);
+  });
+
+  it('flags stuck: true for a checkbox toggled to the wanted state', async () => {
+    mount(`<label><input type="checkbox" aria-label="Subscribe">Subscribe</label>`);
+    const [f] = collectFields(document);
+    const results = await applyMapping([{ id: f.id, value: 'true', kind: 'profile', confidence: 1 }], {});
+    expect(results[0].stuck).toBe(true);
+  });
+
+  it('flags stuck: false when a listener flips a checkbox back after click', async () => {
+    mount(`<label><input type="checkbox" aria-label="Subscribe">Subscribe</label>`);
+    const [f] = collectFields(document);
+    const el = document.querySelector('input');
+    el.addEventListener('click', () => { el.checked = false; }); // listener rejects the check
+    const results = await applyMapping([{ id: f.id, value: 'true', kind: 'profile', confidence: 1 }], {});
+    expect(results[0].stuck).toBe(false);
+  });
+
+  it('flags stuck: true when a checkbox group has all wanted options checked', async () => {
+    mount(`
+      <label><input type="checkbox" name="src" value="li">LinkedIn</label>
+      <label><input type="checkbox" name="src" value="ref">Referral</label>
+      <label><input type="checkbox" name="src" value="other">Other</label>`);
+    const [f] = collectFields(document);
+    const results = await applyMapping([{ id: f.id, value: ['LinkedIn', 'Referral'], kind: 'profile', confidence: 1 }], {});
+    expect(results[0].stuck).toBe(true);
+  });
+
+  it('does not judge combobox verify results for stuck', async () => {
+    mount(`
+      <div role="listbox"><div role="option" id="unrelated">New Jersey</div></div>
+      <input type="text" role="combobox" aria-label="Location">`);
+    const [f] = collectFields(document);
+    const results = await applyMapping([{ id: f.id, value: 'New York', kind: 'profile', confidence: 1 }], {});
+    expect(results[0].status).toBe('verify');
+    expect('stuck' in results[0]).toBe(false);
+  });
+
+  it.skipIf(typeof DataTransfer === 'undefined')('does not judge file input fills for stuck', async () => {
+    mount(`<input type="file" aria-label="Resume">`);
+    const [f] = collectFields(document);
+    const b64 = btoa('%PDF-1.4 fake');
+    const results = await applyMapping(
+      [{ id: f.id, value: 'attach_resume', kind: 'profile', confidence: 1 }],
+      { resume: { name: 'resume.pdf', mime: 'application/pdf', b64 } },
+    );
+    expect(results[0].status).toBe('filled');
+    expect('stuck' in results[0]).toBe(false);
+  });
+
+  it('omits stuck for non-filled statuses', async () => {
+    mount(`<select aria-label="Visa"><option value="a">H-1B</option></select>`);
+    const [f] = collectFields(document);
+    const results = await applyMapping([{ id: f.id, value: 'Green Card', kind: 'profile', confidence: 0.9 }], {});
+    expect(results[0].status).toBe('needs_manual');
+    expect('stuck' in results[0]).toBe(false);
+  });
 });

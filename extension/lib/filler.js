@@ -2,6 +2,7 @@ import { getEntry, isVisible } from './scraper.js';
 
 const ESSAY_STYLE = '3px solid #f5c518';   // yellow — always review
 const LOWCONF_STYLE = '3px solid #f57c00'; // orange — verify
+const DIDNT_STICK_STYLE = '3px solid #d32f2f'; // red — value did not persist
 
 export async function applyMapping(mapping, attachments = {}) {
   const results = [];
@@ -24,11 +25,16 @@ export async function applyMapping(mapping, attachments = {}) {
       console.warn('jobfill fill error', m.id, e);
     }
     const el = entry.el || entry.els[0];
+    let stuck;
     if (status === 'filled') {
-      if (m.kind === 'essay') el.style.outline = ESSAY_STYLE;
+      stuck = verifyStuck(entry, m);
+      if (stuck === false) el.style.outline = DIDNT_STICK_STYLE;
+      else if (m.kind === 'essay') el.style.outline = ESSAY_STYLE;
       else if (m.confidence < 0.7) el.style.outline = LOWCONF_STYLE;
     }
-    results.push({ id: m.id, status, kind: m.kind, confidence: m.confidence });
+    const result = { id: m.id, status, kind: m.kind, confidence: m.confidence };
+    if (typeof stuck === 'boolean') result.stuck = stuck;
+    results.push(result);
   }
   return results;
 }
@@ -42,6 +48,27 @@ function resolveEntry(entry, id) {
   if (entry.el.isConnected) return entry;
   const fresh = entry.el.ownerDocument?.querySelector(`[data-jobfill-id="${id}"]`);
   return fresh ? { el: fresh } : null;
+}
+
+// Post-fill read-back: did the write actually persist? undefined = not verifiable, don't judge.
+function verifyStuck(entry, m) {
+  if (entry.els) {
+    const wanted = Array.isArray(m.value) ? m.value : [m.value];
+    return wanted.every(w => entry.els.some(e => e.checked && (matches(optionText(e), w) || matches(e.value, w))));
+  }
+  const el = entry.el;
+  if (el instanceof HTMLSelectElement) {
+    const sel = el.selectedOptions[0];
+    const wanted = String(Array.isArray(m.value) ? m.value[0] : m.value);
+    return !!sel && (matches(sel.textContent, wanted) || matches(sel.value, wanted));
+  }
+  if (el instanceof HTMLInputElement && el.type === 'checkbox') {
+    const want = /^(true|yes|1)$/i.test(String(m.value));
+    return el.checked === want;
+  }
+  if (el instanceof HTMLInputElement && (el.type === 'radio' || el.type === 'file')) return undefined;
+  if (isComboboxEl(el)) return undefined;
+  return matches(el.value, String(m.value));
 }
 
 async function fillOne(entry, m, attachments) {

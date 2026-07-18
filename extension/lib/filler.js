@@ -24,13 +24,17 @@ export async function applyMapping(mapping, attachments = {}) {
       status = 'error';
       console.warn('jobfill fill error', m.id, e);
     }
-    const el = entry.el || entry.els[0];
     let stuck;
     if (status === 'filled') {
-      stuck = verifyStuck(entry, m);
-      if (stuck === false) el.style.outline = DIDNT_STICK_STYLE;
-      else if (m.kind === 'essay') el.style.outline = ESSAY_STYLE;
-      else if (m.confidence < 0.7) el.style.outline = LOWCONF_STYLE;
+      await sleep(120); // let framework renders / scheduled reverts / masks settle before read-back
+      const resolved = resolveEntry(entry, m.id); // node may have been replaced during the delay
+      if (resolved) {
+        const el = resolved.el || resolved.els[0];
+        stuck = verifyStuck(resolved, m);
+        if (stuck === false) el.style.outline = DIDNT_STICK_STYLE;
+        else if (m.kind === 'essay') el.style.outline = ESSAY_STYLE;
+        else if (m.confidence < 0.7) el.style.outline = LOWCONF_STYLE;
+      }
     }
     const result = { id: m.id, status, kind: m.kind, confidence: m.confidence };
     if (typeof stuck === 'boolean') result.stuck = stuck;

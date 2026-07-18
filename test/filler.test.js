@@ -145,6 +145,27 @@ describe('applyMapping', () => {
     expect(el.style.outline).toContain('#d32f2f');
   });
 
+  it('flags stuck: false when a controlled input reverts the value asynchronously (macrotask)', async () => {
+    mount(`<input type="text" aria-label="First Name">`);
+    const [f] = collectFields(document);
+    const el = document.querySelector('input');
+    el.addEventListener('input', () => { setTimeout(() => { el.value = ''; }, 0); }); // async revert
+    const results = await applyMapping([{ id: f.id, value: 'Example', kind: 'profile', confidence: 1 }], {});
+    expect(results[0].status).toBe('filled');
+    expect(results[0].stuck).toBe(false);
+    expect(el.style.outline).toContain('#d32f2f');
+  });
+
+  it('omits stuck (does not throw) when the node detaches during the read-back delay', async () => {
+    mount(`<input type="text" aria-label="First Name">`);
+    const [f] = collectFields(document);
+    const el = document.querySelector('input');
+    el.addEventListener('input', () => { setTimeout(() => { el.remove(); }, 0); });
+    const results = await applyMapping([{ id: f.id, value: 'Example', kind: 'profile', confidence: 1 }], {});
+    expect(results[0].status).toBe('filled');
+    expect('stuck' in results[0]).toBe(false);
+  });
+
   it('flags stuck: true when a select lands on the intended option', async () => {
     mount(`<select aria-label="Country"><option value="">--</option><option value="us">United States</option></select>`);
     const [f] = collectFields(document);

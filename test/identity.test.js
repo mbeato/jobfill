@@ -118,4 +118,54 @@ describe('enforceIdentity', () => {
     const out = enforceIdentity(mapping, fields, profile);
     expect(out.fields[0].id).toBe('2:jf-5');
   });
+
+  it('leaves a select labeled Phone Device Type untouched', () => {
+    const fields = [field({ id: '0:jf-12', type: 'select', label: 'Phone Device Type' })];
+    const mapping = { fields: [{ id: '0:jf-12', value: 'Mobile', kind: 'model', confidence: 0.9 }], skipped: [] };
+    const out = enforceIdentity(mapping, fields, profile);
+    expect(out.fields[0].value).toBe('Mobile');
+    expect(out.corrections).toHaveLength(0);
+  });
+
+  it('leaves a select labeled Country Phone Code untouched', () => {
+    const fields = [field({ id: '0:jf-13', type: 'select', label: 'Country Phone Code' })];
+    const mapping = { fields: [{ id: '0:jf-13', value: '+1', kind: 'model', confidence: 0.9 }], skipped: [] };
+    const out = enforceIdentity(mapping, fields, profile);
+    expect(out.fields[0].value).toBe('+1');
+    expect(out.corrections).toHaveLength(0);
+  });
+
+  it('leaves a checkbox labeled Email me updates untouched', () => {
+    const fields = [field({ id: '0:jf-14', type: 'checkbox', label: 'Email me updates' })];
+    const mapping = { fields: [{ id: '0:jf-14', value: 'true', kind: 'model', confidence: 0.9 }], skipped: [] };
+    const out = enforceIdentity(mapping, fields, profile);
+    expect(out.fields[0].value).toBe('true');
+    expect(out.corrections).toHaveLength(0);
+  });
+
+  it('does not un-skip a non-text checkbox skipped as already filled', () => {
+    const fields = [field({ id: '0:jf-15', type: 'checkbox', label: 'Sign up for email newsletter' })];
+    const mapping = { fields: [], skipped: [{ id: '0:jf-15', reason: 'already filled' }] };
+    const out = enforceIdentity(mapping, fields, profile);
+    expect(out.fields).toHaveLength(0);
+    expect(out.skipped).toEqual([{ id: '0:jf-15', reason: 'already filled' }]);
+    expect(out.corrections).toHaveLength(0);
+  });
+
+  it('does not inject into a field the model skipped as unrelated frame', () => {
+    const fields = [field({ id: '0:jf-16', type: 'email', label: 'Email' })];
+    const mapping = { fields: [], skipped: [{ id: '0:jf-16', reason: 'unrelated frame' }] };
+    const out = enforceIdentity(mapping, fields, profile);
+    expect(out.fields).toHaveLength(0);
+    expect(out.skipped).toEqual([{ id: '0:jf-16', reason: 'unrelated frame' }]);
+    expect(out.corrections).toHaveLength(0);
+  });
+
+  it('still injects an identity field skipped for a non-frame reason', () => {
+    const fields = [field({ id: '0:jf-17', type: 'email', label: 'Email' })];
+    const mapping = { fields: [], skipped: [{ id: '0:jf-17', reason: 'already filled' }] };
+    const out = enforceIdentity(mapping, fields, profile);
+    expect(out.fields).toEqual([{ id: '0:jf-17', value: 'you@example.edu', kind: 'profile', confidence: 1 }]);
+    expect(out.skipped).toHaveLength(0);
+  });
 });

@@ -18,7 +18,7 @@ async function helperFetch(path, options = {}, timeoutMs = 10000) {
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === 'jobfill.run') {
-    runFill(msg.tabId);
+    runFill(msg.tabId, msg.force);
     sendResponse({ ok: true });
   }
 });
@@ -28,7 +28,7 @@ async function setStatus(patch) {
   await chrome.storage.session.set({ jobfillStatus: { ...jobfillStatus, ...patch } });
 }
 
-async function runFill(tabId) {
+async function runFill(tabId, force = false) {
   // MV3 service workers idle out after ~30s without extension API activity; a periodic
   // no-op storage read resets the timer so the long Claude call can't strand the run.
   const heartbeat = setInterval(() => chrome.storage.session.get('jobfillStatus'), 20000);
@@ -60,6 +60,24 @@ async function runFill(tabId) {
       ...perFrame[0].pageContext,
       frames: perFrame.map(f => ({ id: f.frameId, url: f.pageContext.url })),
     };
+    if (!force) {
+      try {
+        const prior = await helperFetch('/applications?url=' + encodeURIComponent(pageContext.url));
+        if (prior?.length) {
+          const p = prior[0];
+          await setStatus({
+            state: 'duplicate',
+            tabId,
+            prior: { company: p.company, role: p.role, url: p.url, created_at: p.created_at },
+          });
+          return;
+        }
+      } catch (e) {
+        // helper unreachable/erroring — fail open, don't block the fill
+        console.info('jobfill duplicate check skipped (helper unavailable)', e);
+      }
+    }
+
     const response = await callClaude(apiKey, buildRequest(profile, fields, pageContext));
     const mapping = parseMapping(response);
     const cost = costUSD(response.usage);

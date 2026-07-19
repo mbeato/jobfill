@@ -233,6 +233,32 @@ Bun.serve({
         );
         return json(db.query('SELECT * FROM applications WHERE id = ?').get(Number(patch[1])));
       }
+      if (pathname === '/answers' && req.method === 'GET') {
+        const rows = db.query('SELECT * FROM answers ORDER BY created_at DESC, id DESC').all() as AnswerRow[];
+        return json(groupByQuestion(rows));
+      }
+      const answersPatch = pathname.match(/^\/answers\/(\d+)$/);
+      if (answersPatch && req.method === 'PATCH') {
+        const b = await req.json();
+        const fields: string[] = [];
+        const vals: unknown[] = [];
+        for (const k of ['answer', 'pinned'] as const) {
+          if (k in b) {
+            fields.push(`${k} = ?`);
+            vals.push(b[k]);
+          }
+        }
+        if (!fields.length) return json({ error: 'nothing to update' }, 400);
+        db.query(`UPDATE answers SET ${fields.join(', ')}, updated_at = datetime('now') WHERE id = ?`).run(
+          ...vals,
+          Number(answersPatch[1]),
+        );
+        return json(db.query('SELECT * FROM answers WHERE id = ?').get(Number(answersPatch[1])));
+      }
+      if (answersPatch && req.method === 'DELETE') {
+        db.query('DELETE FROM answers WHERE id = ?').run(Number(answersPatch[1]));
+        return json({ ok: true });
+      }
       if (pathname === '/answers' && req.method === 'POST') {
         const b = await req.json();
         const target = normalizeUrl(b.url ?? '');

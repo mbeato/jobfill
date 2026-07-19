@@ -26,6 +26,9 @@ db.run(`CREATE TABLE IF NOT EXISTS applications (
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
 )`);
+try {
+  db.run(`ALTER TABLE applications ADD COLUMN summary TEXT DEFAULT ''`);
+} catch {}
 
 // Shared secret with the extension (must match HELPER_TOKEN in extension/background.js).
 // No CORS headers are served: cross-origin pages can neither read responses nor pass
@@ -47,6 +50,15 @@ function json(data: unknown, status = 200) {
 
 function slugify(s: string) {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'unknown';
+}
+
+function parseSummary(stored: string): string[] | null {
+  try {
+    const arr = JSON.parse(stored);
+    return Array.isArray(arr) && arr.length ? arr : null;
+  } catch {
+    return null;
+  }
 }
 
 function normalizeUrl(u: string): string {
@@ -137,20 +149,28 @@ Bun.serve({
         return new Response(Bun.file(join(HERE, 'dashboard.html')), { headers: { 'content-type': 'text/html' } });
       }
       if (pathname === '/applications' && req.method === 'GET') {
-        const rows = db.query('SELECT * FROM applications ORDER BY created_at DESC').all() as { url: string }[];
+        const rows = db.query('SELECT * FROM applications ORDER BY created_at DESC').all() as { url: string; summary: string }[];
+        const mapped = rows.map(row => ({ ...row, summary: parseSummary(row.summary) }));
         const urlParam = new URL(req.url).searchParams.get('url');
-        if (urlParam === null) return json(rows);
+        if (urlParam === null) return json(mapped);
         const target = normalizeUrl(urlParam);
-        return json(rows.filter(row => normalizeUrl(row.url) === target));
+        return json(mapped.filter(row => normalizeUrl(row.url) === target));
       }
       if (pathname === '/applications' && req.method === 'POST') {
         const b = await req.json();
         const row = db
           .query(
-            `INSERT INTO applications (company, role, url, resume_path, cost_usd)
-             VALUES (?, ?, ?, ?, ?) RETURNING *`,
+            `INSERT INTO applications (company, role, url, resume_path, cost_usd, summary)
+             VALUES (?, ?, ?, ?, ?, ?) RETURNING *`,
           )
-          .get(b.company ?? 'unknown', b.role ?? '', b.url ?? '', b.resume_path ?? '', b.cost_usd ?? 0);
+          .get(
+            b.company ?? 'unknown',
+            b.role ?? '',
+            b.url ?? '',
+            b.resume_path ?? '',
+            b.cost_usd ?? 0,
+            Array.isArray(b.summary) && b.summary.length ? JSON.stringify(b.summary) : '',
+          );
         return json(row, 201);
       }
       const patch = pathname.match(/^\/applications\/(\d+)$/);

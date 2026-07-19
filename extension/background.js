@@ -110,8 +110,16 @@ async function runFill(tabId, force = false) {
       }
     }
 
+    let library = null;
+    try {
+      library = await helperFetch('/answers/match?questions=' + encodeURIComponent(JSON.stringify(fields.map(f => f.label))));
+    } catch (e) {
+      // helper unreachable/erroring — fail open, essays draft without library context
+      console.info('jobfill library fetch skipped (helper unavailable)', e);
+    }
+
     await setStatus({ state: 'mapping', fieldCount: fields.length });
-    const response = await callClaude(apiKey, buildRequest(profile, fields, pageContext, summary));
+    const response = await callClaude(apiKey, buildRequest(profile, fields, pageContext, summary, library));
     const mapping = parseMapping(response);
     const cost = costUSD(response.usage);
 

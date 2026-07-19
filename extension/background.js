@@ -61,7 +61,6 @@ async function runFill(tabId, force = false) {
     const fields = perFrame.flatMap(f => f.fields.map(x => ({ ...x, id: `${f.frameId}:${x.id}` })));
     if (!fields.length) throw new Error('No fillable fields found on this page.');
 
-    await setStatus({ state: 'mapping', fieldCount: fields.length });
     const pageContext = {
       ...perFrame[0].pageContext,
       frames: perFrame.map(f => ({ id: f.frameId, url: f.pageContext.url })),
@@ -84,7 +83,35 @@ async function runFill(tabId, force = false) {
       }
     }
 
-    const response = await callClaude(apiKey, buildRequest(profile, fields, pageContext));
+    // Tailored resume via local helper (headless Claude Code + pdflatex). Falls back
+    // to the stored static resume if the helper is down, disabled, or errors. Runs before
+    // mapping (D-01) so its summary can be injected into essay drafting.
+    const { tailorEnabled = true } = await chrome.storage.local.get('tailorEnabled');
+    let attachedResume = resume;
+    let tailored = false;
+    let tailorError = null;
+    let summary = null;
+    const jd = perFrame[0].pageContext.jd || '';
+    if (tailorEnabled && jd.length >= 200) {
+      try {
+        await helperFetch('/health');
+        await setStatus({ state: 'tailoring', company: pageContext.heading || pageContext.title || '' });
+        const t = await helperFetch('/tailor', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ jd, url: pageContext.url, company: '', role: '' }),
+        }, 8 * 60 * 1000);
+        attachedResume = { name: t.name, mime: t.mime, b64: t.b64 };
+        attachedResume.path = t.path;
+        tailored = true;
+        summary = t.summary ?? null;
+      } catch (e) {
+        tailorError = String(e?.message || e);
+      }
+    }
+
+    await setStatus({ state: 'mapping', fieldCount: fields.length });
+    const response = await callClaude(apiKey, buildRequest(profile, fields, pageContext, summary));
     const mapping = parseMapping(response);
     const cost = costUSD(response.usage);
 
@@ -93,30 +120,6 @@ async function runFill(tabId, force = false) {
     mapping.skipped = identity.skipped;
     const corrections = identity.corrections;
     if (corrections.length) console.info('jobfill identity corrections', corrections);
-
-    // Tailored resume via local helper (headless Claude Code + pdflatex). Falls back
-    // to the stored static resume if the helper is down, disabled, or errors.
-    const { tailorEnabled = true } = await chrome.storage.local.get('tailorEnabled');
-    let attachedResume = resume;
-    let tailored = false;
-    let tailorError = null;
-    const jd = perFrame[0].pageContext.jd || '';
-    if (tailorEnabled && jd.length >= 200) {
-      try {
-        await helperFetch('/health');
-        await setStatus({ state: 'tailoring', cost, company: mapping.company, role: mapping.role });
-        const t = await helperFetch('/tailor', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ company: mapping.company, role: mapping.role, jd, url: pageContext.url }),
-        }, 8 * 60 * 1000);
-        attachedResume = { name: t.name, mime: t.mime, b64: t.b64 };
-        attachedResume.path = t.path;
-        tailored = true;
-      } catch (e) {
-        tailorError = String(e?.message || e);
-      }
-    }
 
     await setStatus({ state: 'filling', cost });
     const results = [];
@@ -157,6 +160,7 @@ async function runFill(tabId, force = false) {
           url: pageContext.url,
           resume_path: tailored ? attachedResume.path : '',
           cost_usd: cost,
+          summary: tailored ? summary : null,
         }),
       });
     } catch {
@@ -169,6 +173,7 @@ async function runFill(tabId, force = false) {
       cost,
       tailored,
       tailorError,
+      summary,
       company: mapping.company,
       role: mapping.role,
       results: results.map(r => ({ ...r, label: labelById.get(r.id) || r.id })),

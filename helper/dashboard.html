@@ -18,6 +18,15 @@
   .s-offer { color: #2e7d32; font-weight: 600; } .s-rejected { color: #999; }
   a { color: #1565c0; text-decoration: none; }
   .summary-toggle { cursor: pointer; margin-top: 2px; }
+  h2 { font-size: 16px; font-weight: 600; line-height: 1.2; margin-top: 32px; }
+  .answer-block { background: #fff8dc; padding: 8px; overflow: hidden; }
+  textarea.answer-edit { width: 100%; box-sizing: border-box; border: 1px solid transparent; padding: 8px; background: #fff8dc; }
+  textarea.answer-edit:focus { border-color: #ccc; }
+  .clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .versions-toggle { color: #1565c0; cursor: pointer; }
+  .pin-btn.pinned { color: #2e7d32; font-weight: 600; }
+  .pin-btn { color: #999; cursor: pointer; }
+  .delete-btn { color: #d32f2f; cursor: pointer; }
 </style>
 <body>
   <h1>jobfill tracker</h1>
@@ -27,6 +36,10 @@
     <thead><tr><th>date</th><th>company</th><th>role</th><th>status</th><th>notes</th><th>links</th></tr></thead>
     <tbody id="rows"></tbody>
   </table>
+  <div id="library">
+    <h2>answer library</h2>
+    <div id="libraryBody"></div>
+  </div>
 <script>
 const STATUSES = ['applied', 'replied', 'interviewing', 'offer', 'rejected'];
 let apps = [];
@@ -92,6 +105,68 @@ function esc(s) {
   return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 }
 
+async function loadLibrary() {
+  const groups = await (await fetch('/answers')).json();
+  renderLibrary(groups);
+}
+
+function renderVersionRow(v) {
+  return `
+    <div style="padding-left: 4px; margin-top: 6px;">
+      <div class="muted clamp-3">${esc(v.answer)}</div>
+      <div class="muted">${(v.created_at || '').slice(0, 10)}
+        <span class="pin-btn ${v.pinned ? 'pinned' : ''}" onclick="patchAnswer(${v.id}, {pinned: ${v.pinned ? 0 : 1}})">${v.pinned ? 'pinned' : 'pin'}</span>
+        · <span class="delete-btn" onclick="deleteAnswer(${v.id})">delete</span>
+      </div>
+    </div>`;
+}
+
+function renderLibrary(groups) {
+  const body = document.getElementById('libraryBody');
+  if (!groups.length) {
+    body.innerHTML = `
+      <div class="muted">no answers banked yet</div>
+      <div class="muted" style="font-size: 12px">capture answers from the popup after filling a form with essay questions.</div>`;
+    return;
+  }
+  body.innerHTML = `
+    <table>
+      <thead><tr><th>question</th><th>answer</th><th>captured</th><th>actions</th></tr></thead>
+      <tbody>
+        ${groups.map(g => {
+          const best = g.best;
+          return `
+            <tr>
+              <td style="text-overflow: ellipsis; white-space: nowrap; overflow: hidden; max-width: 280px">${esc(g.question)}</td>
+              <td><textarea class="answer-edit" rows="4" onchange="patchAnswer(${best.id}, {answer: this.value})">${esc(best.answer)}</textarea></td>
+              <td>
+                <div class="muted">${(best.created_at || '').slice(0, 10)}</div>
+                ${g.versions.length ? `
+                  <div class="versions-toggle" onclick="toggleVersions(${best.id})">${g.versions.length} older version${g.versions.length === 1 ? '' : 's'} <span id="varrow-${best.id}">▾</span></div>
+                  <div id="versions-${best.id}" style="display:none">
+                    ${g.versions.map(renderVersionRow).join('')}
+                  </div>
+                ` : ''}
+              </td>
+              <td>
+                <span class="pin-btn ${best.pinned ? 'pinned' : ''}" onclick="patchAnswer(${best.id}, {pinned: ${best.pinned ? 0 : 1}})">${best.pinned ? 'pinned' : 'pin'}</span>
+                · <span class="delete-btn" onclick="deleteAnswer(${best.id})">delete</span>
+              </td>
+            </tr>`;
+        }).join('')}
+      </tbody>
+    </table>`;
+}
+
+function toggleVersions(id) {
+  const body = document.getElementById(`versions-${id}`);
+  const arrow = document.getElementById(`varrow-${id}`);
+  const expanded = body.style.display !== 'none';
+  body.style.display = expanded ? 'none' : 'block';
+  arrow.textContent = expanded ? '▾' : '▴';
+}
+
 load();
+loadLibrary();
 </script>
 </body>

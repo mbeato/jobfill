@@ -166,6 +166,21 @@ function toggleVersions(id) {
   arrow.textContent = expanded ? '▾' : '▴';
 }
 
+async function patchAnswer(id, body) {
+  await fetch(`/answers/${id}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  loadLibrary();
+}
+
+async function deleteAnswer(id) {
+  if (!confirm("delete this answer? this can't be undone")) return;
+  await fetch(`/answers/${id}`, { method: 'DELETE' });
+  loadLibrary();
+}
+
 load();
 loadLibrary();
 </script>

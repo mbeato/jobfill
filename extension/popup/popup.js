@@ -71,7 +71,7 @@ function render(st) {
   const rows = [];
   for (const r of st.results || []) {
     rows.push(`<div class="row ${r.kind === 'essay' ? 'essay' : ''}">
-      <span>${esc(r.label)}</span><span class="s-${r.status}">${r.status}${r.kind === 'essay' ? ' · essay' : ''}</span>
+      <span>${esc(r.label)}</span><span class="s-${r.status}">${r.status}${r.kind === 'essay' ? ' · essay' : ''}${r.reused ? ' · <span class="reused">reused</span>' : ''}</span>
     </div>`);
     if (r.stuck === false) {
       rows.push(`<div class="row"><span class="s-didnt_stick">${esc(r.label)}: didn't stick — check this field</span></div>`);
@@ -80,7 +80,27 @@ function render(st) {
   for (const s of st.skipped || []) {
     rows.push(`<div class="row"><span>${esc(s.label)}</span><span class="muted">skipped: ${esc(s.reason)}</span></div>`);
   }
+
+  const canCapture = st.state === 'done' &&
+    ((st.results || []).some((r) => r.kind === 'essay') || st.skipped?.length > 0);
+  if (canCapture) {
+    rows.push('<button id="capture">Bank answers</button><div id="captureStatus" class="muted"></div>');
+  }
   $('results').innerHTML = rows.join('');
+
+  if (canCapture) {
+    $('capture').addEventListener('click', () => {
+      $('capture').disabled = true;
+      $('capture').textContent = 'Banking…';
+      chrome.runtime.sendMessage({ type: 'jobfill.capture', tabId: st.tabId });
+    });
+    if (st.captureError) {
+      $('captureStatus').textContent = 'answers not saved — helper offline';
+    } else if (typeof st.bankedCount === 'number') {
+      $('captureStatus').textContent = `banked ${st.bankedCount} answer${st.bankedCount === 1 ? '' : 's'}`;
+      $('captureStatus').style.color = '#2e7d32';
+    }
+  }
 }
 
 function esc(s) {

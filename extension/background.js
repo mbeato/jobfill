@@ -3,12 +3,18 @@ import { callClaude, costUSD } from './lib/anthropic.js';
 import { enforceIdentity } from './lib/identity.js';
 
 const HELPER = 'http://127.0.0.1:7877';
+// Must match TOKEN in helper/server.ts — the helper rejects unauthenticated cross-origin callers.
+const HELPER_TOKEN = 'REDACTED-TOKEN';
 
 async function helperFetch(path, options = {}, timeoutMs = 10000) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const res = await fetch(`${HELPER}${path}`, { ...options, signal: ctrl.signal });
+    const res = await fetch(`${HELPER}${path}`, {
+      ...options,
+      headers: { ...(options.headers || {}), 'x-jobfill-token': HELPER_TOKEN },
+      signal: ctrl.signal,
+    });
     if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || `helper ${res.status}`);
     return await res.json();
   } finally {

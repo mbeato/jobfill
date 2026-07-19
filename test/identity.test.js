@@ -168,4 +168,38 @@ describe('enforceIdentity', () => {
     expect(out.fields).toEqual([{ id: '0:jf-17', value: 'you@example.edu', kind: 'profile', confidence: 1 }]);
     expect(out.skipped).toHaveLength(0);
   });
+
+  it('does not inject when the frame-exclusion reason phrasing drifts', () => {
+    const reasons = ['unrelated iframe', 'third-party chat widget', 'cookie consent embed', 'survey frame'];
+    for (const reason of reasons) {
+      const fields = [field({ id: '3:jf-18', type: 'email', label: 'Email' })];
+      const mapping = { fields: [], skipped: [{ id: '3:jf-18', reason }] };
+      const out = enforceIdentity(mapping, fields, profile);
+      expect(out.fields).toHaveLength(0);
+      expect(out.skipped).toEqual([{ id: '3:jf-18', reason }]);
+    }
+  });
+
+  it('does not inject into a field omitted from both fields and skipped in a frame the model never mapped', () => {
+    const fields = [
+      field({ id: '0:jf-1', type: 'text', label: 'Full name' }),
+      field({ id: '4:jf-19', type: 'email', label: 'Email' }),
+    ];
+    const mapping = { fields: [{ id: '0:jf-1', value: 'the operator Example', kind: 'profile', confidence: 1 }], skipped: [] };
+    const out = enforceIdentity(mapping, fields, profile);
+    expect(out.fields).toHaveLength(1);
+    expect(out.fields[0].id).toBe('0:jf-1');
+    expect(out.corrections).toHaveLength(0);
+  });
+
+  it('still injects an omitted identity field in a frame the model mapped', () => {
+    const fields = [
+      field({ id: '0:jf-1', type: 'text', label: 'Full name' }),
+      field({ id: '0:jf-20', type: 'email', label: 'Email' }),
+    ];
+    const mapping = { fields: [{ id: '0:jf-1', value: 'the operator Example', kind: 'profile', confidence: 1 }], skipped: [] };
+    const out = enforceIdentity(mapping, fields, profile);
+    expect(out.fields.find(f => f.id === '0:jf-20')).toEqual({ id: '0:jf-20', value: 'you@example.edu', kind: 'profile', confidence: 1 });
+    expect(out.corrections).toEqual([{ id: '0:jf-20', category: 'email', from: null, to: 'you@example.edu' }]);
+  });
 });

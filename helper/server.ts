@@ -27,16 +27,21 @@ db.run(`CREATE TABLE IF NOT EXISTS applications (
   updated_at TEXT DEFAULT (datetime('now'))
 )`);
 
-const CORS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, PATCH, OPTIONS',
-  'Access-Control-Allow-Headers': 'content-type',
-};
+// Shared secret with the extension (must match HELPER_TOKEN in extension/background.js).
+// No CORS headers are served: cross-origin pages can neither read responses nor pass
+// preflight, so only the extension (token) and the same-origin dashboard get through.
+const TOKEN = 'REDACTED-TOKEN';
+
+function authorized(req: Request): boolean {
+  if (req.headers.get('x-jobfill-token') === TOKEN) return true;
+  const origin = req.headers.get('origin');
+  return !origin || origin === `http://127.0.0.1:${PORT}` || origin === `http://localhost:${PORT}`;
+}
 
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { 'content-type': 'application/json', ...CORS },
+    headers: { 'content-type': 'application/json' },
   });
 }
 
@@ -121,9 +126,10 @@ Bun.serve({
   idleTimeout: 0,
   async fetch(req) {
     const { pathname } = new URL(req.url);
-    if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
+    if (req.method === 'OPTIONS') return new Response(null, { status: 204 });
 
     try {
+      if (pathname !== '/health' && !authorized(req)) return json({ error: 'forbidden' }, 403);
       if (pathname === '/health') {
         return json({ ok: true, latex: existsSync(PDFLATEX), claude: existsSync(CLAUDE_BIN) });
       }

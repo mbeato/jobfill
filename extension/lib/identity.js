@@ -5,6 +5,15 @@ const LINKEDIN_RE = /linkedin/i;
 const GITHUB_RE = /github/i;
 const PORTFOLIO_RE = /\b(portfolio|personal (web ?site|website)|personal site)\b/i;
 const TEXT_TYPES = new Set(['text', 'email', 'tel', 'url', 'textarea']);
+// Catches the model's frame-exclusion reason including phrasing drift ("unrelated iframe",
+// "third-party chat widget", "cookie consent embed", ...). A fuzzy match fails safe: we
+// just don't inject.
+const UNRELATED_FRAME_RE = /unrelated|third[\s-]?party|widget|embed|chat|survey|cookie|consent|iframe/i;
+
+function frameKey(id) {
+  const i = String(id).indexOf(':');
+  return i === -1 ? '' : String(id).slice(0, i);
+}
 
 export function identityCategory(descriptor) {
   if (!TEXT_TYPES.has(descriptor.type)) return null;
@@ -34,6 +43,10 @@ export function enforceIdentity(mapping, fields, profile) {
   const skipped = [...mapping.skipped];
   const corrections = [];
   const byId = new Map(mappedFields.map((m, i) => [m.id, i]));
+  // Frames where the model chose to fill at least one field. Injecting into any other
+  // frame would make the guard the sole writer somewhere the model excluded — the exact
+  // PII-into-third-party-widget leak the frame-safety rule exists to prevent.
+  const mappedFrames = new Set(mapping.fields.map(m => frameKey(m.id)));
 
   for (const descriptor of fields) {
     const category = identityCategory(descriptor);
@@ -44,7 +57,8 @@ export function enforceIdentity(mapping, fields, profile) {
     const idx = byId.get(descriptor.id);
     if (idx === undefined) {
       const skipIdx = skipped.findIndex(s => s.id === descriptor.id);
-      if (skipIdx !== -1 && /unrelated frame/i.test(skipped[skipIdx].reason || '')) continue;
+      if (skipIdx !== -1 && UNRELATED_FRAME_RE.test(skipped[skipIdx].reason || '')) continue;
+      if (skipIdx === -1 && !mappedFrames.has(frameKey(descriptor.id))) continue;
       mappedFields.push({ id: descriptor.id, value: constant, kind: 'profile', confidence: 1 });
       byId.set(descriptor.id, mappedFields.length - 1);
       if (skipIdx !== -1) skipped.splice(skipIdx, 1);

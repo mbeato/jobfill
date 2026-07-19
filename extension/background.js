@@ -5,6 +5,9 @@ import { enforceIdentity } from './lib/identity.js';
 const HELPER = 'http://127.0.0.1:7877';
 // Must match TOKEN in helper/server.ts — the helper rejects unauthenticated cross-origin callers.
 const HELPER_TOKEN = 'REDACTED-TOKEN';
+// Mirrors lib/identity.js — gates which skipped fields are safe to bank as free-text Q&A
+// (a skipped dropdown/radio/checkbox with a hand-picked option value must never be captured).
+const TEXT_TYPES = new Set(['text', 'email', 'tel', 'url', 'textarea']);
 
 async function helperFetch(path, options = {}, timeoutMs = 10000) {
   const ctrl = new AbortController();
@@ -25,6 +28,10 @@ async function helperFetch(path, options = {}, timeoutMs = 10000) {
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === 'jobfill.run') {
     runFill(msg.tabId, msg.force);
+    sendResponse({ ok: true });
+  }
+  if (msg.type === 'jobfill.capture') {
+    captureAnswers(msg.tabId);
     sendResponse({ ok: true });
   }
 });
@@ -110,8 +117,16 @@ async function runFill(tabId, force = false) {
       }
     }
 
+    let library = null;
+    try {
+      library = await helperFetch('/answers/match?questions=' + encodeURIComponent(JSON.stringify(fields.map(f => f.label))));
+    } catch (e) {
+      // helper unreachable/erroring — fail open, essays draft without library context
+      console.info('jobfill library fetch skipped (helper unavailable)', e);
+    }
+
     await setStatus({ state: 'mapping', fieldCount: fields.length });
-    const response = await callClaude(apiKey, buildRequest(profile, fields, pageContext, summary));
+    const response = await callClaude(apiKey, buildRequest(profile, fields, pageContext, summary, library));
     const mapping = parseMapping(response);
     const cost = costUSD(response.usage);
 
@@ -184,5 +199,63 @@ async function runFill(tabId, force = false) {
     await setStatus({ state: 'error', error: String(e?.message || e) });
   } finally {
     clearInterval(heartbeat);
+  }
+}
+
+// Explicit, popup-triggered capture (D-01/D-02/D-03): re-scrapes the page and banks the operator's
+// post-edit answers for this run's own essay fields plus any free-text fields he hand-filled
+// after the model skipped them. Never scrapes or banks fields outside those two label sets.
+async function captureAnswers(tabId) {
+  try {
+    const { jobfillStatus } = await chrome.storage.session.get('jobfillStatus');
+    const essayLabels = new Set((jobfillStatus?.results || []).filter(r => r.kind === 'essay').map(r => r.label));
+    const skippedLabels = new Set((jobfillStatus?.skipped || []).map(s => s.label));
+
+    const frames = (await chrome.webNavigation.getAllFrames({ tabId })) || [];
+    const perFrame = [];
+    for (const f of frames) {
+      try {
+        const resp = await chrome.tabs.sendMessage(tabId, { type: 'jobfill.scrape' }, { frameId: f.frameId });
+        if (resp?.fields?.length) perFrame.push({ frameId: f.frameId, ...resp });
+      } catch {
+        // frame without content script — ignore
+      }
+    }
+    const freshFields = perFrame.flatMap(f => f.fields);
+    if (!freshFields.length) {
+      await setStatus({ bankedCount: 0, captureError: null });
+      return;
+    }
+
+    const answers = [];
+    for (const label of essayLabels) {
+      const field = freshFields.find(f => f.label === label && String(f.value ?? '').trim());
+      if (field) answers.push({ question: label, answer: field.value.trim() });
+    }
+    for (const label of skippedLabels) {
+      const field = freshFields.find(f => f.label === label && TEXT_TYPES.has(f.type) && String(f.value ?? '').trim());
+      if (field) answers.push({ question: label, answer: field.value.trim() });
+    }
+
+    if (!answers.length) {
+      await setStatus({ bankedCount: 0, captureError: null });
+      return;
+    }
+
+    const url = perFrame[0]?.pageContext?.url || '';
+    try {
+      const resp = await helperFetch('/answers', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ url, answers }),
+      });
+      await setStatus({ bankedCount: resp.banked, captureError: null });
+    } catch (e) {
+      console.info('jobfill capture skipped (helper unavailable)', e);
+      await setStatus({ bankedCount: null, captureError: true });
+    }
+  } catch (e) {
+    console.info('jobfill capture failed', e);
+    await setStatus({ bankedCount: null, captureError: true });
   }
 }

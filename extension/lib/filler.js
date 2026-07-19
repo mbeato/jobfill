@@ -36,7 +36,7 @@ export async function applyMapping(mapping, attachments = {}) {
         else if (m.confidence < 0.7) el.style.outline = LOWCONF_STYLE;
       }
     }
-    const result = { id: m.id, status, kind: m.kind, confidence: m.confidence };
+    const result = { id: m.id, status, kind: m.kind, confidence: m.confidence, reused: m.reused };
     if (typeof stuck === 'boolean') result.stuck = stuck;
     results.push(result);
   }

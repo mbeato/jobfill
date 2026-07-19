@@ -47,6 +47,7 @@ function render(st) {
     const when = new Date(st.prior.created_at).toLocaleDateString(undefined, {
       year: 'numeric', month: 'short', day: 'numeric',
     });
+    $('summary').innerHTML = '';
     $('results').innerHTML = `<div class="row s-duplicate">
       <span>you already applied to ${esc(st.prior.company)}${st.prior.role ? ' · ' + esc(st.prior.role) : ''} on ${esc(when)}</span>
     </div>
@@ -56,6 +57,15 @@ function render(st) {
       chrome.runtime.sendMessage({ type: 'jobfill.run', tabId: st.tabId, force: true });
     });
     return;
+  }
+
+  if (st.state === 'done' && st.tailored && st.summary?.length) {
+    $('summary').innerHTML = `<div class="summary-block">
+      <div class="summary-label">resume changes</div>
+      ${st.summary.map((line) => `<div class="summary-line">${esc(line)}</div>`).join('')}
+    </div>`;
+  } else {
+    $('summary').innerHTML = '';
   }
 
   const rows = [];

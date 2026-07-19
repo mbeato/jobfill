@@ -14,8 +14,9 @@ export const MAPPING_SCHEMA = {
           value: { anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }] },
           kind: { type: 'string', enum: ['profile', 'essay'] },
           confidence: { type: 'number' },
+          reused: { type: 'boolean' },
         },
-        required: ['id', 'value', 'kind', 'confidence'],
+        required: ['id', 'value', 'kind', 'confidence', 'reused'],
         additionalProperties: false,
       },
     },
@@ -36,14 +37,14 @@ export const MAPPING_SCHEMA = {
   additionalProperties: false,
 };
 
-export function buildRequest(profile, fields, pageContext, summary) {
+export function buildRequest(profile, fields, pageContext, summary, library) {
   return {
     model: MODEL,
     max_tokens: 16000,
     system: [
       {
         type: 'text',
-        text: systemPrompt(profile, summary),
+        text: systemPrompt(profile, summary, library),
         cache_control: { type: 'ephemeral' },
       },
     ],
@@ -52,7 +53,7 @@ export function buildRequest(profile, fields, pageContext, summary) {
   };
 }
 
-function systemPrompt(profile, summary) {
+function systemPrompt(profile, summary, library) {
   return `You fill job application forms on behalf of the operator Example. You receive a page context and a list of form fields (id, type, label, options, required, current value). Return a mapping for every field you can fill and a skipped entry with a reason for every field you cannot.
 
 CANDIDATE PROFILE (the ONLY source of facts):
@@ -77,7 +78,7 @@ ESSAY VOICE (kind "essay")
 
 CONFIDENCE: 1.0 for direct profile copies, lower when interpreting (0.5-0.8 for judgment calls on options), always between 0 and 1.
 
-Also return "company" and "role" — the employer name and job title this application is for, inferred from pageContext (title, heading, jd text, url). Use "" when genuinely undeterminable.${summaryBlock(summary)}`;
+Also return "company" and "role" — the employer name and job title this application is for, inferred from pageContext (title, heading, jd text, url). Use "" when genuinely undeterminable.${summaryBlock(summary)}${libraryBlock(library)}`;
 }
 
 function summaryBlock(summary) {
@@ -87,6 +88,29 @@ function summaryBlock(summary) {
 RESUME CONTEXT (for kind "essay" answers)
 The resume was tailored for this role as summarized below. Essay answers must stay consistent with that framing — lead with the same strengths, don't contradict the emphasis.
 ${summary.join('\n')}`;
+}
+
+function libraryBlock(library) {
+  const reuse = library?.reuse || [];
+  const examples = library?.examples || [];
+  if (reuse.length === 0 && examples.length === 0) return '';
+  const reuseSection = reuse.length
+    ? `
+
+REUSE (the operator's own accepted answers to matching questions)
+These are the operator's own accepted answers to matching questions on prior applications — reuse each one, keeping its voice and substance, adapting ONLY company/role-specific references. When you reuse one, set "reused": true on that field.
+${reuse.map(r => `Q: ${r.question}\nA: ${r.answer}`).join('\n\n')}`
+    : '';
+  const examplesSection = examples.length
+    ? `
+
+EXAMPLES (the operator's approved answers to other questions)
+Examples of the operator's approved answers to other questions — borrow phrasing, anecdotes, and voice when relevant, but facts still come only from the profile and this library, never invented.
+${examples.map(e => `Q: ${e.question}\nA: ${e.answer}`).join('\n\n')}`
+    : '';
+  return `
+
+ANSWER LIBRARY${reuseSection}${examplesSection}`;
 }
 
 export function parseMapping(response) {

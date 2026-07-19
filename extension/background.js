@@ -160,6 +160,7 @@ async function runFill(tabId, force = false) {
           url: pageContext.url,
           resume_path: tailored ? attachedResume.path : '',
           cost_usd: cost,
+          summary: tailored ? summary : null,
         }),
       });
     } catch {
@@ -172,6 +173,7 @@ async function runFill(tabId, force = false) {
       cost,
       tailored,
       tailorError,
+      summary,
       company: mapping.company,
       role: mapping.role,
       results: results.map(r => ({ ...r, label: labelById.get(r.id) || r.id })),

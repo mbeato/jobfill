@@ -36,14 +36,14 @@ export const MAPPING_SCHEMA = {
   additionalProperties: false,
 };
 
-export function buildRequest(profile, fields, pageContext) {
+export function buildRequest(profile, fields, pageContext, summary) {
   return {
     model: MODEL,
     max_tokens: 16000,
     system: [
       {
         type: 'text',
-        text: systemPrompt(profile),
+        text: systemPrompt(profile, summary),
         cache_control: { type: 'ephemeral' },
       },
     ],
@@ -52,7 +52,7 @@ export function buildRequest(profile, fields, pageContext) {
   };
 }
 
-function systemPrompt(profile) {
+function systemPrompt(profile, summary) {
   return `You fill job application forms on behalf of the operator Example. You receive a page context and a list of form fields (id, type, label, options, required, current value). Return a mapping for every field you can fill and a skipped entry with a reason for every field you cannot.
 
 CANDIDATE PROFILE (the ONLY source of facts):
@@ -77,7 +77,16 @@ ESSAY VOICE (kind "essay")
 
 CONFIDENCE: 1.0 for direct profile copies, lower when interpreting (0.5-0.8 for judgment calls on options), always between 0 and 1.
 
-Also return "company" and "role" — the employer name and job title this application is for, inferred from pageContext (title, heading, jd text, url). Use "" when genuinely undeterminable.`;
+Also return "company" and "role" — the employer name and job title this application is for, inferred from pageContext (title, heading, jd text, url). Use "" when genuinely undeterminable.${summaryBlock(summary)}`;
+}
+
+function summaryBlock(summary) {
+  if (!Array.isArray(summary) || summary.length === 0) return '';
+  return `
+
+RESUME CONTEXT (for kind "essay" answers)
+The resume was tailored for this role as summarized below. Essay answers must stay consistent with that framing — lead with the same strengths, don't contradict the emphasis.
+${summary.join('\n')}`;
 }
 
 export function parseMapping(response) {

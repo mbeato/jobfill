@@ -17,6 +17,17 @@ describe('buildRequest', () => {
     expect(user.fields[0].id).toBe('0:jf-0');
     expect(user.pageContext.heading).toBe('Software Engineer');
   });
+
+  it('injects a RESUME CONTEXT section when a summary is provided', () => {
+    const req = buildRequest(profile, fields, ctx, ['led with X — JD wants Y']);
+    expect(req.system[0].text).toContain('RESUME CONTEXT');
+    expect(req.system[0].text).toContain('led with X — JD wants Y');
+  });
+
+  it('omits the RESUME CONTEXT section when no summary is provided', () => {
+    const req = buildRequest(profile, fields, ctx);
+    expect(req.system[0].text).not.toContain('RESUME CONTEXT');
+  });
 });
 
 describe('parseMapping', () => {

@@ -28,6 +28,44 @@ describe('buildRequest', () => {
     const req = buildRequest(profile, fields, ctx);
     expect(req.system[0].text).not.toContain('RESUME CONTEXT');
   });
+
+  it('injects an ANSWER LIBRARY section with reuse candidates and the reuse instruction', () => {
+    const req = buildRequest(profile, fields, ctx, null, {
+      reuse: [{ question: 'why here?', answer: 'i like the mission' }],
+      examples: [],
+    });
+    expect(req.system[0].text).toContain('ANSWER LIBRARY');
+    expect(req.system[0].text).toContain('reuse each one, keeping its voice and substance');
+    expect(req.system[0].text).toContain('i like the mission');
+  });
+
+  it('injects few-shot examples when provided', () => {
+    const req = buildRequest(profile, fields, ctx, null, {
+      reuse: [],
+      examples: [{ question: 'a project', answer: 'built jobfill' }],
+    });
+    expect(req.system[0].text).toContain('EXAMPLES');
+    expect(req.system[0].text).toContain('built jobfill');
+  });
+
+  it('omits ANSWER LIBRARY when no library arg is passed', () => {
+    const req = buildRequest(profile, fields, ctx);
+    expect(req.system[0].text).not.toContain('ANSWER LIBRARY');
+  });
+
+  it('allows RESUME CONTEXT and ANSWER LIBRARY to coexist', () => {
+    const req = buildRequest(profile, fields, ctx, ['led with X — JD wants Y'], {
+      reuse: [{ question: 'why here?', answer: 'i like the mission' }],
+      examples: [],
+    });
+    expect(req.system[0].text).toContain('RESUME CONTEXT');
+    expect(req.system[0].text).toContain('ANSWER LIBRARY');
+  });
+
+  it('gives MAPPING_SCHEMA a required boolean reused property', () => {
+    expect(MAPPING_SCHEMA.properties.fields.items.properties.reused).toEqual({ type: 'boolean' });
+    expect(MAPPING_SCHEMA.properties.fields.items.required).toContain('reused');
+  });
 });
 
 describe('parseMapping', () => {

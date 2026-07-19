@@ -3,6 +3,7 @@ import { mkdirSync, existsSync, renameSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
+import { normalizeQuestion, matchLibrary, selectFewShot, groupByQuestion, type AnswerRow } from './answers';
 
 const PORT = 7877;
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -29,6 +30,18 @@ db.run(`CREATE TABLE IF NOT EXISTS applications (
 try {
   db.run(`ALTER TABLE applications ADD COLUMN summary TEXT DEFAULT ''`);
 } catch {}
+
+db.run(`CREATE TABLE IF NOT EXISTS answers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  application_id INTEGER,
+  url TEXT DEFAULT '',
+  question TEXT NOT NULL,
+  question_key TEXT NOT NULL,
+  answer TEXT NOT NULL,
+  pinned INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+)`);
 
 // Shared secret with the extension (must match HELPER_TOKEN in extension/background.js).
 // No CORS headers are served: cross-origin pages can neither read responses nor pass
@@ -219,6 +232,45 @@ Bun.serve({
           Number(patch[1]),
         );
         return json(db.query('SELECT * FROM applications WHERE id = ?').get(Number(patch[1])));
+      }
+      if (pathname === '/answers' && req.method === 'POST') {
+        const b = await req.json();
+        const target = normalizeUrl(b.url ?? '');
+        const appRows = db.query('SELECT id, url FROM applications ORDER BY created_at DESC, id DESC').all() as {
+          id: number;
+          url: string;
+        }[];
+        const applicationId = appRows.find(row => normalizeUrl(row.url) === target)?.id ?? null;
+
+        let banked = 0;
+        for (const a of Array.isArray(b.answers) ? b.answers : []) {
+          const question = String(a?.question ?? '').trim();
+          const answer = String(a?.answer ?? '').trim();
+          if (!question || !answer) continue;
+          const questionKey = normalizeQuestion(question);
+          const existing = (db.query('SELECT * FROM answers WHERE question_key = ?').all(questionKey) as { id: number; url: string }[]).find(
+            row => normalizeUrl(row.url) === target,
+          );
+          if (existing) {
+            db.query(`UPDATE answers SET answer = ?, updated_at = datetime('now') WHERE id = ?`).run(answer, existing.id);
+          } else {
+            db.query(
+              `INSERT INTO answers (application_id, url, question, question_key, answer) VALUES (?, ?, ?, ?, ?)`,
+            ).run(applicationId, b.url ?? '', question, questionKey, answer);
+          }
+          banked++;
+        }
+        return json({ banked }, 201);
+      }
+      if (pathname === '/answers/match' && req.method === 'GET') {
+        const questionsParam = new URL(req.url).searchParams.get('questions');
+        let questions: string[] = [];
+        try {
+          const parsed = JSON.parse(questionsParam ?? '[]');
+          if (Array.isArray(parsed)) questions = parsed.filter(q => typeof q === 'string');
+        } catch {}
+        const rows = db.query('SELECT * FROM answers ORDER BY created_at DESC, id DESC').all() as AnswerRow[];
+        return json({ reuse: matchLibrary(questions, rows), examples: selectFewShot(rows, 5) });
       }
       if (pathname === '/tailor' && req.method === 'POST') {
         return json(await tailor(await req.json()));

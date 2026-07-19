@@ -17,6 +17,7 @@
   .s-applied { color: #555; } .s-replied { color: #1565c0; } .s-interviewing { color: #e65100; }
   .s-offer { color: #2e7d32; font-weight: 600; } .s-rejected { color: #999; }
   a { color: #1565c0; text-decoration: none; }
+  .summary-toggle { cursor: pointer; margin-top: 2px; }
 </style>
 <body>
   <h1>jobfill tracker</h1>
@@ -60,6 +61,12 @@ function render() {
       <td>
         ${a.url ? `<a href="${esc(a.url)}" target="_blank">posting</a>` : ''}
         ${a.resume_path ? `<div class="muted" title="${esc(a.resume_path)}">resume: …/${esc(a.resume_path.split('/').slice(-2).join('/'))}</div>` : ''}
+        ${a.summary ? `
+          <div class="muted summary-toggle" onclick="toggleSummary(${a.id})">resume changes <span id="arrow-${a.id}">▾</span></div>
+          <div class="summary-body" id="summary-${a.id}" style="display:none">
+            ${a.summary.map(line => `<div class="muted" style="padding-left:4px">${esc(line)}</div>`).join('')}
+          </div>
+        ` : ''}
       </td>
     </tr>`).join('');
 }
@@ -71,6 +78,14 @@ async function patch(id, body) {
     body: JSON.stringify(body),
   });
   load();
+}
+
+function toggleSummary(id) {
+  const body = document.getElementById(`summary-${id}`);
+  const arrow = document.getElementById(`arrow-${id}`);
+  const expanded = body.style.display !== 'none';
+  body.style.display = expanded ? 'none' : 'block';
+  arrow.textContent = expanded ? '▾' : '▴';
 }
 
 function esc(s) {

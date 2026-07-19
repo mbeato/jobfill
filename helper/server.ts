@@ -1,5 +1,5 @@
 import { Database } from 'bun:sqlite';
-import { mkdirSync, existsSync } from 'node:fs';
+import { mkdirSync, existsSync, renameSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
@@ -26,6 +26,9 @@ db.run(`CREATE TABLE IF NOT EXISTS applications (
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
 )`);
+try {
+  db.run(`ALTER TABLE applications ADD COLUMN summary TEXT DEFAULT ''`);
+} catch {}
 
 // Shared secret with the extension (must match HELPER_TOKEN in extension/background.js).
 // No CORS headers are served: cross-origin pages can neither read responses nor pass
@@ -49,6 +52,15 @@ function slugify(s: string) {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'unknown';
 }
 
+function parseSummary(stored: string): string[] | null {
+  try {
+    const arr = JSON.parse(stored);
+    return Array.isArray(arr) && arr.length ? arr : null;
+  } catch {
+    return null;
+  }
+}
+
 function normalizeUrl(u: string): string {
   const raw = String(u ?? '').trim().slice(0, 300);
   try {
@@ -62,13 +74,14 @@ function normalizeUrl(u: string): string {
 
 async function tailor(body: { company: string; role: string; jd: string; url?: string }) {
   if (!body.jd || body.jd.length < 200) throw new Error('Job description too short to tailor against.');
-  const slug = slugify(body.company);
+  const slug = slugify(body.company || '');
   const outDir = join(ROUNDS_DIR, slug);
   mkdirSync(outDir, { recursive: true });
   const stamp = new Date().toISOString().slice(0, 10);
   const texName = `resume_${slug}_${stamp}.tex`;
   const texPath = join(outDir, texName);
   const jdPath = join(outDir, `jd_${stamp}.md`);
+  const summaryPath = join(outDir, `summary_${stamp}.json`);
   await Bun.write(jdPath, `# ${body.role} @ ${body.company}\n${body.url ?? ''}\n\n${body.jd}`);
 
   const prompt = `You are tailoring the operator Example's resume for one specific job application.
@@ -80,12 +93,17 @@ Read these files:
 
 Write the tailored resume to exactly this path: ${texPath}
 
+Also write a summary file to exactly this path: ${summaryPath}
+Its shape must be exactly: { "company": string, "role": string, "summary": string[] }
+- "company" and "role": infer from the job description file. Use "" if undeterminable.
+- "summary": up to 3 lines, honest minimum — only real changes, no padding. Each line pairs the change made with the JD reason that drove it, e.g. "led with distributed-systems bullets — JD emphasizes scale". If the base resume already fits with minimal changes, return a single line like "minimal changes — base resume already fits this JD".
+
 Hard rules:
 - Facts come ONLY from the base resume and the bullet pool. Never invent or inflate metrics, titles, dates, or technologies. Every number must be interview-defensible.
 - Tailor by SELECTING and REORDERING: swap in bullet-pool variants that better match the job description, reorder bullets and the skills lists to lead with what the JD emphasizes. Do not rewrite facts.
 - Keep the base resume's LaTeX preamble, commands, and structure exactly. The result must compile with pdflatex and stay one page.
 - Bullets marked with warning symbols in the pool need re-verification — do not use them.
-- Write only the .tex file. No commentary, no other files.`;
+- Write exactly two files: the .tex and the summary_<stamp>.json. No commentary, no other files.`;
 
   const proc = Bun.spawn(
     [CLAUDE_BIN, '-p', prompt, '--permission-mode', 'acceptEdits', '--allowedTools', 'Read,Write,Edit,Glob,Grep'],
@@ -108,15 +126,38 @@ Hard rules:
     await latex.exited;
     clearTimeout(latexTimeout);
   }
-  const pdfPath = texPath.replace(/\.tex$/, '.pdf');
+  const pdfName = texName.replace(/\.tex$/, '.pdf');
+  let pdfPath = join(outDir, pdfName);
   if (!existsSync(pdfPath)) throw new Error('pdflatex did not produce a PDF — check the tailored .tex for LaTeX errors.');
+
+  let parsed: { company?: string; role?: string; summary?: string[] } | null = null;
+  if (existsSync(summaryPath)) {
+    try {
+      const raw = JSON.parse(await Bun.file(summaryPath).text());
+      if (raw && typeof raw === 'object') parsed = raw;
+    } catch {}
+  }
+
+  let effectiveSlug = slug;
+  if (parsed?.company) {
+    const newSlug = slugify(parsed.company);
+    const newDir = join(ROUNDS_DIR, newSlug);
+    if (newSlug !== slug && !existsSync(newDir)) {
+      renameSync(outDir, newDir);
+      effectiveSlug = newSlug;
+      pdfPath = join(newDir, pdfName);
+    }
+  }
 
   const pdfBytes = await Bun.file(pdfPath).arrayBuffer();
   return {
-    name: `resume_${slug}.pdf`,
+    name: `resume_${effectiveSlug}.pdf`,
     path: pdfPath,
     b64: Buffer.from(pdfBytes).toString('base64'),
     mime: 'application/pdf',
+    summary: parsed?.summary ?? null,
+    company: parsed?.company || body.company || '',
+    role: parsed?.role || body.role || '',
   };
 }
 
@@ -137,20 +178,28 @@ Bun.serve({
         return new Response(Bun.file(join(HERE, 'dashboard.html')), { headers: { 'content-type': 'text/html' } });
       }
       if (pathname === '/applications' && req.method === 'GET') {
-        const rows = db.query('SELECT * FROM applications ORDER BY created_at DESC').all() as { url: string }[];
+        const rows = db.query('SELECT * FROM applications ORDER BY created_at DESC').all() as { url: string; summary: string }[];
+        const mapped = rows.map(row => ({ ...row, summary: parseSummary(row.summary) }));
         const urlParam = new URL(req.url).searchParams.get('url');
-        if (urlParam === null) return json(rows);
+        if (urlParam === null) return json(mapped);
         const target = normalizeUrl(urlParam);
-        return json(rows.filter(row => normalizeUrl(row.url) === target));
+        return json(mapped.filter(row => normalizeUrl(row.url) === target));
       }
       if (pathname === '/applications' && req.method === 'POST') {
         const b = await req.json();
         const row = db
           .query(
-            `INSERT INTO applications (company, role, url, resume_path, cost_usd)
-             VALUES (?, ?, ?, ?, ?) RETURNING *`,
+            `INSERT INTO applications (company, role, url, resume_path, cost_usd, summary)
+             VALUES (?, ?, ?, ?, ?, ?) RETURNING *`,
           )
-          .get(b.company ?? 'unknown', b.role ?? '', b.url ?? '', b.resume_path ?? '', b.cost_usd ?? 0);
+          .get(
+            b.company ?? 'unknown',
+            b.role ?? '',
+            b.url ?? '',
+            b.resume_path ?? '',
+            b.cost_usd ?? 0,
+            Array.isArray(b.summary) && b.summary.length ? JSON.stringify(b.summary) : '',
+          );
         return json(row, 201);
       }
       const patch = pathname.match(/^\/applications\/(\d+)$/);

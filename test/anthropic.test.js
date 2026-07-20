@@ -45,8 +45,8 @@ describe('costUSD', () => {
       cache_creation_input_tokens: 1_000_000,
       cache_read_input_tokens: 1_000_000,
     };
-    // 3 + 15 + 3.75 + 0.30
-    expect(costUSD(usage)).toBeCloseTo(22.05, 2);
+    // 1 + 5 + 1.25 + 0.10
+    expect(costUSD(usage)).toBeCloseTo(7.35, 2);
     expect(costUSD(undefined)).toBe(0);
   });
 });

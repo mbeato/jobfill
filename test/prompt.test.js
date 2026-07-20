@@ -6,9 +6,9 @@ const fields = [{ id: '0:jf-0', type: 'text', label: 'Email', required: true, va
 const ctx = { url: 'https://boards.greenhouse.io/x', title: 'Apply', heading: 'Software Engineer' };
 
 describe('buildRequest', () => {
-  it('builds a sonnet request with structured output and cached system prompt', () => {
+  it('builds a haiku request with structured output and cached system prompt', () => {
     const req = buildRequest(profile, fields, ctx);
-    expect(req.model).toBe('claude-sonnet-5');
+    expect(req.model).toBe('claude-haiku-4-5');
     expect(req.output_config.format.type).toBe('json_schema');
     expect(req.output_config.format.schema).toBe(MAPPING_SCHEMA);
     expect(req.system[0].cache_control).toEqual({ type: 'ephemeral' });

@@ -9,12 +9,12 @@ export async function applyMapping(mapping, attachments = {}) {
   for (const m of mapping) {
     let entry = getEntry(m.id);
     if (!entry) {
-      results.push({ id: m.id, status: 'not_found' });
+      results.push({ id: m.id, status: 'not_found', kind: m.kind, confidence: m.confidence, reused: m.reused });
       continue;
     }
     entry = resolveEntry(entry, m.id);
     if (!entry) {
-      results.push({ id: m.id, status: 'stale' });
+      results.push({ id: m.id, status: 'stale', kind: m.kind, confidence: m.confidence, reused: m.reused });
       continue;
     }
     let status;

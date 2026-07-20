@@ -152,7 +152,7 @@ async function runFill(tabId, force = false) {
         for (const r of resp?.results || []) results.push({ ...r, id: `${f.frameId}:${r.id}` });
       } catch {
         // frame navigated or was removed during the Claude call — report its fields, keep going
-        for (const m of frameMapping) results.push({ id: `${f.frameId}:${m.id}`, status: 'frame_error' });
+        for (const m of frameMapping) results.push({ id: `${f.frameId}:${m.id}`, status: 'frame_error', kind: m.kind, confidence: m.confidence, reused: m.reused });
       }
     }
 

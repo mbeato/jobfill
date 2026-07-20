@@ -1,7 +1,7 @@
-export const MODEL = 'claude-sonnet-5';
+export const MODEL = 'claude-haiku-4-5';
 
-// Sticker $/MTok (intro pricing through 2026-08-31 is lower; this over-estimates slightly)
-const IN = 3, OUT = 15, CACHE_WRITE = IN * 1.25, CACHE_READ = IN * 0.1;
+// Sticker $/MTok (Haiku 4.5)
+const IN = 1, OUT = 5, CACHE_WRITE = IN * 1.25, CACHE_READ = IN * 0.1;
 
 const RETRYABLE = new Set([429, 500, 529]);
 

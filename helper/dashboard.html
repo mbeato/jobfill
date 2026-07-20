@@ -226,11 +226,13 @@ function renderFailures(rows) {
           const more = optionsSeen.length > 20 ? ` +${optionsSeen.length - 20} more` : '';
           const ariaText = r.list_resolved_via_aria === null ? 'unknown' : (r.list_resolved_via_aria ? 'yes' : 'no');
           const statusClass = FAILURE_STATUSES.includes(r.status) ? `s-${r.status}` : 'muted';
+          // WR-01: stored urls are untrusted — only emit an anchor for http(s) schemes.
+          const safeUrl = /^https?:\/\//i.test(r.url) ? r.url : '';
           return `
             <tr>
               <td class="muted">${(r.created_at || '').slice(0, 10)}</td>
               <td style="text-overflow: ellipsis; white-space: nowrap; overflow: hidden; max-width: 280px">
-                <a href="${esc(r.url)}" target="_blank">${esc(hostnameOf(r.url))}</a>
+                ${safeUrl ? `<a href="${esc(safeUrl)}" target="_blank">${esc(hostnameOf(safeUrl))}</a>` : esc(hostnameOf(r.url))}
               </td>
               <td>${esc(r.field_label)}${r.widget_kind ? `<span class="muted"> · ${esc(r.widget_kind)}</span>` : ''}</td>
               <td><span class="${statusClass}">${esc(r.status)}</span></td>

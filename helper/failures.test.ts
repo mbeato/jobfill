@@ -84,6 +84,20 @@ test('outer_html longer than 8000 chars is capped at 8000', () => {
   expect(row.outer_html.length).toBe(8000);
 });
 
+test('a record with a status outside the known triage set is rejected (CR-01)', () => {
+  const db = makeDb();
+  const result = insertFailures(
+    db,
+    'https://x.com',
+    [{ status: 'x"><img src=x onerror=alert(1)>', label: 'evil' }, { status: 'didnt_stick', label: 'kept' }],
+    noApp,
+  );
+  expect(result).toEqual({ saved: 1 });
+  const rows = listFailures(db);
+  expect(rows.length).toBe(1);
+  expect(rows[0].status).toBe('didnt_stick');
+});
+
 test('a record missing status is skipped; a stray id field is ignored (not stored)', () => {
   const db = makeDb();
   const result = insertFailures(

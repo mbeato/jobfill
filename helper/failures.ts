@@ -31,6 +31,10 @@ export interface FailureRecordInput {
 
 const MAX_OUTER_HTML = 8000;
 
+// The trust boundary is the POST body, not the extension — reject statuses outside
+// the known triage set so arbitrary strings never reach the store (CR-01).
+const VALID_STATUSES = new Set(['verify', 'needs_manual', 'error', 'didnt_stick', 'not_found', 'stale']);
+
 export function createFailuresTable(db: Database) {
   db.run(`CREATE TABLE IF NOT EXISTS failures (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -57,7 +61,7 @@ export function insertFailures(
   let saved = 0;
   for (const r of Array.isArray(records) ? records : []) {
     const status = String(r?.status ?? '').trim();
-    if (!status) continue;
+    if (!VALID_STATUSES.has(status)) continue;
     const optionsSeenArr = Array.isArray(r?.optionsSeen) ? r.optionsSeen : null;
     const optionsSeen = optionsSeenArr && optionsSeenArr.length ? JSON.stringify(optionsSeenArr) : '';
     const listResolvedViaAria = r?.listResolvedViaAria === true ? 1 : r?.listResolvedViaAria === false ? 0 : null;

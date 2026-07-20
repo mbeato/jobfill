@@ -203,6 +203,10 @@ function hostnameOf(url) {
   }
 }
 
+// Statuses are allowlisted at render — the store is untrusted (POST body), so an
+// unknown status must never reach the class attribute (stored-XSS sink).
+const FAILURE_STATUSES = ['verify', 'needs_manual', 'error', 'didnt_stick', 'not_found', 'stale'];
+
 function renderFailures(rows) {
   const body = document.getElementById('failuresBody');
   if (!rows.length) {
@@ -221,6 +225,7 @@ function renderFailures(rows) {
           const shown = optionsSeen.slice(0, 20);
           const more = optionsSeen.length > 20 ? ` +${optionsSeen.length - 20} more` : '';
           const ariaText = r.list_resolved_via_aria === null ? 'unknown' : (r.list_resolved_via_aria ? 'yes' : 'no');
+          const statusClass = FAILURE_STATUSES.includes(r.status) ? `s-${r.status}` : 'muted';
           return `
             <tr>
               <td class="muted">${(r.created_at || '').slice(0, 10)}</td>
@@ -228,7 +233,7 @@ function renderFailures(rows) {
                 <a href="${esc(r.url)}" target="_blank">${esc(hostnameOf(r.url))}</a>
               </td>
               <td>${esc(r.field_label)}${r.widget_kind ? `<span class="muted"> · ${esc(r.widget_kind)}</span>` : ''}</td>
-              <td><span class="s-${r.status}">${esc(r.status)}</span></td>
+              <td><span class="${statusClass}">${esc(r.status)}</span></td>
               <td>
                 <div class="failure-toggle" onclick="toggleFailureDetails(${r.id})">details <span id="farrow-${r.id}">▾</span></div>
                 <div id="fdetails-${r.id}" style="display:none; padding-left: 4px">

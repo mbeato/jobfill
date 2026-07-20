@@ -30,6 +30,12 @@ export interface FailureRecordInput {
 }
 
 const MAX_OUTER_HTML = 8000;
+// WR-04: the persistence boundary defends itself regardless of caller — bound every
+// text column and the batch size so one pathological POST can't bloat the db.
+const MAX_TEXT = 2000;
+const MAX_OPTIONS = 20;
+const MAX_OPTION_LEN = 200;
+const MAX_RECORDS = 50;
 
 // The trust boundary is the POST body, not the extension — reject statuses outside
 // the known triage set so arbitrary strings never reach the store (CR-01).
@@ -59,10 +65,12 @@ export function insertFailures(
 ): { saved: number } {
   const applicationId = resolveApplicationId(url);
   let saved = 0;
-  for (const r of Array.isArray(records) ? records : []) {
+  for (const r of (Array.isArray(records) ? records : []).slice(0, MAX_RECORDS)) {
     const status = String(r?.status ?? '').trim();
     if (!VALID_STATUSES.has(status)) continue;
-    const optionsSeenArr = Array.isArray(r?.optionsSeen) ? r.optionsSeen : null;
+    const optionsSeenArr = Array.isArray(r?.optionsSeen)
+      ? r.optionsSeen.slice(0, MAX_OPTIONS).map(o => String(o ?? '').slice(0, MAX_OPTION_LEN))
+      : null;
     const optionsSeen = optionsSeenArr && optionsSeenArr.length ? JSON.stringify(optionsSeenArr) : '';
     const listResolvedViaAria = r?.listResolvedViaAria === true ? 1 : r?.listResolvedViaAria === false ? 0 : null;
     db.query(
@@ -70,9 +78,9 @@ export function insertFailures(
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       applicationId,
-      url ?? '',
-      String(r?.label ?? ''),
-      String(r?.mappedValue ?? ''),
+      String(url ?? '').slice(0, MAX_TEXT),
+      String(r?.label ?? '').slice(0, MAX_TEXT),
+      String(r?.mappedValue ?? '').slice(0, MAX_TEXT),
       status,
       String(r?.widgetKind ?? ''),
       String(r?.outerHTML ?? '').slice(0, MAX_OUTER_HTML),

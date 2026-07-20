@@ -98,6 +98,31 @@ test('a record with a status outside the known triage set is rejected (CR-01)', 
   expect(rows[0].status).toBe('didnt_stick');
 });
 
+test('WR-04 caps: batch, optionsSeen count/length, and text columns are bounded', () => {
+  const db = makeDb();
+  const many: FailureRecordInput[] = Array.from({ length: 60 }, () => ({ status: 'error' }));
+  expect(insertFailures(db, 'https://x.com', many, noApp)).toEqual({ saved: 50 });
+
+  const db2 = makeDb();
+  insertFailures(
+    db2,
+    'https://x.com/' + 'u'.repeat(3000),
+    [{
+      status: 'verify',
+      label: 'l'.repeat(3000),
+      mappedValue: 'v'.repeat(3000),
+      optionsSeen: Array.from({ length: 30 }, () => 'o'.repeat(300)),
+    }],
+    noApp,
+  );
+  const [row] = listFailures(db2);
+  expect(row.url.length).toBe(2000);
+  expect(row.field_label.length).toBe(2000);
+  expect(row.mapped_value.length).toBe(2000);
+  expect(row.options_seen?.length).toBe(20);
+  expect(row.options_seen?.[0].length).toBe(200);
+});
+
 test('a record missing status is skipped; a stray id field is ignored (not stored)', () => {
   const db = makeDb();
   const result = insertFailures(

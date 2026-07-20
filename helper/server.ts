@@ -4,6 +4,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { normalizeQuestion, matchLibrary, selectFewShot, groupByQuestion, type AnswerRow } from './answers';
+import { createFailuresTable, insertFailures, listFailures, type FailureRecordInput } from './failures';
 
 const PORT = 7877;
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -42,6 +43,8 @@ db.run(`CREATE TABLE IF NOT EXISTS answers (
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
 )`);
+
+createFailuresTable(db);
 
 // Shared secret with the extension (must match HELPER_TOKEN in extension/background.js).
 // No CORS headers are served: cross-origin pages can neither read responses nor pass
@@ -297,6 +300,23 @@ Bun.serve({
         } catch {}
         const rows = db.query('SELECT * FROM answers ORDER BY created_at DESC, id DESC').all() as AnswerRow[];
         return json({ reuse: matchLibrary(questions, rows), examples: selectFewShot(rows, 5) });
+      }
+      if (pathname === '/failures' && req.method === 'GET') {
+        return json(listFailures(db));
+      }
+      if (pathname === '/failures' && req.method === 'POST') {
+        const b = await req.json();
+        const url = b.url ?? '';
+        const resolveApplicationId = (u: string) => {
+          const target = normalizeUrl(u);
+          const appRows = db.query('SELECT id, url FROM applications ORDER BY created_at DESC, id DESC').all() as {
+            id: number;
+            url: string;
+          }[];
+          return appRows.find(row => normalizeUrl(row.url) === target)?.id ?? null;
+        };
+        const records = (Array.isArray(b.records) ? b.records : []) as FailureRecordInput[];
+        return json(insertFailures(db, url, records, resolveApplicationId), 201);
       }
       if (pathname === '/tailor' && req.method === 'POST') {
         return json(await tailor(await req.json()));

@@ -8,8 +8,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
   if (msg.type === 'jobfill.fill') {
     applyMapping(msg.mapping, msg.attachments || {})
-      .then(results => sendResponse({ results }))
-      .catch(e => sendResponse({ results: [], error: String(e) }));
+      .then(({ results, failureRecords }) => sendResponse({ results, failureRecords }))
+      .catch(e => sendResponse({ results: [], failureRecords: [], error: String(e) }));
     return true; // keep the channel open for the async response
   }
 });

@@ -127,6 +127,16 @@ describe('applyMapping', () => {
     expect(results[0].status).toBe('not_found');
   });
 
+  it('carries kind/confidence/reused onto a not_found result', async () => {
+    mount(`<input type="text" aria-label="X">`);
+    collectFields(document);
+    const results = await applyMapping([{ id: 'jf-999', value: 'x', kind: 'essay', confidence: 0.6, reused: true }], {});
+    expect(results[0].status).toBe('not_found');
+    expect(results[0].kind).toBe('essay');
+    expect(results[0].confidence).toBe(0.6);
+    expect(results[0].reused).toBe(true);
+  });
+
   it('flags stuck: true when a filled text value persists', async () => {
     mount(`<input type="text" aria-label="Email">`);
     const [f] = collectFields(document);

@@ -8,11 +8,18 @@ const TEXT_TYPES = new Set(['text', 'email', 'tel', 'url', 'textarea']);
 // Catches the model's frame-exclusion reason including phrasing drift ("unrelated iframe",
 // "third-party chat widget", "cookie consent embed", ...). A fuzzy match fails safe: we
 // just don't inject.
-const UNRELATED_FRAME_RE = /unrelated|third[\s-]?party|widget|embed|chat|survey|cookie|consent|iframe/i;
+export const UNRELATED_FRAME_RE = /unrelated|third[\s-]?party|widget|embed|chat|survey|cookie|consent|iframe/i;
 
 function frameKey(id) {
   const i = String(id).indexOf(':');
   return i === -1 ? '' : String(id).slice(0, i);
+}
+
+// Gates which skipped fields captureAnswers may bank: never an unrelated-frame widget
+// (third-party chat/support/cookie-consent) and never a field the model skipped because it
+// was already filled (pre-filled/autofilled PII), even under phrasing drift.
+export function isBankableSkip(reason) {
+  return !UNRELATED_FRAME_RE.test(reason || '') && !/already filled/i.test(reason || '');
 }
 
 export function identityCategory(descriptor) {

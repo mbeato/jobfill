@@ -1,6 +1,6 @@
 import { buildRequest, parseMapping } from './lib/prompt.js';
 import { callClaude, costUSD } from './lib/anthropic.js';
-import { enforceIdentity } from './lib/identity.js';
+import { enforceIdentity, isBankableSkip } from './lib/identity.js';
 
 const HELPER = 'http://127.0.0.1:7877';
 // Must match TOKEN in helper/server.ts — the helper rejects unauthenticated cross-origin callers.
@@ -152,7 +152,7 @@ async function runFill(tabId, force = false) {
         for (const r of resp?.results || []) results.push({ ...r, id: `${f.frameId}:${r.id}` });
       } catch {
         // frame navigated or was removed during the Claude call — report its fields, keep going
-        for (const m of frameMapping) results.push({ id: `${f.frameId}:${m.id}`, status: 'frame_error' });
+        for (const m of frameMapping) results.push({ id: `${f.frameId}:${m.id}`, status: 'frame_error', kind: m.kind, confidence: m.confidence, reused: m.reused });
       }
     }
 
@@ -205,11 +205,13 @@ async function runFill(tabId, force = false) {
 // Explicit, popup-triggered capture (D-01/D-02/D-03): re-scrapes the page and banks the operator's
 // post-edit answers for this run's own essay fields plus any free-text fields he hand-filled
 // after the model skipped them. Never scrapes or banks fields outside those two label sets.
+// Skipped fields banked from unrelated-frame (third-party chat/support/cookie-consent) or
+// already-filled (pre-filled/autofilled PII) reasons are excluded (see the filter below).
 async function captureAnswers(tabId) {
   try {
     const { jobfillStatus } = await chrome.storage.session.get('jobfillStatus');
     const essayLabels = new Set((jobfillStatus?.results || []).filter(r => r.kind === 'essay').map(r => r.label));
-    const skippedLabels = new Set((jobfillStatus?.skipped || []).map(s => s.label));
+    const skippedLabels = new Set((jobfillStatus?.skipped || []).filter(s => isBankableSkip(s.reason)).map(s => s.label));
 
     const frames = (await chrome.webNavigation.getAllFrames({ tabId })) || [];
     const perFrame = [];

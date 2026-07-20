@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { enforceIdentity } from '../extension/lib/identity.js';
+import { enforceIdentity, isBankableSkip } from '../extension/lib/identity.js';
 
 const profile = {
   contact: { email: 'you@example.edu', phone: '555-555-0100' },
@@ -201,5 +201,35 @@ describe('enforceIdentity', () => {
     const out = enforceIdentity(mapping, fields, profile);
     expect(out.fields.find(f => f.id === '0:jf-20')).toEqual({ id: '0:jf-20', value: 'you@example.edu', kind: 'profile', confidence: 1 });
     expect(out.corrections).toEqual([{ id: '0:jf-20', category: 'email', from: null, to: 'you@example.edu' }]);
+  });
+});
+
+describe('isBankableSkip', () => {
+  it('excludes an unrelated-frame skip reason', () => {
+    expect(isBankableSkip('unrelated frame')).toBe(false);
+  });
+
+  it('excludes unrelated-frame reasons under phrasing drift', () => {
+    const reasons = ['third-party chat widget', 'cookie consent embed', 'survey iframe'];
+    for (const reason of reasons) expect(isBankableSkip(reason)).toBe(false);
+  });
+
+  it('excludes an already-filled skip reason', () => {
+    expect(isBankableSkip('already filled')).toBe(false);
+  });
+
+  it('excludes already-filled variants case-insensitively', () => {
+    expect(isBankableSkip('already filled (placeholder)')).toBe(false);
+    expect(isBankableSkip('field was Already Filled by the site')).toBe(false);
+  });
+
+  it('keeps a real drafting-skip reason', () => {
+    expect(isBankableSkip('no matching profile field')).toBe(true);
+    expect(isBankableSkip('profile lacks this information')).toBe(true);
+  });
+
+  it('keeps an undefined or empty reason', () => {
+    expect(isBankableSkip(undefined)).toBe(true);
+    expect(isBankableSkip('')).toBe(true);
   });
 });

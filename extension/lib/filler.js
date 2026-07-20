@@ -32,10 +32,12 @@ export async function applyMapping(mapping, attachments = {}) {
       console.warn('jobfill fill error', m.id, e);
     }
     let stuck;
+    let liveEntry = entry;
     if (status === 'filled') {
       await sleep(120); // let framework renders / scheduled reverts / masks settle before read-back
       const resolved = resolveEntry(entry, m.id); // node may have been replaced during the delay
       if (resolved) {
+        liveEntry = resolved; // snapshot the node the verdict was computed against, not the possibly-detached original
         const el = resolved.el || resolved.els[0];
         stuck = verifyStuck(resolved, m);
         if (stuck === false) el.style.outline = DIDNT_STICK_STYLE;
@@ -48,7 +50,7 @@ export async function applyMapping(mapping, attachments = {}) {
     results.push(result);
 
     // D-05/D-07: snapshot the failure moment for in-scope widget-ish statuses only (D-08).
-    const el = entry.el || entry.els?.[0];
+    const el = liveEntry.el || liveEntry.els?.[0];
     const widgetKind = resolveWidgetKind(el);
     const triageStatus = stuck === false ? 'didnt_stick' : status;
     if (widgetKind !== null && IN_SCOPE_STATUSES.has(triageStatus)) {

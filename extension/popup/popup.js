@@ -86,6 +86,12 @@ function render(st) {
   if (canCapture) {
     rows.push('<button id="capture">Bank answers</button><div id="captureStatus" class="muted"></div>');
   }
+
+  const canExportFailures = st.state === 'done' && st.failureRecords?.length > 0 && st.failuresSaved === false;
+  if (canExportFailures) {
+    rows.push('<button id="exportFailures">Export failures</button><div id="exportStatus" class="muted"></div>');
+  }
+
   $('results').innerHTML = rows.join('');
 
   if (canCapture) {
@@ -100,6 +106,19 @@ function render(st) {
       $('captureStatus').textContent = `banked ${st.bankedCount} answer${st.bankedCount === 1 ? '' : 's'}`;
       $('captureStatus').style.color = '#2e7d32';
     }
+  }
+
+  if (canExportFailures) {
+    $('exportFailures').addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(JSON.stringify(st.failureRecords, null, 2));
+        const n = st.failureRecords.length;
+        $('exportStatus').textContent = `copied ${n} failure record${n === 1 ? '' : 's'}`;
+        $('exportStatus').style.color = '#2e7d32';
+      } catch {
+        $('exportStatus').textContent = 'copy failed — try again';
+      }
+    });
   }
 }
 

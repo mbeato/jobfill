@@ -138,6 +138,7 @@ async function runFill(tabId, force = false) {
 
     await setStatus({ state: 'filling', cost });
     const results = [];
+    const failureRecords = [];
     for (const f of perFrame) {
       const frameMapping = mapping.fields
         .filter(m => m.id.startsWith(`${f.frameId}:`))
@@ -150,6 +151,7 @@ async function runFill(tabId, force = false) {
           { frameId: f.frameId },
         );
         for (const r of resp?.results || []) results.push({ ...r, id: `${f.frameId}:${r.id}` });
+        for (const rec of resp?.failureRecords || []) failureRecords.push({ ...rec, id: `${f.frameId}:${rec.id}` });
       } catch {
         // frame navigated or was removed during the Claude call — report its fields, keep going
         for (const m of frameMapping) results.push({ id: `${f.frameId}:${m.id}`, status: 'frame_error', kind: m.kind, confidence: m.confidence, reused: m.reused });
@@ -183,6 +185,23 @@ async function runFill(tabId, force = false) {
     }
 
     const labelById = new Map(fields.map(f => [f.id, f.label]));
+
+    // D-05/D-06: ship captured widget-failure evidence to the helper, fail-open.
+    const enrichedFailureRecords = failureRecords.map(r => ({ ...r, label: labelById.get(r.id) || r.id }));
+    let failuresSaved = true;
+    if (enrichedFailureRecords.length) {
+      try {
+        await helperFetch('/failures', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ url: pageContext.url, records: enrichedFailureRecords }),
+        });
+      } catch (e) {
+        failuresSaved = false;
+        console.info('jobfill failure-capture skipped (helper unavailable)', e);
+      }
+    }
+
     await setStatus({
       state: 'done',
       cost,
@@ -194,6 +213,8 @@ async function runFill(tabId, force = false) {
       results: results.map(r => ({ ...r, label: labelById.get(r.id) || r.id })),
       skipped: mapping.skipped.map(s => ({ ...s, label: labelById.get(s.id) || s.id })),
       corrections: corrections.map(c => ({ ...c, label: labelById.get(c.id) || c.id })),
+      failuresSaved,
+      ...(failuresSaved ? {} : { failureRecords: enrichedFailureRecords }),
     });
   } catch (e) {
     await setStatus({ state: 'error', error: String(e?.message || e) });

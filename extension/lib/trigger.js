@@ -2,10 +2,15 @@
 // (the only safe resolution for an external/dashboard caller — see Pitfall 1); bare
 // active-tab resolution is reserved for the popup's own path, where the caller and the
 // tab it cares about are the same tab by construction.
+// Bound on waiting for a created tab to finish loading — without it a tab that never
+// completes (closed early, hung load) leaves the trigger's message channel open forever.
+export const CREATED_TAB_TIMEOUT_MS = 60_000;
+
 export async function resolveTargetTab(msg, sender, deps = {}) {
   const tabsQuery = deps.tabsQuery || chrome.tabs.query.bind(chrome.tabs);
   const tabsCreate = deps.tabsCreate || chrome.tabs.create.bind(chrome.tabs);
   const onUpdated = deps.onUpdated || chrome.tabs.onUpdated;
+  const onRemoved = deps.onRemoved || chrome.tabs.onRemoved;
 
   if (typeof msg.tabId === 'number') return msg.tabId;
 
@@ -24,14 +29,32 @@ export async function resolveTargetTab(msg, sender, deps = {}) {
     if (tabs.length) return tabs[0].id;
 
     const created = await tabsCreate({ url: msg.url, active: true });
-    return new Promise(resolve => {
-      function listener(tabId, changeInfo) {
+    // Settle on load-complete, tab-removed, or timeout — whichever fires first —
+    // and clean up both listeners plus the timer on every exit path.
+    return new Promise((resolve, reject) => {
+      function cleanup() {
+        clearTimeout(timer);
+        onUpdated.removeListener(updateListener);
+        onRemoved.removeListener(removeListener);
+      }
+      function updateListener(tabId, changeInfo) {
         if (tabId === created.id && changeInfo.status === 'complete') {
-          onUpdated.removeListener(listener);
+          cleanup();
           resolve(tabId);
         }
       }
-      onUpdated.addListener(listener);
+      function removeListener(tabId) {
+        if (tabId === created.id) {
+          cleanup();
+          reject(new Error('created tab was closed before it finished loading'));
+        }
+      }
+      const timer = setTimeout(() => {
+        cleanup();
+        reject(new Error(`created tab did not finish loading within ${CREATED_TAB_TIMEOUT_MS / 1000}s`));
+      }, CREATED_TAB_TIMEOUT_MS);
+      onUpdated.addListener(updateListener);
+      onRemoved.addListener(removeListener);
     });
   }
 

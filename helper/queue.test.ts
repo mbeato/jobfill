@@ -67,6 +67,19 @@ test('results_summary above MAX_SUMMARY is truncated structurally, never mid-JSO
   expect(parsed[0]).toEqual({ id: '0:field-0', status: 'filled', label: 'x'.repeat(40) });
 });
 
+test('a run-state patch never regresses a human-set reviewed/submitted row', () => {
+  const db = makeDb();
+  const row = insertQueueEntry(db, 'https://x.com/job');
+  updateQueueStatus(db, row.id, { status: 'submitted' });
+  const after = updateQueueStatus(db, row.id, { status: 'filled', error: 'late finish' });
+  expect(after?.status).toBe('submitted');
+  expect(after?.error).toBe(''); // whole write skipped, not just the status column
+  // forward, human-driven transitions still work
+  const reviewed = insertQueueEntry(db, 'https://x.com/job2');
+  updateQueueStatus(db, reviewed.id, { status: 'filled' });
+  expect(updateQueueStatus(db, reviewed.id, { status: 'reviewed' })?.status).toBe('reviewed');
+});
+
 test('listQueue returns rows newest first', () => {
   const db = makeDb();
   const a = insertQueueEntry(db, 'https://x.com/a');

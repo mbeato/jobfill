@@ -365,7 +365,7 @@ function renderQueue(rows) {
                 <div id="qresults-${q.id}" style="display:none">${resultsHtml}</div>
               </td>
               <td class="queue-actions">
-                <button onclick="triggerFill(${q.id})">Fill now</button>
+                <button onclick="triggerFill(${q.id})" ${q.status === 'filling' ? 'disabled' : ''}>Fill now</button>
                 <button onclick="patchQueue(${q.id}, {status: 'reviewed'})">mark reviewed</button>
                 <button onclick="markSubmitted(${q.id})">mark submitted</button>
               </td>

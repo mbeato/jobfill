@@ -62,6 +62,11 @@ function truncateResultsSummary(raw: string): string {
 // dashboard click may set it) is enforced by the caller, not this module.
 export const QUEUE_STATUSES = new Set(['queued', 'filling', 'filled', 'failed', 'reviewed', 'submitted']);
 
+// WR-05: reviewed/submitted are human-set, later-lifecycle states. An automated fill
+// that finishes after the operator already reviewed/submitted the row must never regress it.
+const HUMAN_STATUSES = new Set(['reviewed', 'submitted']);
+const RUN_STATUSES = new Set(['filling', 'filled', 'failed']);
+
 export class InvalidQueueStatusError extends Error {
   constructor(status: string) {
     super(`invalid queue status: ${status}`);
@@ -93,6 +98,12 @@ export function insertQueueEntry(db: Database, url: string): QueueRow {
 export function updateQueueStatus(db: Database, id: number, patch: QueueUpdatePatch): QueueRow | null {
   if (patch.status !== undefined && !QUEUE_STATUSES.has(patch.status)) {
     throw new InvalidQueueStatusError(patch.status);
+  }
+  // WR-05: skip the whole write (return the current row) when an automated run-state
+  // patch would move a row backwards out of a human-set reviewed/submitted status.
+  if (patch.status !== undefined && RUN_STATUSES.has(patch.status)) {
+    const current = db.query('SELECT * FROM queue WHERE id = ?').get(id) as QueueRow | null;
+    if (current && HUMAN_STATUSES.has(current.status)) return current;
   }
   const fields: string[] = [];
   const vals: unknown[] = [];

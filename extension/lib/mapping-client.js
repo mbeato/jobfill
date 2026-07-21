@@ -45,7 +45,14 @@ async function helperMap(doFetch, prompt, schema, helperToken) {
       signal: ctrl.signal,
     });
     if (!res.ok) throw new Error(`helper /map ${res.status}`);
-    return await res.json();
+    const mapping = await res.json();
+    // Shape check here, inside the try that falls back to Haiku: schema conformance is
+    // otherwise delegated entirely to the CLI, and a malformed 200 would only blow up
+    // later in enforceIdentity — after the fallback window is gone.
+    if (!mapping || !Array.isArray(mapping.fields) || !Array.isArray(mapping.skipped)) {
+      throw new Error('helper /map returned a malformed mapping');
+    }
+    return mapping;
   } finally {
     clearTimeout(t);
   }

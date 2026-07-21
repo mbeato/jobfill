@@ -79,6 +79,18 @@ describe('mapFields', () => {
     expect(out.source).toBe('haiku');
   });
 
+  it('falls back to Haiku when the helper returns 200 with a malformed mapping shape', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ company: 'C', fields: 'not-an-array' }), { status: 200 }),
+    );
+    const deps = makeDeps({ fetch: fetchMock });
+
+    const out = await mapFields(ARGS, deps);
+
+    expect(deps.callClaude).toHaveBeenCalledTimes(1);
+    expect(out.source).toBe('haiku');
+  });
+
   it('falls back to Haiku when the helper fetch rejects', async () => {
     const fetchMock = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
     const deps = makeDeps({ fetch: fetchMock });

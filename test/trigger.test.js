@@ -21,6 +21,7 @@ function makeDeps(overrides = {}) {
     tabsCreate: vi.fn(),
     onUpdated: fakeEvent(),
     onRemoved: fakeEvent(),
+    runtimeId: 'test-extension-id',
     ...overrides,
   };
 }
@@ -137,6 +138,17 @@ describe('resolveTargetTab', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('(d2) resolves the active tab for an internal sender even though it carries a url', async () => {
+    const deps = makeDeps({ tabsQuery: vi.fn().mockResolvedValue([{ id: 5 }]) });
+    const id = await resolveTargetTab(
+      {},
+      { id: 'test-extension-id', url: 'chrome-extension://test-extension-id/popup/popup.html' },
+      deps,
+    );
+    expect(id).toBe(5);
+    expect(deps.tabsQuery).toHaveBeenCalledWith({ active: true, currentWindow: true });
   });
 
   it('(d) throws when an external caller supplies neither url nor tabId', async () => {

@@ -11,6 +11,7 @@ export async function resolveTargetTab(msg, sender, deps = {}) {
   const tabsCreate = deps.tabsCreate || chrome.tabs.create.bind(chrome.tabs);
   const onUpdated = deps.onUpdated || chrome.tabs.onUpdated;
   const onRemoved = deps.onRemoved || chrome.tabs.onRemoved;
+  const runtimeId = deps.runtimeId ?? chrome.runtime.id;
 
   if (typeof msg.tabId === 'number') return msg.tabId;
 
@@ -58,8 +59,10 @@ export async function resolveTargetTab(msg, sender, deps = {}) {
     });
   }
 
-  // Only the popup's own path has neither an external url/origin nor an explicit tabId.
-  const isExternal = Boolean(sender?.url || sender?.origin);
+  // Discriminate on sender identity, not url presence: the extension's own pages
+  // (popup, options) also carry a url/origin, but their sender.id is this extension's
+  // id — only web-page senders (dashboard via onMessageExternal) lack it.
+  const isExternal = sender?.id !== runtimeId;
   if (!isExternal) {
     const tabs = await tabsQuery({ active: true, currentWindow: true });
     return tabs[0].id;

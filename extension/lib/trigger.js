@@ -10,8 +10,18 @@ export async function resolveTargetTab(msg, sender, deps = {}) {
   if (typeof msg.tabId === 'number') return msg.tabId;
 
   if (msg.url) {
-    const tabs = await tabsQuery({ url: msg.url });
-    if (tabs && tabs.length) return tabs[0].id;
+    // tabs.query treats url as a match pattern, not a literal: a #fragment makes the
+    // pattern invalid (query throws) and job-posting URLs routinely carry them. Strip
+    // the fragment, and treat a still-invalid pattern as "no open tab" so the trigger
+    // falls through to creating a fresh tab instead of rejecting.
+    const pattern = msg.url.split('#')[0];
+    let tabs = [];
+    try {
+      tabs = (await tabsQuery({ url: pattern })) || [];
+    } catch {
+      // invalid match pattern — fall through to tabsCreate below
+    }
+    if (tabs.length) return tabs[0].id;
 
     const created = await tabsCreate({ url: msg.url, active: true });
     return new Promise(resolve => {

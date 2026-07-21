@@ -35,12 +35,27 @@ function render(st) {
     mapping: `mapping ${st.fieldCount ?? ''} fields with claude…`,
     tailoring: `tailoring resume for ${st.company || 'this role'}… (1-3 min)`,
     filling: 'filling…',
-    done: `done — review highlighted fields${st.tailored ? ' · tailored resume attached' : st.tailorError ? ' · static resume (tailor failed)' : ''}`,
+    done: 'done — review highlighted fields',
     duplicate: 'already applied to this job',
     error: `error: ${st.error}`,
   };
   $('status').textContent = labels[st.state] || st.state;
   $('status').className = st.state === 'error' || st.state === 'duplicate' ? '' : 'muted';
+
+  if (st.tailorState === 'ran') {
+    $('tailorState').textContent = 'tailored resume attached';
+    $('tailorState').className = 'muted';
+  } else if (st.tailorState === 'skipped') {
+    $('tailorState').textContent = `static resume — ${esc(st.tailorMessage)}`;
+    $('tailorState').className = 'muted';
+  } else if (st.tailorState === 'error') {
+    $('tailorState').textContent = `tailor failed — ${esc(st.tailorMessage)} · static resume used`;
+    $('tailorState').className = 'tailor-error';
+  } else {
+    $('tailorState').textContent = '';
+    $('tailorState').className = '';
+  }
+
   $('cost').textContent = st.cost ? `api cost ~$${st.cost.toFixed(3)}` : '';
 
   if (st.state === 'duplicate' && st.prior) {
@@ -59,7 +74,7 @@ function render(st) {
     return;
   }
 
-  if (st.state === 'done' && st.tailored && st.summary?.length) {
+  if (st.state === 'done' && st.tailorState === 'ran' && st.summary?.length) {
     $('summary').innerHTML = `<div class="summary-block">
       <div class="summary-label">resume changes</div>
       ${st.summary.map((line) => `<div class="summary-line">${esc(line)}</div>`).join('')}

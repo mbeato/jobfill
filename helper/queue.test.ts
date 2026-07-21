@@ -41,6 +41,32 @@ test('updateQueueStatus rejects an XSS-shaped status and leaves prior status unc
   expect(rows[0].status).toBe('queued');
 });
 
+test('results_summary above the old 2k bound is stored intact as valid JSON', () => {
+  const db = makeDb();
+  const row = insertQueueEntry(db, 'https://x.com/job');
+  // ~40 fields at ~100 chars each — a typical Greenhouse form, well past 2,000 chars
+  const results = Array.from({ length: 40 }, (_, i) => ({
+    id: `0:field-${i}`, status: 'filled', kind: 'profile', confidence: 'high', reused: false,
+    label: `A realistically long field label for question number ${i} on the application form`,
+  }));
+  const updated = updateQueueStatus(db, row.id, { results_summary: JSON.stringify(results) });
+  expect(JSON.parse(updated!.results_summary)).toEqual(results);
+});
+
+test('results_summary above MAX_SUMMARY is truncated structurally, never mid-JSON', () => {
+  const db = makeDb();
+  const row = insertQueueEntry(db, 'https://x.com/job');
+  const results = Array.from({ length: 300 }, (_, i) => ({
+    id: `0:field-${i}`, status: 'filled', kind: 'essay', confidence: 'high', reused: false,
+    label: 'x'.repeat(40),
+  }));
+  const updated = updateQueueStatus(db, row.id, { results_summary: JSON.stringify(results) });
+  const parsed = JSON.parse(updated!.results_summary); // must not throw
+  expect(Array.isArray(parsed)).toBe(true);
+  expect(parsed.length).toBeLessThanOrEqual(200);
+  expect(parsed[0]).toEqual({ id: '0:field-0', status: 'filled', label: 'x'.repeat(40) });
+});
+
 test('listQueue returns rows newest first', () => {
   const db = makeDb();
   const a = insertQueueEntry(db, 'https://x.com/a');

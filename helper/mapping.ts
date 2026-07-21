@@ -22,8 +22,13 @@ export async function mapViaCLI(prompt: string, schema: object): Promise<unknown
       'json',
       '--json-schema',
       JSON.stringify(schema),
-      '--permission-mode',
-      'bypassPermissions',
+      // The prompt embeds untrusted scraped-page content, so this run must be
+      // genuinely tool-less: --tools '' removes every built-in tool and
+      // --allowedTools '' allowlists none. Never add a permission-mode bypass
+      // here — it would neutralize both flags (verified: -p print mode returns
+      // structured_output without any permission prompt under this combination).
+      '--tools',
+      '',
       '--allowedTools',
       '',
     ],

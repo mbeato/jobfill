@@ -48,6 +48,7 @@ async function setStatus(patch) {
 }
 
 async function runFill(tabId, force = false, opts = {}) {
+  const { queueId } = opts;
   // MV3 service workers idle out after ~30s without extension API activity; a periodic
   // no-op storage read resets the timer so the long Claude call can't strand the run.
   const heartbeat = setInterval(() => chrome.storage.session.get('jobfillStatus'), 20000);
@@ -94,6 +95,21 @@ async function runFill(tabId, force = false, opts = {}) {
       } catch (e) {
         // helper unreachable/erroring — fail open, don't block the fill
         console.info('jobfill duplicate check skipped (helper unavailable)', e);
+      }
+    }
+
+    // QUEUE-02: advance the queue row to 'filling' now that this run is committed to
+    // (past the duplicate early-return, so a duplicate never leaves a row stuck there).
+    // Fail-open — a failed PATCH must never abort the fill (D-02: never 'submitted').
+    if (queueId) {
+      try {
+        await helperFetch(`/queue/${queueId}`, {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ status: 'filling' }),
+        });
+      } catch (e) {
+        console.info('jobfill queue-status update skipped (helper unavailable)', e);
       }
     }
 
@@ -238,10 +254,41 @@ async function runFill(tabId, force = false, opts = {}) {
       ...(failuresSaved ? {} : { failureRecords: enrichedFailureRecords }),
     };
     await setStatus(finalStatus);
+
+    // QUEUE-02: a completed run counts as 'filled' even when some fields came back
+    // needs_manual/verify — that per-field distinction is what RUN-02 is for, not this
+    // coarser queue status (Pitfall 3). Fail-open.
+    if (queueId) {
+      try {
+        await helperFetch(`/queue/${queueId}`, {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ status: 'filled', results_summary: JSON.stringify(finalStatus.results) }),
+        });
+      } catch (e) {
+        console.info('jobfill queue-status update skipped (helper unavailable)', e);
+      }
+    }
+
     return finalStatus;
   } catch (e) {
     const errorStatus = { state: 'error', error: String(e?.message || e) };
     await setStatus(errorStatus);
+
+    // QUEUE-02: only a thrown exception (mapping failed, no fields, no API key, etc.)
+    // counts as 'failed' (Pitfall 3). Fail-open.
+    if (queueId) {
+      try {
+        await helperFetch(`/queue/${queueId}`, {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ status: 'failed', error: errorStatus.error }),
+        });
+      } catch (patchErr) {
+        console.info('jobfill queue-status update skipped (helper unavailable)', patchErr);
+      }
+    }
+
     return errorStatus;
   } finally {
     clearInterval(heartbeat);

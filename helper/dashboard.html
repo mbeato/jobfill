@@ -30,6 +30,8 @@
   .s-verify, .s-needs_manual, .s-error { color: #e65100; }
   .s-didnt_stick { color: #d32f2f; font-weight: 600; }
   .s-not_found, .s-stale { color: #999; }
+  .s-partial { color: #e65100; }
+  .s-frame_error { color: #e65100; }
   .failure-toggle { color: #1565c0; cursor: pointer; }
   .snapshot { background: #f5f5f5; padding: 8px; max-height: 160px; overflow: auto; font-family: ui-monospace, monospace; font-size: 12px; line-height: 1.4; }
   .s-queued { color: #999; } .s-filling { color: #e65100; } .s-filled { color: #2e7d32; }
@@ -391,11 +393,19 @@ function renderQueue(rows) {
 
 // results is either a parsed per-field results object/array (JSON.parse succeeded) or
 // null (parse failed / empty) — never render the raw unparsed string.
+// Statuses are allowlisted at render — results_summary is untrusted, server-stored JSON
+// influenced by the LLM mapping call, so an unknown status must never reach the class
+// attribute (stored-XSS sink), mirroring FAILURE_STATUSES above.
+const QUEUE_REVIEW_STATUSES = new Set(['verify', 'needs_manual', 'error', 'partial', 'not_found', 'stale', 'frame_error']);
 function renderQueueResults(results) {
   if (!results) return `<div class="muted" style="padding-left:4px">no summary</div>`;
   const items = Array.isArray(results) ? results : Object.entries(results).map(([k, v]) => ({ label: k, ...(typeof v === 'object' && v ? v : { value: v }) }));
   if (!items.length) return `<div class="muted" style="padding-left:4px">no summary</div>`;
-  return items.map(r => `<div class="muted" style="padding-left:4px">${esc(r.label || r.id || '')}: ${esc(r.status || r.value || '')}</div>`).join('');
+  return items.map(r => {
+    const cls = QUEUE_REVIEW_STATUSES.has(r.status) ? `s-${r.status}` : 'muted';
+    const stuckNote = r.stuck === false ? ` <span class="s-didnt_stick">didn't stick — check this field</span>` : '';
+    return `<div class="${cls}" style="padding-left:4px">${esc(r.label || r.id || '')}: ${esc(r.status || r.value || '')}${stuckNote}</div>`;
+  }).join('');
 }
 
 function toggleQueueResults(id) {

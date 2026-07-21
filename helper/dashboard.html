@@ -300,8 +300,22 @@ function triggerFill(id) {
     document.getElementById('queueBody').insertAdjacentHTML('afterbegin', `<div class="muted">extension not detected</div>`);
     return;
   }
-  chrome.runtime.sendMessage(EXTENSION_ID, { type: 'jobfill.trigger', queueId: q.id, url: q.url }, () => {
-    loadQueue();
+  chrome.runtime.sendMessage(EXTENSION_ID, { type: 'jobfill.trigger', queueId: q.id, url: q.url }, async (resp) => {
+    // Always read lastError (silences "Unchecked runtime.lastError") and surface
+    // outcomes the queue row itself won't show (unreachable / duplicate / error).
+    let notice = '';
+    if (chrome.runtime.lastError) {
+      notice = `extension not reachable — ${esc(chrome.runtime.lastError.message)}`;
+    } else if (resp?.state === 'duplicate') {
+      notice = `already applied to ${esc(resp.prior?.company || '')} — use the popup's Fill anyway`;
+    } else if (resp?.state === 'error') {
+      notice = `fill failed — ${esc(resp.error || '')}`;
+    }
+    // reload first: renderQueue replaces queueBody's innerHTML and would wipe the notice
+    await loadQueue();
+    if (notice) {
+      document.getElementById('queueBody').insertAdjacentHTML('afterbegin', `<div class="muted">${notice}</div>`);
+    }
   });
 }
 

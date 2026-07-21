@@ -32,10 +32,18 @@
   .s-not_found, .s-stale { color: #999; }
   .failure-toggle { color: #1565c0; cursor: pointer; }
   .snapshot { background: #f5f5f5; padding: 8px; max-height: 160px; overflow: auto; font-family: ui-monospace, monospace; font-size: 12px; line-height: 1.4; }
+  .s-queued { color: #999; } .s-filling { color: #e65100; } .s-filled { color: #2e7d32; }
+  .s-failed { color: #d32f2f; } .s-reviewed { color: #1565c0; } .s-submitted { color: #2e7d32; font-weight: 600; }
+  .queue-toggle { color: #1565c0; cursor: pointer; }
+  .queue-actions button { margin-right: 8px; padding: 4px 10px; cursor: pointer; border: 1px solid #ccc; background: #fff; border-radius: 4px; }
 </style>
 <body>
   <h1>jobfill tracker</h1>
   <div id="stats"></div>
+  <div id="queue">
+    <h2>posting queue</h2>
+    <div id="queueBody"></div>
+  </div>
   <div class="filters" id="filters"></div>
   <table>
     <thead><tr><th>date</th><th>company</th><th>role</th><th>status</th><th>notes</th><th>links</th></tr></thead>
@@ -83,6 +91,7 @@ function render() {
       <td>
         ${a.url ? `<a href="${esc(a.url)}" target="_blank">posting</a>` : ''}
         ${a.resume_path ? `<div class="muted" title="${esc(a.resume_path)}">resume: …/${esc(a.resume_path.split('/').slice(-2).join('/'))}</div>` : ''}
+        ${tailorStateLine(a.tailor_state, a.tailor_message)}
         ${a.summary ? `
           <div class="muted summary-toggle" onclick="toggleSummary(${a.id})">resume changes <span id="arrow-${a.id}">▾</span></div>
           <div class="summary-body" id="summary-${a.id}" style="display:none">
@@ -112,6 +121,15 @@ function toggleSummary(id) {
 
 function esc(s) {
   return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+
+// OBS-01: always-visible tailor-state line — unlike the resume-changes toggle above
+// (gated on a.summary truthiness), this renders for every fill regardless of summary.
+function tailorStateLine(tailorState, tailorMessage) {
+  if (tailorState === 'ran') return `<div class="muted">tailored resume attached</div>`;
+  if (tailorState === 'skipped') return `<div class="muted">static resume — ${esc(tailorMessage)}</div>`;
+  if (tailorState === 'error') return `<div style="color:#e65100">tailor failed — ${esc(tailorMessage)} · static resume used</div>`;
+  return '';
 }
 
 async function loadLibrary() {
@@ -261,8 +279,119 @@ function toggleFailureDetails(id) {
   arrow.textContent = expanded ? '▾' : '▴';
 }
 
+// Queue statuses are allowlisted at render — the store is untrusted (POST/PATCH body),
+// so an unknown status must never reach the class attribute (stored-XSS sink), mirroring
+// FAILURE_STATUSES above.
+const QUEUE_STATUSES = ['queued', 'filling', 'filled', 'failed', 'reviewed', 'submitted'];
+// Resolved in the Task 3 checkpoint: replace with the real unpacked extension id
+// from chrome://extensions (Assumption A1).
+const EXTENSION_ID = 'REPLACE_WITH_UNPACKED_EXTENSION_ID';
+let queueRows = [];
+
+async function loadQueue() {
+  queueRows = await (await fetch('/queue')).json();
+  renderQueue(queueRows);
+}
+
+function triggerFill(id) {
+  const q = queueRows.find(r => r.id === id);
+  if (!q) return;
+  if (typeof chrome === 'undefined' || !chrome.runtime) {
+    document.getElementById('queueBody').insertAdjacentHTML('afterbegin', `<div class="muted">extension not detected</div>`);
+    return;
+  }
+  chrome.runtime.sendMessage(EXTENSION_ID, { type: 'jobfill.trigger', queueId: q.id, url: q.url }, () => {
+    loadQueue();
+  });
+}
+
+// D-02: the ONLY code path in the whole system that constructs a 'submitted' status —
+// no background/helper code sets it. Gated behind a human confirm() click.
+function markSubmitted(id) {
+  const q = queueRows.find(r => r.id === id);
+  if (!q) return;
+  if (!confirm(`mark ${q.company} submitted? this records that you already submitted it manually — jobfill never submits for you.`)) return;
+  patchQueue(id, { status: 'submitted' });
+}
+
+async function patchQueue(id, body) {
+  await fetch(`/queue/${id}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  loadQueue();
+}
+
+function renderQueue(rows) {
+  const body = document.getElementById('queueBody');
+  if (!rows.length) {
+    body.innerHTML = `
+      <div class="muted">no postings queued yet</div>
+      <div class="muted" style="font-size: 12px">add a posting URL from the popup, or POST it to /queue, to start the queue.</div>`;
+    return;
+  }
+  body.innerHTML = `
+    <table>
+      <thead><tr><th>date</th><th>company / role</th><th>url</th><th>status</th><th>results</th><th>actions</th></tr></thead>
+      <tbody>
+        ${rows.map(q => {
+          const statusClass = QUEUE_STATUSES.includes(q.status) ? `s-${q.status}` : 'muted';
+          // results_summary is a JSON STRING written by background.js (JSON.stringify of the
+          // per-field results array) — never a display string. Guard the parse; on failure or
+          // empty input, render nothing rather than injecting the raw string into the DOM.
+          let results;
+          try {
+            results = JSON.parse(q.results_summary || '{}');
+          } catch {
+            results = null;
+          }
+          const resultsHtml = renderQueueResults(results);
+          return `
+            <tr>
+              <td class="muted">${(q.created_at || '').slice(0, 10)}</td>
+              <td><strong>${esc(q.company)}</strong>${q.role ? ` · ${esc(q.role)}` : ''}</td>
+              <td style="text-overflow: ellipsis; white-space: nowrap; overflow: hidden; max-width: 240px">
+                ${q.url ? `<a href="${esc(q.url)}" target="_blank">${esc(q.url)}</a>` : ''}
+              </td>
+              <td><span class="${statusClass}">${esc(q.status)}</span>
+                ${q.status === 'failed' ? `<div class="muted">fill failed — ${esc(q.error)}. check the field results below, or retry from the popup.</div>` : ''}
+              </td>
+              <td>
+                <div class="muted queue-toggle" onclick="toggleQueueResults(${q.id})">results <span id="qarrow-${q.id}">▾</span></div>
+                <div id="qresults-${q.id}" style="display:none">${resultsHtml}</div>
+              </td>
+              <td class="queue-actions">
+                <button onclick="triggerFill(${q.id})">Fill now</button>
+                <button onclick="patchQueue(${q.id}, {status: 'reviewed'})">mark reviewed</button>
+                <button onclick="markSubmitted(${q.id})">mark submitted</button>
+              </td>
+            </tr>`;
+        }).join('')}
+      </tbody>
+    </table>`;
+}
+
+// results is either a parsed per-field results object/array (JSON.parse succeeded) or
+// null (parse failed / empty) — never render the raw unparsed string.
+function renderQueueResults(results) {
+  if (!results) return `<div class="muted" style="padding-left:4px">no summary</div>`;
+  const items = Array.isArray(results) ? results : Object.entries(results).map(([k, v]) => ({ label: k, ...(typeof v === 'object' && v ? v : { value: v }) }));
+  if (!items.length) return `<div class="muted" style="padding-left:4px">no summary</div>`;
+  return items.map(r => `<div class="muted" style="padding-left:4px">${esc(r.label || r.id || '')}: ${esc(r.status || r.value || '')}</div>`).join('');
+}
+
+function toggleQueueResults(id) {
+  const body = document.getElementById(`qresults-${id}`);
+  const arrow = document.getElementById(`qarrow-${id}`);
+  const expanded = body.style.display !== 'none';
+  body.style.display = expanded ? 'none' : 'block';
+  arrow.textContent = expanded ? '▾' : '▴';
+}
+
 load();
 loadLibrary();
 loadFailures();
+loadQueue();
 </script>
 </body>

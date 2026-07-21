@@ -1,6 +1,6 @@
-import { buildRequest, parseMapping } from './lib/prompt.js';
-import { callClaude, costUSD } from './lib/anthropic.js';
 import { enforceIdentity, isBankableSkip } from './lib/identity.js';
+import { resolveTargetTab } from './lib/trigger.js';
+import { mapFields } from './lib/mapping-client.js';
 
 const HELPER = 'http://127.0.0.1:7877';
 // Must match TOKEN in helper/server.ts — the helper rejects unauthenticated cross-origin callers.
@@ -25,7 +25,7 @@ async function helperFetch(path, options = {}, timeoutMs = 10000) {
   }
 }
 
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'jobfill.run') {
     runFill(msg.tabId, msg.force);
     sendResponse({ ok: true });
@@ -34,6 +34,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     captureAnswers(msg.tabId);
     sendResponse({ ok: true });
   }
+  if (msg.type === 'jobfill.trigger') {
+    resolveTargetTab(msg, sender)
+      .then(tabId => runFill(tabId, msg.force, { queueId: msg.queueId }))
+      .then(sendResponse);
+    return true; // keep the channel open — sendResponse fires once the fill finishes
+  }
 });
 
 async function setStatus(patch) {
@@ -41,7 +47,8 @@ async function setStatus(patch) {
   await chrome.storage.session.set({ jobfillStatus: { ...jobfillStatus, ...patch } });
 }
 
-async function runFill(tabId, force = false) {
+async function runFill(tabId, force = false, opts = {}) {
+  const { queueId } = opts;
   // MV3 service workers idle out after ~30s without extension API activity; a periodic
   // no-op storage read resets the timer so the long Claude call can't strand the run.
   const heartbeat = setInterval(() => chrome.storage.session.get('jobfillStatus'), 20000);
@@ -77,16 +84,32 @@ async function runFill(tabId, force = false) {
         const prior = await helperFetch('/applications?url=' + encodeURIComponent(pageContext.url));
         if (prior?.length) {
           const p = prior[0];
-          await setStatus({
+          const duplicateStatus = {
             state: 'duplicate',
             tabId,
             prior: { company: p.company, role: p.role, url: p.url, created_at: p.created_at },
-          });
-          return;
+          };
+          await setStatus(duplicateStatus);
+          return duplicateStatus;
         }
       } catch (e) {
         // helper unreachable/erroring — fail open, don't block the fill
         console.info('jobfill duplicate check skipped (helper unavailable)', e);
+      }
+    }
+
+    // QUEUE-02: advance the queue row to 'filling' now that this run is committed to
+    // (past the duplicate early-return, so a duplicate never leaves a row stuck there).
+    // Fail-open — a failed PATCH must never abort the fill (D-02: never 'submitted').
+    if (queueId) {
+      try {
+        await helperFetch(`/queue/${queueId}`, {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ status: 'filling' }),
+        });
+      } catch (e) {
+        console.info('jobfill queue-status update skipped (helper unavailable)', e);
       }
     }
 
@@ -95,10 +118,14 @@ async function runFill(tabId, force = false) {
     // mapping (D-01) so its summary can be injected into essay drafting.
     const { tailorEnabled = true } = await chrome.storage.local.get('tailorEnabled');
     let attachedResume = resume;
-    let tailored = false;
-    let tailorError = null;
-    let summary = null;
     const jd = perFrame[0].pageContext.jd || '';
+    let tailorState = 'skipped';
+    let tailorMessage = !tailorEnabled
+      ? 'tailoring disabled in options'
+      : jd.length < 200
+        ? `no usable job description found (${jd.length} chars, need 200+)`
+        : null;
+    let summary = null;
     if (tailorEnabled && jd.length >= 200) {
       try {
         await helperFetch('/health');
@@ -110,10 +137,12 @@ async function runFill(tabId, force = false) {
         }, 8 * 60 * 1000);
         attachedResume = { name: t.name, mime: t.mime, b64: t.b64 };
         attachedResume.path = t.path;
-        tailored = true;
+        tailorState = 'ran';
+        tailorMessage = null;
         summary = t.summary ?? null;
       } catch (e) {
-        tailorError = String(e?.message || e);
+        tailorState = 'error';
+        tailorMessage = String(e?.message || e);
       }
     }
 
@@ -126,9 +155,15 @@ async function runFill(tabId, force = false) {
     }
 
     await setStatus({ state: 'mapping', fieldCount: fields.length });
-    const response = await callClaude(apiKey, buildRequest(profile, fields, pageContext, summary, library));
-    const mapping = parseMapping(response);
-    const cost = costUSD(response.usage);
+    const { mapping, cost } = await mapFields({
+      apiKey,
+      profile,
+      fields,
+      pageContext,
+      summary,
+      library,
+      helperToken: HELPER_TOKEN,
+    });
 
     const identity = enforceIdentity(mapping, fields, profile);
     mapping.fields = identity.fields;
@@ -175,9 +210,11 @@ async function runFill(tabId, force = false) {
           company: mapping.company || pageContext.heading || pageContext.title || 'unknown',
           role: mapping.role || '',
           url: pageContext.url,
-          resume_path: tailored ? attachedResume.path : '',
+          resume_path: tailorState === 'ran' ? attachedResume.path : '',
           cost_usd: cost,
-          summary: tailored ? summary : null,
+          summary: tailorState === 'ran' ? summary : null,
+          tailor_state: tailorState,
+          tailor_message: tailorMessage ?? '',
         }),
       });
     } catch {
@@ -202,11 +239,11 @@ async function runFill(tabId, force = false) {
       }
     }
 
-    await setStatus({
+    const finalStatus = {
       state: 'done',
       cost,
-      tailored,
-      tailorError,
+      tailorState,
+      tailorMessage,
       summary,
       company: mapping.company,
       role: mapping.role,
@@ -215,9 +252,44 @@ async function runFill(tabId, force = false) {
       corrections: corrections.map(c => ({ ...c, label: labelById.get(c.id) || c.id })),
       failuresSaved,
       ...(failuresSaved ? {} : { failureRecords: enrichedFailureRecords }),
-    });
+    };
+    await setStatus(finalStatus);
+
+    // QUEUE-02: a completed run counts as 'filled' even when some fields came back
+    // needs_manual/verify — that per-field distinction is what RUN-02 is for, not this
+    // coarser queue status (Pitfall 3). Fail-open.
+    if (queueId) {
+      try {
+        await helperFetch(`/queue/${queueId}`, {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ status: 'filled', results_summary: JSON.stringify(finalStatus.results) }),
+        });
+      } catch (e) {
+        console.info('jobfill queue-status update skipped (helper unavailable)', e);
+      }
+    }
+
+    return finalStatus;
   } catch (e) {
-    await setStatus({ state: 'error', error: String(e?.message || e) });
+    const errorStatus = { state: 'error', error: String(e?.message || e) };
+    await setStatus(errorStatus);
+
+    // QUEUE-02: only a thrown exception (mapping failed, no fields, no API key, etc.)
+    // counts as 'failed' (Pitfall 3). Fail-open.
+    if (queueId) {
+      try {
+        await helperFetch(`/queue/${queueId}`, {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ status: 'failed', error: errorStatus.error }),
+        });
+      } catch (patchErr) {
+        console.info('jobfill queue-status update skipped (helper unavailable)', patchErr);
+      }
+    }
+
+    return errorStatus;
   } finally {
     clearInterval(heartbeat);
   }

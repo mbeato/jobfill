@@ -91,6 +91,7 @@ function render() {
       <td>
         ${a.url ? `<a href="${esc(a.url)}" target="_blank">posting</a>` : ''}
         ${a.resume_path ? `<div class="muted" title="${esc(a.resume_path)}">resume: …/${esc(a.resume_path.split('/').slice(-2).join('/'))}</div>` : ''}
+        ${tailorStateLine(a.tailor_state, a.tailor_message)}
         ${a.summary ? `
           <div class="muted summary-toggle" onclick="toggleSummary(${a.id})">resume changes <span id="arrow-${a.id}">▾</span></div>
           <div class="summary-body" id="summary-${a.id}" style="display:none">
@@ -120,6 +121,15 @@ function toggleSummary(id) {
 
 function esc(s) {
   return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+
+// OBS-01: always-visible tailor-state line — unlike the resume-changes toggle above
+// (gated on a.summary truthiness), this renders for every fill regardless of summary.
+function tailorStateLine(tailorState, tailorMessage) {
+  if (tailorState === 'ran') return `<div class="muted">tailored resume attached</div>`;
+  if (tailorState === 'skipped') return `<div class="muted">static resume — ${esc(tailorMessage)}</div>`;
+  if (tailorState === 'error') return `<div style="color:#e65100">tailor failed — ${esc(tailorMessage)} · static resume used</div>`;
+  return '';
 }
 
 async function loadLibrary() {
@@ -273,11 +283,35 @@ function toggleFailureDetails(id) {
 // so an unknown status must never reach the class attribute (stored-XSS sink), mirroring
 // FAILURE_STATUSES above.
 const QUEUE_STATUSES = ['queued', 'filling', 'filled', 'failed', 'reviewed', 'submitted'];
+// Resolved in the Task 3 checkpoint: replace with the real unpacked extension id
+// from chrome://extensions (Assumption A1).
+const EXTENSION_ID = 'REPLACE_WITH_UNPACKED_EXTENSION_ID';
 let queueRows = [];
 
 async function loadQueue() {
   queueRows = await (await fetch('/queue')).json();
   renderQueue(queueRows);
+}
+
+function triggerFill(id) {
+  const q = queueRows.find(r => r.id === id);
+  if (!q) return;
+  if (typeof chrome === 'undefined' || !chrome.runtime) {
+    document.getElementById('queueBody').insertAdjacentHTML('afterbegin', `<div class="muted">extension not detected</div>`);
+    return;
+  }
+  chrome.runtime.sendMessage(EXTENSION_ID, { type: 'jobfill.trigger', queueId: q.id, url: q.url }, () => {
+    loadQueue();
+  });
+}
+
+// D-02: the ONLY code path in the whole system that constructs a 'submitted' status —
+// no background/helper code sets it. Gated behind a human confirm() click.
+function markSubmitted(id) {
+  const q = queueRows.find(r => r.id === id);
+  if (!q) return;
+  if (!confirm(`mark ${q.company} submitted? this records that you already submitted it manually — jobfill never submits for you.`)) return;
+  patchQueue(id, { status: 'submitted' });
 }
 
 async function patchQueue(id, body) {

@@ -335,6 +335,9 @@ Bun.serve({
       if (pathname === '/queue' && req.method === 'POST') {
         const b = await req.json();
         if (!b.url) return json({ error: 'url required' }, 400);
+        // Persistence-boundary allowlist: this url is later rendered as an anchor and
+        // passed to chrome.tabs.query/create by the trigger — never store a non-http(s) scheme.
+        if (!/^https?:\/\//i.test(String(b.url))) return json({ error: 'url must be http(s)' }, 400);
         return json(insertQueueEntry(db, b.url), 201);
       }
       const queuePatch = pathname.match(/^\/queue\/(\d+)$/);

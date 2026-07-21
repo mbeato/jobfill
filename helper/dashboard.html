@@ -347,12 +347,15 @@ function renderQueue(rows) {
             results = null;
           }
           const resultsHtml = renderQueueResults(results);
+          // WR-01-style guard (mirrors the failures table): stored urls are untrusted —
+          // esc() does not neutralize a javascript: scheme, so only emit an anchor for http(s).
+          const safeUrl = /^https?:\/\//i.test(q.url) ? q.url : '';
           return `
             <tr>
               <td class="muted">${(q.created_at || '').slice(0, 10)}</td>
               <td><strong>${esc(q.company)}</strong>${q.role ? ` · ${esc(q.role)}` : ''}</td>
               <td style="text-overflow: ellipsis; white-space: nowrap; overflow: hidden; max-width: 240px">
-                ${q.url ? `<a href="${esc(q.url)}" target="_blank">${esc(q.url)}</a>` : ''}
+                ${safeUrl ? `<a href="${esc(safeUrl)}" target="_blank">${esc(safeUrl)}</a>` : esc(q.url)}
               </td>
               <td><span class="${statusClass}">${esc(q.status)}</span>
                 ${q.status === 'failed' ? `<div class="muted">fill failed — ${esc(q.error)}. check the field results below, or retry from the popup.</div>` : ''}

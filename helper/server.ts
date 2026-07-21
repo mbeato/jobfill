@@ -180,7 +180,9 @@ Hard rules:
     path: pdfPath,
     b64: Buffer.from(pdfBytes).toString('base64'),
     mime: 'application/pdf',
-    summary: parsed?.summary ?? null,
+    // WR-08: the CLI may write a bare string ("minimal changes") despite the prompt —
+    // consumers .map() over this, so only ever return an array or null.
+    summary: Array.isArray(parsed?.summary) ? parsed.summary : null,
     company: parsed?.company || body.company || '',
     role: parsed?.role || body.role || '',
   };

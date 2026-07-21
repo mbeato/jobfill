@@ -74,7 +74,9 @@ function render(st) {
     return;
   }
 
-  if (st.state === 'done' && st.tailorState === 'ran' && st.summary?.length) {
+  // Array.isArray belt-and-suspenders (server already normalizes): a string summary is
+  // truthy with a .length but .map() would throw and abort render() mid-way.
+  if (st.state === 'done' && st.tailorState === 'ran' && Array.isArray(st.summary) && st.summary.length) {
     $('summary').innerHTML = `<div class="summary-block">
       <div class="summary-label">resume changes</div>
       ${st.summary.map((line) => `<div class="summary-line">${esc(line)}</div>`).join('')}

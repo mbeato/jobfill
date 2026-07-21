@@ -25,6 +25,17 @@ async function helperFetch(path, options = {}, timeoutMs = 10000) {
   }
 }
 
+// Shared jobfill.trigger handler for both message surfaces. Rejections (bad url
+// pattern, missing url/tabId) are converted to an error response so the caller
+// always hears back and the channel never leaks.
+function handleTrigger(msg, sender, sendResponse) {
+  resolveTargetTab(msg, sender)
+    .then(tabId => runFill(tabId, msg.force, { queueId: msg.queueId }))
+    .catch(e => ({ state: 'error', error: String(e?.message || e) }))
+    .then(sendResponse);
+  return true; // keep the channel open — sendResponse fires once the fill finishes
+}
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'jobfill.run') {
     runFill(msg.tabId, msg.force);
@@ -35,10 +46,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     sendResponse({ ok: true });
   }
   if (msg.type === 'jobfill.trigger') {
-    resolveTargetTab(msg, sender)
-      .then(tabId => runFill(tabId, msg.force, { queueId: msg.queueId }))
-      .then(sendResponse);
-    return true; // keep the channel open — sendResponse fires once the fill finishes
+    return handleTrigger(msg, sender, sendResponse);
+  }
+});
+
+// Messages sent from the externally_connectable dashboard page arrive HERE, not at
+// onMessage — without this listener the dashboard's "Fill now" can never be received.
+chrome.runtime.onMessageExternal.addListener((msg, sender, sendResponse) => {
+  // Defense-in-depth on top of the manifest's externally_connectable matches:
+  // only the helper dashboard may trigger.
+  if (!sender.url?.startsWith('http://127.0.0.1:7877/')) return;
+  if (msg.type === 'jobfill.trigger') {
+    return handleTrigger(msg, sender, sendResponse);
   }
 });
 

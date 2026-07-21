@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { normalizeQuestion, matchLibrary, selectFewShot, groupByQuestion, type AnswerRow } from './answers';
 import { createFailuresTable, insertFailures, listFailures, type FailureRecordInput } from './failures';
+import { createQueueTable, insertQueueEntry, updateQueueStatus, listQueue, InvalidQueueStatusError } from './queue';
 
 const PORT = 7877;
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -31,6 +32,12 @@ db.run(`CREATE TABLE IF NOT EXISTS applications (
 try {
   db.run(`ALTER TABLE applications ADD COLUMN summary TEXT DEFAULT ''`);
 } catch {}
+try {
+  db.run(`ALTER TABLE applications ADD COLUMN tailor_state TEXT DEFAULT ''`);
+} catch {}
+try {
+  db.run(`ALTER TABLE applications ADD COLUMN tailor_message TEXT DEFAULT ''`);
+} catch {}
 
 db.run(`CREATE TABLE IF NOT EXISTS answers (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -45,6 +52,7 @@ db.run(`CREATE TABLE IF NOT EXISTS answers (
 )`);
 
 createFailuresTable(db);
+createQueueTable(db);
 
 // Shared secret with the extension (must match HELPER_TOKEN in extension/background.js).
 // No CORS headers are served: cross-origin pages can neither read responses nor pass
@@ -205,8 +213,8 @@ Bun.serve({
         const b = await req.json();
         const row = db
           .query(
-            `INSERT INTO applications (company, role, url, resume_path, cost_usd, summary)
-             VALUES (?, ?, ?, ?, ?, ?) RETURNING *`,
+            `INSERT INTO applications (company, role, url, resume_path, cost_usd, summary, tailor_state, tailor_message)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
           )
           .get(
             b.company ?? 'unknown',
@@ -215,6 +223,8 @@ Bun.serve({
             b.resume_path ?? '',
             b.cost_usd ?? 0,
             Array.isArray(b.summary) && b.summary.length ? JSON.stringify(b.summary) : '',
+            b.tailor_state ?? '',
+            b.tailor_message ?? '',
           );
         return json(row, 201);
       }
@@ -317,6 +327,24 @@ Bun.serve({
         };
         const records = (Array.isArray(b.records) ? b.records : []) as FailureRecordInput[];
         return json(insertFailures(db, url, records, resolveApplicationId), 201);
+      }
+      if (pathname === '/queue' && req.method === 'GET') {
+        return json(listQueue(db));
+      }
+      if (pathname === '/queue' && req.method === 'POST') {
+        const b = await req.json();
+        if (!b.url) return json({ error: 'url required' }, 400);
+        return json(insertQueueEntry(db, b.url), 201);
+      }
+      const queuePatch = pathname.match(/^\/queue\/(\d+)$/);
+      if (queuePatch && req.method === 'PATCH') {
+        const b = await req.json();
+        try {
+          return json(updateQueueStatus(db, Number(queuePatch[1]), b));
+        } catch (e) {
+          if (e instanceof InvalidQueueStatusError) return json({ error: e.message }, 400);
+          throw e;
+        }
       }
       if (pathname === '/tailor' && req.method === 'POST') {
         return json(await tailor(await req.json()));

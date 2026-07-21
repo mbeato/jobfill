@@ -1,7 +1,6 @@
-import { buildRequest, parseMapping } from './lib/prompt.js';
-import { callClaude, costUSD } from './lib/anthropic.js';
 import { enforceIdentity, isBankableSkip } from './lib/identity.js';
 import { resolveTargetTab } from './lib/trigger.js';
+import { mapFields } from './lib/mapping-client.js';
 
 const HELPER = 'http://127.0.0.1:7877';
 // Must match TOKEN in helper/server.ts — the helper rejects unauthenticated cross-origin callers.
@@ -103,10 +102,14 @@ async function runFill(tabId, force = false, opts = {}) {
     // mapping (D-01) so its summary can be injected into essay drafting.
     const { tailorEnabled = true } = await chrome.storage.local.get('tailorEnabled');
     let attachedResume = resume;
-    let tailored = false;
-    let tailorError = null;
-    let summary = null;
     const jd = perFrame[0].pageContext.jd || '';
+    let tailorState = 'skipped';
+    let tailorMessage = !tailorEnabled
+      ? 'tailoring disabled in options'
+      : jd.length < 200
+        ? `no usable job description found (${jd.length} chars, need 200+)`
+        : null;
+    let summary = null;
     if (tailorEnabled && jd.length >= 200) {
       try {
         await helperFetch('/health');
@@ -118,10 +121,12 @@ async function runFill(tabId, force = false, opts = {}) {
         }, 8 * 60 * 1000);
         attachedResume = { name: t.name, mime: t.mime, b64: t.b64 };
         attachedResume.path = t.path;
-        tailored = true;
+        tailorState = 'ran';
+        tailorMessage = null;
         summary = t.summary ?? null;
       } catch (e) {
-        tailorError = String(e?.message || e);
+        tailorState = 'error';
+        tailorMessage = String(e?.message || e);
       }
     }
 
@@ -134,9 +139,15 @@ async function runFill(tabId, force = false, opts = {}) {
     }
 
     await setStatus({ state: 'mapping', fieldCount: fields.length });
-    const response = await callClaude(apiKey, buildRequest(profile, fields, pageContext, summary, library));
-    const mapping = parseMapping(response);
-    const cost = costUSD(response.usage);
+    const { mapping, cost } = await mapFields({
+      apiKey,
+      profile,
+      fields,
+      pageContext,
+      summary,
+      library,
+      helperToken: HELPER_TOKEN,
+    });
 
     const identity = enforceIdentity(mapping, fields, profile);
     mapping.fields = identity.fields;
@@ -183,9 +194,11 @@ async function runFill(tabId, force = false, opts = {}) {
           company: mapping.company || pageContext.heading || pageContext.title || 'unknown',
           role: mapping.role || '',
           url: pageContext.url,
-          resume_path: tailored ? attachedResume.path : '',
+          resume_path: tailorState === 'ran' ? attachedResume.path : '',
           cost_usd: cost,
-          summary: tailored ? summary : null,
+          summary: tailorState === 'ran' ? summary : null,
+          tailor_state: tailorState,
+          tailor_message: tailorMessage ?? '',
         }),
       });
     } catch {
@@ -213,8 +226,8 @@ async function runFill(tabId, force = false, opts = {}) {
     const finalStatus = {
       state: 'done',
       cost,
-      tailored,
-      tailorError,
+      tailorState,
+      tailorMessage,
       summary,
       company: mapping.company,
       role: mapping.role,

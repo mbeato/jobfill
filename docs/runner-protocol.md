@@ -1,0 +1,143 @@
+# Runner Protocol
+
+This is the operational runbook for a Claude-in-Chrome (CiC) session acting as the
+**runner**: the agent that works jobfill's posting queue end to end — selecting a
+queued posting, navigating to it, triggering the existing fill pipeline, waiting for
+it to finish, and reporting the outcome back to the operator. It is a living document, not a
+dated design spec (see `docs/superpowers/specs/` for those) — update it in place as
+the protocol evolves.
+
+Every mechanism this protocol drives already shipped and is code-verified in Phase 7
+(`extension/background.js`, `helper/queue.ts`, `helper/dashboard.html`). Phase 8 adds
+no new extension or helper code paths — this doc is the missing piece: the exact
+sequence a runner session follows to drive that surface safely, without the operator touching
+a single step himself.
+
+## Preconditions
+
+Before starting any run, confirm all of the following are true:
+
+- **Helper is running** on `http://127.0.0.1:7877` (`bun helper/server.ts`). Every step
+  below reads and writes through this origin.
+- **The jobfill unpacked extension is loaded** in the real Chrome profile, and its real
+  `EXTENSION_ID` (from `chrome://extensions`, developer mode) is set in
+  `helper/dashboard.html`'s `EXTENSION_ID` constant — not the literal placeholder
+  `REPLACE_WITH_UNPACKED_EXTENSION_ID`. If the placeholder is still present, this is a
+  hard blocker: stop and have the operator load the extension and paste in the real ID first.
+- **The Claude in Chrome browser extension is installed and enabled** in that same
+  Chrome profile (a separate extension from jobfill itself — this is Anthropic's
+  Chrome integration, the thing that gives this runner session its browser tools).
+- **This Claude Code session is authenticated with a direct plan** (Pro/the operator/Team/
+  Enterprise), not an API key. Chrome integration is disabled entirely under API-key
+  auth, regardless of `--chrome`. Before the first run, check `/mcp` → `claude-in-chrome`
+  → "View tools" to confirm the live tool surface is actually present
+  (`javascript_tool`, `navigate`, `read_page`/`get_page_text`, etc.) — the exact tool
+  names and parameter shapes may drift between Claude Code releases, and this is the
+  first-party way to confirm what's actually available before relying on it.
+
+If any precondition fails, stop and surface it to the operator rather than guessing around it.
+
+## Operational sequence
+
+Work exactly **one** queue item at a time, start to finish, before touching the next
+one (see "one fill in flight at a time" under Hard Invariants below).
+
+### 1. Select a queued posting
+
+`GET /queue` from the helper (a plain fetch, or `javascript_tool` running
+`fetch('/queue').then(r=>r.json())` in any tab). Filter the rows to
+**`status === 'queued'`** only. Never pick a row whose status is `failed` or `filled`
+— those are not this runner's to re-touch (see the no-auto-retry rule below). Pick
+exactly one `queued` row and note its `id` (the `queueId`) and `url`.
+
+### 2. Navigate to the posting — using CiC's own `navigate` tool
+
+Use CiC's own browser `navigate` tool, in its own new tab, to open the posting's
+`url`. Do **not** skip this and let the trigger message alone cause the extension to
+silently create the tab (see Pitfall: login/CAPTCHA visibility, below) — CiC's
+documented native behavior of pausing and handing control to the operator on a login page or
+CAPTCHA is tied to *CiC's own* navigation actions. If the extension creates the tab
+instead, CiC never sees that navigation happen and can't pause on your behalf.
+
+### 3. Sanity-check the page actually loaded a real application form
+
+Use `read_page` or `get_page_text` (read-only) on the tab you just navigated to.
+Confirm it looks like a genuine job-application form, not a login wall and not an
+empty SPA loading skeleton. If the page looks empty or unrendered, give it a moment
+and re-check once before concluding anything — client-side-routed SPAs can render
+their real form well after the browser's own "navigation complete" event fires (this
+is the same class of timing gap that caused the JD-extraction bug fixed in commit
+`8df4a14`). This is a lightweight, human-legible courtesy check only — the extension's
+own scraper (`extension/lib/scraper.js`) is still the authoritative field-inventory
+pass once triggered; you are not building or need a second scraper here.
+
+If, after a moment, the page is genuinely a login wall or CAPTCHA, let CiC's native
+pause-on-login/CAPTCHA behavior engage and wait for the operator, rather than triggering
+against a page with no real form.
+
+### 4. Navigate a second tab to the dashboard
+
+Navigate a **separate** tab (CiC's own `navigate` tool again) to
+`http://127.0.0.1:7877` — jobfill's own dashboard. This second tab's origin is what
+the extension's `externally_connectable` manifest entry trusts; the trigger message
+in the next step must be sent from JS executing in *this* tab's page context, not
+from the posting tab.
+
+### 5. Trigger the fill — fire-and-forget, not fire-and-await
+
+In that dashboard tab's JS context (via `javascript_tool`), run exactly the same call
+the dashboard's own "Fill now" button already runs:
+
+```javascript
+chrome.runtime.sendMessage(
+  EXTENSION_ID,
+  { type: 'jobfill.trigger', url: postingUrl, queueId },
+  () => { /* intentionally ignored */ }
+);
+'fired';
+```
+
+Pass the **same** `postingUrl` you navigated to in Step 2 — this lets the extension's
+`resolveTargetTab` (`chrome.tabs.query({url})`) find and reuse the tab CiC already
+opened, instead of creating a new one.
+
+Do **not** wait on the callback in this same tool call. This is a **fire-and-forget**
+call, and the pattern as a whole is **fire-and-poll**, not fire-and-await: a fill can
+legitimately take several minutes (mapping plus an up-to-8-minute tailoring call), and
+no public source documents a maximum duration for a single CiC tool-call round trip.
+Blocking on the callback risks hitting that undocumented limit for no benefit — the
+queue row itself is already the authoritative result channel (`background.js` PATCHes
+`/queue/:id` the instant the fill finishes), so there is nothing to gain by holding the
+callback open. Move immediately to polling.
+
+### 6. Poll the queue until the fill leaves `filling`
+
+Every **~20-30 seconds**, `fetch('/queue')` and find the row by `queueId`. Stop
+polling once its `status` is no longer `filling` — i.e. it has reached `filled` or
+`failed`. Give this a total patience budget of roughly **10 minutes** before treating
+it as stuck and flagging that to the operator. Speed is explicitly deprioritized here in favor
+of hands-off, quality-first operation — don't shorten the interval or the budget to
+"feel faster."
+
+### 7. One fill in flight at a time
+
+There is no server-side or extension-side mutex around a running fill. Do not trigger
+the next `queued` row until the current row's status has left `filling`. Running two
+triggers concurrently would race on the same `chrome.storage.session.jobfillStatus`
+key and could open two tabs against the same or different postings simultaneously —
+this is a rule the protocol itself must enforce, since no code enforces it for you.
+
+## Known harmless behaviors
+
+These are expected, self-healing situations — do not treat them as failures:
+
+- **A duplicate tab may occasionally appear.** `resolveTargetTab`'s tab lookup uses
+  Chrome match-pattern semantics, not literal string equality, and strips
+  `#fragments` for that reason. If the posting's visible URL shifted slightly after
+  navigation (tracking params, SPA client-side routing, a redirect chain), the lookup
+  can miss the tab CiC already opened and the extension will open a second tab for
+  the same posting. This is low-severity and self-healing — the create-fallback is
+  itself tested code from Phase 7. Not something to prevent or work around.
+- **A transient helper hiccup mid-fill is fail-open, not a hard failure.** Every queue
+  PATCH in `background.js` is wrapped in its own try/catch that logs and continues;
+  a momentary helper unavailability during a fill does not abort the fill in progress.

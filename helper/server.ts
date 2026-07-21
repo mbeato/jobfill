@@ -6,6 +6,7 @@ import { homedir } from 'node:os';
 import { normalizeQuestion, matchLibrary, selectFewShot, groupByQuestion, type AnswerRow } from './answers';
 import { createFailuresTable, insertFailures, listFailures, type FailureRecordInput } from './failures';
 import { createQueueTable, insertQueueEntry, updateQueueStatus, listQueue, InvalidQueueStatusError } from './queue';
+import { mapViaCLI } from './mapping';
 
 const PORT = 7877;
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -348,6 +349,12 @@ Bun.serve({
       }
       if (pathname === '/tailor' && req.method === 'POST') {
         return json(await tailor(await req.json()));
+      }
+      if (pathname === '/map' && req.method === 'POST') {
+        const b = await req.json();
+        if (typeof b.prompt !== 'string' || !b.prompt) return json({ error: 'prompt required' }, 400);
+        if (typeof b.schema !== 'object' || !b.schema) return json({ error: 'schema required' }, 400);
+        return json(await mapViaCLI(b.prompt, b.schema));
       }
       return json({ error: 'not found' }, 404);
     } catch (e) {

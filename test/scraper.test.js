@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { collectFields, getEntry } from '../extension/lib/scraper.js';
+import { collectFields, getEntry, extractJD } from '../extension/lib/scraper.js';
 
 function mount(html) {
   document.body.innerHTML = html;
@@ -76,5 +76,60 @@ describe('collectFields', () => {
   it('includes current value so already-filled fields can be skipped', () => {
     mount(`<input type="text" aria-label="City" value="Miami">`);
     expect(collectFields(document)[0].value).toBe('Miami');
+  });
+});
+
+describe('extractJD', () => {
+  const longDesc = 'We are hiring a senior engineer. '.repeat(30); // ~990 chars
+
+  it('prefers JSON-LD JobPosting description over sparse DOM text (Ashby application-tab case)', () => {
+    document.body.innerHTML = `<div id="root"><form><label>First Name</label><input></form></div>`;
+    const ld = document.createElement('script');
+    ld.type = 'application/ld+json';
+    ld.textContent = JSON.stringify({
+      '@context': 'https://schema.org/', '@type': 'JobPosting',
+      title: 'Head of AI Enablement Engineering',
+      description: `<h1>Company Overview</h1><p>${longDesc}</p>`,
+    });
+    document.head.appendChild(ld);
+    const jd = extractJD(document);
+    expect(jd).toContain('Company Overview');
+    expect(jd).toContain('senior engineer');
+    expect(jd).not.toContain('<p>');
+    expect(jd.length).toBeGreaterThanOrEqual(200);
+    ld.remove();
+  });
+
+  it('handles JSON-LD arrays and skips non-JobPosting entries', () => {
+    document.body.innerHTML = `<div></div>`;
+    const ld = document.createElement('script');
+    ld.type = 'application/ld+json';
+    ld.textContent = JSON.stringify([
+      { '@type': 'Organization', name: 'Acme' },
+      { '@type': 'JobPosting', description: `<p>${longDesc}</p>` },
+    ]);
+    document.head.appendChild(ld);
+    expect(extractJD(document)).toContain('senior engineer');
+    ld.remove();
+  });
+
+  it('falls back to the DOM heuristic when JSON-LD is absent or malformed', () => {
+    const ld = document.createElement('script');
+    ld.type = 'application/ld+json';
+    ld.textContent = '{not json';
+    document.head.appendChild(ld);
+    document.body.innerHTML = `<main>About the role: ${longDesc}</main>`;
+    expect(extractJD(document)).toContain('About the role');
+    ld.remove();
+  });
+
+  it('ignores a short JSON-LD description and falls back to richer DOM text', () => {
+    const ld = document.createElement('script');
+    ld.type = 'application/ld+json';
+    ld.textContent = JSON.stringify({ '@type': 'JobPosting', description: 'Short.' });
+    document.head.appendChild(ld);
+    document.body.innerHTML = `<main>Full posting text here. ${longDesc}</main>`;
+    expect(extractJD(document)).toContain('Full posting text');
+    ld.remove();
   });
 });

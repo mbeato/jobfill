@@ -162,3 +162,22 @@ function clean(s) {
 function cssEscape(s) {
   return typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(s) : s.replace(/"/g, '\\"');
 }
+
+// Job-description capture for resume tailoring. ATS pages (Ashby, Greenhouse,
+// Lever) embed a schema.org JobPosting in JSON-LD even on application-form
+// routes where the description is never rendered into the DOM — prefer that,
+// then fall back to visible-text heuristics.
+export function extractJD(doc = document) {
+  for (const script of doc.querySelectorAll('script[type="application/ld+json"]')) {
+    let data;
+    try { data = JSON.parse(script.textContent); } catch { continue; }
+    for (const item of Array.isArray(data) ? data : [data]) {
+      if (item?.['@type'] !== 'JobPosting' || typeof item.description !== 'string') continue;
+      const text = new DOMParser().parseFromString(item.description, 'text/html')
+        .body.textContent.replace(/\s+/g, ' ').trim();
+      if (text.length >= 200) return text.slice(0, 8000);
+    }
+  }
+  const el = doc.querySelector('main, article, [class*="description"], [id*="description"]') || doc.body;
+  return (el.innerText || el.textContent || '').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim().slice(0, 8000);
+}

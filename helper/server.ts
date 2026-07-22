@@ -9,6 +9,12 @@ import { createQueueTable, insertQueueEntry, updateQueueStatus, listQueue, Inval
 import { mapViaCLI } from './mapping';
 import { normalizeUrl } from './seek/normalize';
 import { createPostingsTable, upsertPosting } from './seek/postings';
+import { loadSeekConfig } from './seek/config';
+import { runSweep } from './seek/sweep';
+import { fetchGreenhouse } from './seek/greenhouse';
+import { fetchLever } from './seek/lever';
+import { fetchAshby } from './seek/ashby';
+import { fetchHNPostings } from './seek/hn';
 import type { SourceName } from './seek/types';
 
 const PORT = 7877;
@@ -346,6 +352,12 @@ Bun.serve({
           if (e instanceof InvalidQueueStatusError) return json({ error: e.message }, 400);
           throw e;
         }
+      }
+      if (pathname === '/seek' && req.method === 'POST') {
+        const config = await loadSeekConfig();
+        return json(
+          await runSweep(db, config, { fetchGreenhouse, fetchLever, fetchAshby, fetchHNPostings, upsertPosting }),
+        );
       }
       if (pathname === '/seek/results' && req.method === 'POST') {
         const b = await req.json();

@@ -21,12 +21,18 @@ export interface PostingRow {
   login_gated: boolean;
   not_fillable: boolean;
   low_confidence: boolean;
+  decision: string | null;
+  decision_reason: string | null;
+  decided_at: string | null;
   fetched_at: string;
   created_at: string;
 }
 
 const MAX_TEXT = 2000;
 const VALID_SOURCES = new Set(['greenhouse', 'lever', 'ashby', 'hn', 'yc', 'jobright']);
+
+// D-13 decision audit trail: a posting's final verdict. null = unscored.
+export const DECISION_VALUES = new Set(['queued', 'rejected', 'held']);
 
 export function createPostingsTable(db: Database) {
   db.run(`CREATE TABLE IF NOT EXISTS postings (
@@ -42,6 +48,9 @@ export function createPostingsTable(db: Database) {
     login_gated INTEGER DEFAULT 0,
     not_fillable INTEGER DEFAULT 0,
     low_confidence INTEGER DEFAULT 0,
+    decision TEXT,
+    decision_reason TEXT,
+    decided_at TEXT,
     fetched_at TEXT DEFAULT (datetime('now')),
     created_at TEXT DEFAULT (datetime('now'))
   )`);
@@ -61,6 +70,9 @@ function toRow(raw: Record<string, unknown>): PostingRow {
     login_gated: raw.login_gated === 1,
     not_fillable: raw.not_fillable === 1,
     low_confidence: raw.low_confidence === 1,
+    decision: (raw.decision as string | null) ?? null,
+    decision_reason: (raw.decision_reason as string | null) ?? null,
+    decided_at: (raw.decided_at as string | null) ?? null,
     fetched_at: raw.fetched_at as string,
     created_at: raw.created_at as string,
   };
@@ -83,6 +95,9 @@ export function upsertPosting(db: Database, p: NormalizedPosting): PostingRow | 
        -- login_gated only ever ratchets up on conflict: once a URL is known to
        -- be login-walled, no later sweep stage (e.g. HN re-discovering the same
        -- link) may downgrade it back into the fillable pool.
+       -- D-14: decision/decision_reason/decided_at are deliberately absent from
+       -- this SET list — a re-discovery upsert refreshes staging metadata but
+       -- must never clobber a prior verdict.
        ON CONFLICT(url_key) DO UPDATE SET
          fetched_at = datetime('now'),
          company = excluded.company,
@@ -114,5 +129,30 @@ export function upsertPosting(db: Database, p: NormalizedPosting): PostingRow | 
 
 export function listPostings(db: Database): PostingRow[] {
   const rows = db.query('SELECT * FROM postings ORDER BY fetched_at DESC, id DESC').all() as Record<string, unknown>[];
+  return rows.map(toRow);
+}
+
+// D-13: records a posting's final verdict. Never touched by upsertPosting's
+// ON CONFLICT (see D-14 comment above) — this is the only write path.
+export function recordDecision(db: Database, id: number, decision: string, reason: string): PostingRow | null {
+  if (!DECISION_VALUES.has(decision)) {
+    throw new Error(`invalid posting decision: ${decision}`);
+  }
+  db.query(`UPDATE postings SET decision = ?, decision_reason = ?, decided_at = datetime('now') WHERE id = ?`).run(
+    decision,
+    String(reason ?? '').slice(0, MAX_TEXT),
+    id,
+  );
+  const raw = db.query('SELECT * FROM postings WHERE id = ?').get(id) as Record<string, unknown> | null;
+  return raw ? toRow(raw) : null;
+}
+
+// D-08/D-12: the sweep's scoring backlog — unscored (null) or held-for-retry
+// postings, oldest-fetched-first so the backlog is ground down in order.
+export function listPostingsToDecide(db: Database, limit?: number): PostingRow[] {
+  const sql =
+    `SELECT * FROM postings WHERE decision IS NULL OR decision = 'held' ORDER BY fetched_at ASC, id ASC` +
+    (limit !== undefined ? ' LIMIT ?' : '');
+  const rows = (limit !== undefined ? db.query(sql).all(limit) : db.query(sql).all()) as Record<string, unknown>[];
   return rows.map(toRow);
 }

@@ -127,3 +127,10 @@ test('fetchHNPostings builds fillable, permalink-fallback, and freshness-filtere
 
   expect(postings.find(p => p.company === 'Stale Co')).toBeUndefined();
 });
+
+test('extractApplicationUrl decodes Algolia HTML-escaped hrefs before matching', () => {
+  const text = 'Apply at <a href="https:&#x2F;&#x2F;job-boards.greenhouse.io&#x2F;novacredit" rel="nofollow">link</a>';
+  const r = extractApplicationUrl(text);
+  expect(r.fromComment).toBe(true);
+  expect(r.url).toBe('https://job-boards.greenhouse.io/novacredit');
+});

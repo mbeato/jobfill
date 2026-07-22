@@ -55,7 +55,8 @@ export function parseHNComment(
 
 export function extractApplicationUrl(text: string): { url: string; fromComment: boolean } {
   try {
-    const clean = String(text ?? '');
+    // Algolia HTML-escapes hrefs (https:&#x2F;&#x2F;…) — decode before matching.
+    const clean = decodeEntities(String(text ?? ''));
     const urls = clean.match(URL_RE) ?? [];
     if (urls.length === 0) return { url: '', fromComment: false };
     const known = urls.find(u => KNOWN_ATS_HOSTS.some(host => u.includes(host)));

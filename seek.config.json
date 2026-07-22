@@ -56,5 +56,9 @@
   },
   "jobright": {
     "enabled": true
+  },
+  "schedule": {
+    "enabled": true,
+    "targetHour": 7
   }
 }

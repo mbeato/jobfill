@@ -35,6 +35,13 @@ export interface SourceConfig {
   tokens: string[];
 }
 
+// Daily cadence knobs (SCHED-01, D-04): the operator-editable, fresh-read like every
+// other seek.config.json section — fail-closed defaults if malformed.
+export interface ScheduleConfig {
+  enabled: boolean;
+  targetHour: number;
+}
+
 export interface SeekConfig {
   greenhouse: SourceConfig;
   lever: SourceConfig;
@@ -42,4 +49,5 @@ export interface SeekConfig {
   hn: { enabled: boolean };
   yc: { enabled: boolean };
   jobright: { enabled: boolean };
+  schedule: ScheduleConfig;
 }

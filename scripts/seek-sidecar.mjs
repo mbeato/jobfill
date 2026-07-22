@@ -13,6 +13,12 @@
 // Usage: node scripts/seek-sidecar.mjs [--source yc|jobright]
 // With no --source flag, runs whichever of yc/jobright is enabled in
 // seek.config.json (repo root, read fresh on every run — SEEK-05).
+//
+// First-time login: node scripts/seek-sidecar.mjs --login
+// Opens both YC Work at a Startup and Jobright in the headed persistent
+// profile and waits (no timeout) for the operator to log into both, then press Enter
+// in this terminal to finish. This mode never scrapes or POSTs — it only
+// persists the login session into .runner-profile.
 
 import { chromium } from 'playwright';
 import { readFileSync } from 'node:fs';
@@ -25,6 +31,7 @@ const TOKEN = 'REDACTED-TOKEN';
 const PROFILE_DIR = join(ROOT, '.runner-profile');
 
 const args = process.argv.slice(2);
+const loginMode = args.includes('--login');
 const sourceFlag = args.indexOf('--source');
 let onlySource = null;
 if (sourceFlag !== -1) {
@@ -33,6 +40,26 @@ if (sourceFlag !== -1) {
     console.error('usage: node scripts/seek-sidecar.mjs [--source yc|jobright]');
     process.exit(1);
   }
+}
+
+// --login: first-time auth only. Opens both sites in the headed persistent
+// profile and waits indefinitely for the operator to log in — it never scrapes or
+// POSTs (that would run right now, logged-out, and just close on him mid-login,
+// which is the exact bug this mode fixes). Session persists via the profile
+// dir itself; closing the context flushes it before exit.
+if (loginMode) {
+  const loginCtx = await chromium.launchPersistentContext(PROFILE_DIR, { headless: false });
+  await (await loginCtx.newPage()).goto('https://www.workatastartup.com', { waitUntil: 'domcontentloaded' });
+  await (await loginCtx.newPage()).goto('https://jobright.ai/', { waitUntil: 'domcontentloaded' });
+  console.log('[seek-sidecar] log into both YC Work at a Startup and Jobright in the windows that just opened.');
+  console.log('[seek-sidecar] once logged into both, come back here and press Enter to finish.');
+  await new Promise((resolve) => {
+    process.stdin.resume();
+    process.stdin.once('data', resolve);
+  });
+  await loginCtx.close();
+  console.log('[seek-sidecar] session saved to .runner-profile — done');
+  process.exit(0);
 }
 
 // Fresh read, no caching (SEEK-05) — mirrors helper/seek/config.ts's

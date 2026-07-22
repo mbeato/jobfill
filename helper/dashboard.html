@@ -43,6 +43,10 @@
   .d-held { color: #e65100; }
   .seek-actions button { margin-right: 8px; padding: 4px 10px; cursor: pointer; border: 1px solid #ccc; background: #fff; border-radius: 4px; }
   .decision-toggle { color: #1565c0; cursor: pointer; }
+  .sweep-actions button { margin-right: 8px; padding: 4px 10px; cursor: pointer; border: 1px solid #ccc; background: #fff; border-radius: 4px; }
+  .s-running { color: #e65100; } .s-ok { color: #2e7d32; }
+  .sweep-toggle { color: #1565c0; cursor: pointer; }
+  .auth-badge { color: #d32f2f; font-weight: 600; margin: 4px 0; }
 </style>
 <body>
   <h1>jobfill tracker</h1>
@@ -50,6 +54,12 @@
   <div id="queue">
     <h2>posting queue</h2>
     <div id="queueBody"></div>
+  </div>
+  <div id="sweeps">
+    <h2>sweeps</h2>
+    <div class="sweep-actions"><button onclick="triggerSweep()">Trigger sweep now</button></div>
+    <div id="sweepsBadges"></div>
+    <div id="sweepsBody"></div>
   </div>
   <div id="seek">
     <h2>seek decisions</h2>
@@ -563,10 +573,139 @@ async function queueReject(id) {
   }
 }
 
+// D-14/D-16: sweeps run-history — last-N-runs list with per-source
+// expandable detail, in-progress polling, a manual trigger button on the
+// identical POST /sweep path the CLI and scheduler tick use, and an
+// auth-expired badge. Status is untrusted server-authored state, allowlisted
+// before it reaches a class attribute (stored-XSS sink), mirroring
+// FAILURE_STATUSES/QUEUE_STATUSES/DECISION_VALUES above.
+const SWEEP_STATUSES = new Set(['running', 'ok', 'failed']);
+let sweepRows = [];
+let sweepPollHandle = null;
+
+async function loadSweeps() {
+  sweepRows = await (await fetch('/sweeps')).json();
+  renderSweeps(sweepRows);
+}
+
+// Fire-and-poll (D-10): mirrors triggerFill's reload-first-then-notify
+// order. A 409 (already running) is a friendly notice, not a thrown error.
+async function triggerSweep() {
+  const resp = await fetch('/sweep', { method: 'POST' });
+  const body = await resp.json();
+  await loadSweeps();
+  if (resp.status === 409) {
+    document.getElementById('sweepsBody').insertAdjacentHTML('afterbegin', `<div class="muted">sweep already running (run ${Number(body.runId) || ''})</div>`);
+    return;
+  }
+  if (resp.ok && body.id) pollSweep(body.id);
+}
+
+// Polling primitive (11-RESEARCH Code Examples) — re-renders the in-progress
+// run at the top of the list every ~3s, stops once status leaves 'running'.
+// A single active poll handle is guarded so a second trigger during an
+// existing poll doesn't stack intervals.
+function pollSweep(runId) {
+  if (sweepPollHandle) clearInterval(sweepPollHandle);
+  sweepPollHandle = setInterval(async () => {
+    const run = await (await fetch(`/sweeps/${runId}`)).json();
+    sweepRows = [run, ...sweepRows.filter(r => r.id !== runId)];
+    renderSweeps(sweepRows);
+    if (run.status !== 'running') clearInterval(sweepPollHandle);
+  }, 3000);
+}
+
+function fmtDuration(startedAt, finishedAt, status) {
+  if (status === 'running' || !finishedAt) return 'running…';
+  const ms = new Date(finishedAt) - new Date(startedAt);
+  if (!Number.isFinite(ms) || ms < 0) return '—';
+  const s = Math.round(ms / 1000);
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
+}
+
+// D-16: derived from the most recent FINISHED run's detail.sidecar.authExpired
+// (rows are newest-first) — a badge for a source appears until a later
+// finished sweep's detail no longer lists it, which this always reflects
+// since it only ever reads the single latest finished row, never accumulates
+// across runs.
+function renderAuthBadges(rows) {
+  const el = document.getElementById('sweepsBadges');
+  const latestFinished = rows.find(r => r.status !== 'running' && r.detail);
+  const authExpired = latestFinished?.detail?.sidecar?.authExpired || [];
+  if (!authExpired.length) {
+    el.innerHTML = '';
+    return;
+  }
+  const labels = { yc: 'YC', jobright: 'Jobright' };
+  el.innerHTML = authExpired
+    .map(source => `<div class="auth-badge">${esc(labels[source] || source)} session expired — re-login (\`node scripts/seek-sidecar.mjs --login\`)</div>`)
+    .join('');
+}
+
+function renderSweeps(rows) {
+  renderAuthBadges(rows);
+  const body = document.getElementById('sweepsBody');
+  if (!rows.length) {
+    body.innerHTML = `
+      <div class="muted">no sweeps run yet</div>
+      <div class="muted" style="font-size: 12px">trigger one above, or wait for the daily scheduled sweep.</div>`;
+    return;
+  }
+  body.innerHTML = `
+    <table>
+      <thead><tr><th>started</th><th>trigger</th><th>duration</th><th>headline</th><th>status</th><th>detail</th></tr></thead>
+      <tbody>
+        ${rows.map(r => {
+          const statusClass = SWEEP_STATUSES.has(r.status) ? `s-${r.status}` : 'muted';
+          const h = r.detail?.headline;
+          const headline = h ? `${h.fetched} fetched · ${h.rejected} rejected · ${h.held} held · ${h.queued} queued` : '—';
+          return `
+            <tr>
+              <td class="muted">${esc((r.started_at || '').replace('T', ' ').slice(0, 19))}</td>
+              <td>${esc(r.trigger)}</td>
+              <td>${fmtDuration(r.started_at, r.finished_at, r.status)}</td>
+              <td>${headline}</td>
+              <td><span class="${statusClass}">${esc(r.status)}</span></td>
+              <td>
+                ${r.detail ? `
+                  <div class="sweep-toggle" onclick="toggleSweepDetail(${r.id})">per-source <span id="sarrow-${r.id}">▾</span></div>
+                  <div id="sdetail-${r.id}" style="display:none">${renderSweepSourceDetail(r.detail)}</div>
+                ` : `<span class="muted">in progress…</span>`}
+              </td>
+            </tr>`;
+        }).join('')}
+      </tbody>
+    </table>`;
+}
+
+// detail.fetch is server-composed SourceResult[]; per-source error strings
+// are third-party/network text and therefore untrusted — esc() every one,
+// mirroring the failures table's snapshot rendering.
+function renderSweepSourceDetail(detail) {
+  const fetchLines = (detail.fetch || [])
+    .map(s => `<div class="muted" style="padding-left:4px">${esc(s.source)}: ${s.fetched} fetched${s.upserted != null ? `, ${s.upserted} upserted` : ''}${s.error ? ` — error: ${esc(s.error)}` : ''}</div>`)
+    .join('');
+  const bc = detail.filter?.byCriterion || {};
+  const criterionLine = `<div class="muted" style="padding-left:4px">rejected by criterion: location ${bc.location ?? 0} · title ${bc.title ?? 0} · yoe ${bc.yoe ?? 0} · stale ${bc.stale ?? 0} · llm ${bc.llm ?? 0}</div>`;
+  const sidecarLine = detail.sidecar
+    ? `<div class="muted" style="padding-left:4px">sidecar: ${detail.sidecar.ran ? 'ran' : 'did not run'}${detail.sidecar.error ? ` — error: ${esc(detail.sidecar.error)}` : ''}</div>`
+    : '';
+  return fetchLines + criterionLine + sidecarLine;
+}
+
+function toggleSweepDetail(id) {
+  const body = document.getElementById(`sdetail-${id}`);
+  const arrow = document.getElementById(`sarrow-${id}`);
+  const expanded = body.style.display !== 'none';
+  body.style.display = expanded ? 'none' : 'block';
+  arrow.textContent = expanded ? '▾' : '▴';
+}
+
 load();
 loadLibrary();
 loadFailures();
 loadQueue();
 loadPostings();
+loadSweeps();
 </script>
 </body>

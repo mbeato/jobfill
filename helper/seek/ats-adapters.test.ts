@@ -1,6 +1,7 @@
 import { test, expect } from 'bun:test';
 import { normalizeGreenhouseJob, fetchGreenhouse } from './greenhouse';
 import { normalizeLeverPosting, fetchLever } from './lever';
+import { normalizeAshbyJob, fetchAshby } from './ashby';
 
 // Trimmed real shapes captured via curl against public boards (see 09-02 SUMMARY spot-check).
 const rawGreenhouseJob = {
@@ -20,6 +21,14 @@ const rawLeverPosting = {
   },
   hostedUrl: 'https://jobs.lever.co/palantir/ac978161-6f46-4f6b-ad9e-a258e642751c',
   createdAt: 1711403416463,
+};
+
+const rawAshbyJob = {
+  id: '34413f8d-26bf-4bbc-8ade-eb309a0e2245',
+  title: 'Security Engineer, Cloud',
+  location: 'New York, NY (HQ)',
+  jobUrl: 'https://jobs.ashbyhq.com/ramp/34413f8d-26bf-4bbc-8ade-eb309a0e2245',
+  publishedAt: '2026-04-07T17:12:35.753+00:00',
 };
 
 function fakeFetch(body: unknown, ok = true, status = 200) {
@@ -91,4 +100,35 @@ test('fetchLever maps a stubbed bare-array response through normalizeLeverPostin
 test('fetchLever throws when the stub response is non-2xx', async () => {
   const stub = fakeFetch({}, false, 404);
   await expect(fetchLever(['nonexistent'], stub)).rejects.toThrow();
+});
+
+test('normalizeAshbyJob maps a raw Ashby job to the shared shape with posted_at_trusted true', () => {
+  const posting = normalizeAshbyJob(rawAshbyJob, 'ramp');
+  expect(posting.source).toBe('ashby');
+  expect(posting.url).toBe('https://jobs.ashbyhq.com/ramp/34413f8d-26bf-4bbc-8ade-eb309a0e2245');
+  expect(posting.company).toBe('ramp');
+  expect(posting.title).toBe('Security Engineer, Cloud');
+  expect(posting.location).toBe('New York, NY (HQ)');
+  expect(posting.posted_at).toBe('2026-04-07T17:12:35.753+00:00');
+  expect(posting.posted_at_trusted).toBe(true);
+  expect(posting.login_gated).toBe(false);
+});
+
+test('normalizeAshbyJob tolerates a missing location without throwing', () => {
+  const { location: _drop, ...noLocation } = rawAshbyJob;
+  expect(() => normalizeAshbyJob(noLocation, 'ramp')).not.toThrow();
+  expect(normalizeAshbyJob(noLocation, 'ramp').location).toBe('');
+});
+
+test('fetchAshby maps a stubbed response body through normalizeAshbyJob', async () => {
+  const stub = fakeFetch({ jobs: [rawAshbyJob] });
+  const postings = await fetchAshby(['ramp'], stub);
+  expect(postings).toHaveLength(1);
+  expect(postings[0].source).toBe('ashby');
+  expect(postings[0].posted_at_trusted).toBe(true);
+});
+
+test('fetchAshby throws when the stub response is non-2xx', async () => {
+  const stub = fakeFetch({}, false, 404);
+  await expect(fetchAshby(['nonexistent'], stub)).rejects.toThrow();
 });

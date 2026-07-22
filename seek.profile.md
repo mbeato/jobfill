@@ -22,8 +22,8 @@ RAG, LLM-as-judge evals.
 
 ## Location
 
-New York City preferred, or explicitly US-remote-friendly roles. Not
-currently based in NY on-site markets outside the above.
+New York City or San Francisco, or explicitly US-remote-friendly roles.
+Generic "United States" locations count as US-remote-friendly.
 
 ## Anti-criteria (reject)
 
@@ -31,4 +31,4 @@ currently based in NY on-site markets outside the above.
   required)
 - Postings explicitly requiring more than 1 year of experience
 - Non-engineering roles: PM, design, sales, recruiting, marketing, ops
-- On-site roles outside New York with no remote option
+- On-site roles outside New York or San Francisco with no remote option

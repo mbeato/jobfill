@@ -70,7 +70,26 @@ for (const title of NON_ENGINEERING_TITLES) {
 
 // --- Location (D-02) ---
 
-const SURVIVING_LOCATIONS = ['New York, NY', 'NYC', 'New York', 'Remote', 'Remote (US)', 'Remote - United States', ''];
+const SURVIVING_LOCATIONS = [
+  'New York, NY',
+  'NYC',
+  'New York',
+  'Remote',
+  'Remote (US)',
+  'Remote - United States',
+  '',
+  // D-02 amendment (2026-07-22): SF is a home market; US-generic strings and
+  // work-mode-only strings survive to the LLM instead of hard-rejecting.
+  'San Francisco',
+  'San Francisco, CA',
+  'SF Bay Area',
+  'United States',
+  'USA',
+  'U.S. Remote',
+  'Hybrid',
+  'In-Office',
+  'Full-time',
+];
 
 for (const location of SURVIVING_LOCATIONS) {
   test(`classifyMetadata survives location "${location}"`, () => {
@@ -79,10 +98,14 @@ for (const location of SURVIVING_LOCATIONS) {
   });
 }
 
-test('classifyMetadata rejects a specific non-NY, non-remote location as rules:location', () => {
-  const result = classifyMetadata(mkPosting({ location: 'San Francisco, CA' }));
-  expect(result).toEqual({ reject: true, reason: 'rules:location' });
-});
+const REJECTED_LOCATIONS = ['London, UK', 'Toronto, Canada', 'Singapore', 'Seattle, WA'];
+
+for (const location of REJECTED_LOCATIONS) {
+  test(`classifyMetadata rejects location "${location}" as rules:location`, () => {
+    const result = classifyMetadata(mkPosting({ location }));
+    expect(result).toEqual({ reject: true, reason: 'rules:location' });
+  });
+}
 
 // --- Freshness-where-trusted (D-01) ---
 
@@ -115,7 +138,7 @@ test('classifyMetadata checks title before location: a bad title rejects even wi
 
 test('classifyMetadata checks location before freshness: a bad location rejects even with a fresh timestamp', () => {
   const result = classifyMetadata(
-    mkPosting({ location: 'San Francisco, CA', posted_at: daysAgo(1), posted_at_trusted: true }),
+    mkPosting({ location: 'London, UK', posted_at: daysAgo(1), posted_at_trusted: true }),
   );
   expect(result).toEqual({ reject: true, reason: 'rules:location' });
 });

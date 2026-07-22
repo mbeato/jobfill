@@ -25,8 +25,17 @@ const LEAD_ENGINEER_RE = /\blead\s+(?:software\s+)?(?:engineer|developer)\b|\ben
 const NON_ENGINEERING_RE =
   /\b(product manager|product designer|designer|sales|recruiter|marketing|account executive|customer success)\b/i;
 
+// D-02 as amended 2026-07-22: NY and SF are both home markets; US-generic
+// location strings ("United States", "USA", "US") read as US-remote-friendly
+// and survive to the LLM rather than hard-rejecting.
 const NY_RE = /\b(new york|nyc|ny)\b/i;
+const SF_RE = /\b(san francisco|sf)\b/i;
+const US_GENERIC_RE = /\b(united states|usa|us)\b|\bu\.s\./i;
 const REMOTE_RE = /\bremote\b/i;
+// Work-mode strings some sources put in the location field ("Hybrid",
+// "In-Office", "Full-time") carry no geography — treat as ambiguous (pass to
+// the LLM), same as an empty location, instead of hard-rejecting.
+const WORK_MODE_ONLY_RE = /^(hybrid|in[- ]?office|on[- ]?site|full[- ]?time|part[- ]?time|contract|flexible)$/i;
 
 const MAX_STALE_DAYS = 2;
 
@@ -46,7 +55,14 @@ export function classifyMetadata(posting: PostingRow): { reject: boolean; reason
     }
 
     const location = String(posting?.location ?? '').trim();
-    if (location && !NY_RE.test(location) && !REMOTE_RE.test(location)) {
+    if (
+      location &&
+      !WORK_MODE_ONLY_RE.test(location) &&
+      !NY_RE.test(location) &&
+      !SF_RE.test(location) &&
+      !US_GENERIC_RE.test(location) &&
+      !REMOTE_RE.test(location)
+    ) {
       return { reject: true, reason: REASON_LOCATION };
     }
 

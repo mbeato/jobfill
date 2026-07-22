@@ -291,3 +291,37 @@ test('isolation: one posting whose fetchJD throws does not prevent a later posti
   const survivingRow = db.query('SELECT decision FROM postings WHERE id = ?').get(surviving.id) as { decision: string };
   expect(survivingRow.decision).toBe('queued');
 });
+
+test('login-gated posting: fetchJD and classifyYoe are skipped, LLM judges on metadata-only placeholder JD', async () => {
+  const db = makeDb();
+  const row = upsertPosting(
+    db,
+    posting({ login_gated: true, url: 'https://www.workatastartup.com/jobs/999', source: 'yc' }),
+  )!;
+  let fetchCalls = 0;
+  let yoeCalls = 0;
+  let seenJd = '';
+  const deps = baseDeps({
+    fetchJD: async () => {
+      fetchCalls++;
+      throw new Error('login wall');
+    },
+    classifyYoe: () => {
+      yoeCalls++;
+      return { reject: false };
+    },
+    scoreRelevance: async (_profile, jdText) => {
+      seenJd = jdText;
+      return { relevant: true, reason: 'metadata fit' };
+    },
+  });
+
+  const counts = await runFilterPromote(db, deps);
+
+  expect(fetchCalls).toBe(0);
+  expect(yoeCalls).toBe(0);
+  expect(seenJd).toContain('login-gated');
+  expect(counts.queued).toBe(1);
+  const stored = db.query('SELECT decision FROM postings WHERE id = ?').get(row.id) as { decision: string };
+  expect(stored.decision).toBe('queued');
+});

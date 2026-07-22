@@ -454,7 +454,7 @@ async function loadPostings() {
 // LLM-derived one-liner about third-party JD content, so it's esc()-escaped here.
 function reasonLabel(code) {
   if (!code) return '—';
-  if (code === 'rules:location') return 'rejected — not NY-based or remote-friendly';
+  if (code === 'rules:location') return 'rejected — not NY/SF-based or remote-friendly';
   if (code === 'rules:title') return 'rejected — title outside target roles';
   if (code === 'rules:yoe') return 'rejected — requires more experience than target (incl. seniority-marker titles)';
   if (code === 'rules:stale') return 'rejected — posted more than 2 days ago';

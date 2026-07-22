@@ -98,21 +98,30 @@ export async function runFilterPromote(db: Database, deps: DecideDeps): Promise<
       continue;
     }
 
+    // D-10: login-gated sources (YC/Jobright) have no reachable JD — fetching
+    // would fail every sweep and strand the posting in a permanent held loop.
+    // Score them on metadata alone; the YOE rule needs JD text, so it is
+    // skipped and seniority stays covered by the title rule + LLM.
     let jd: string;
-    try {
-      jd = await deps.fetchJD(p);
-    } catch {
-      deps.recordDecision(db, p.id, 'held', 'held:jd-fetch-error');
-      counts.held++;
-      continue;
-    }
+    if (p.login_gated) {
+      jd =
+        'Job description unavailable (login-gated source). Judge relevance from the posting metadata alone (title, company, location); reject if the metadata is insufficient to establish a clear fit.';
+    } else {
+      try {
+        jd = await deps.fetchJD(p);
+      } catch {
+        deps.recordDecision(db, p.id, 'held', 'held:jd-fetch-error');
+        counts.held++;
+        continue;
+      }
 
-    const yoe = deps.classifyYoe(jd);
-    if (yoe.reject) {
-      deps.recordDecision(db, p.id, 'rejected', 'rules:yoe');
-      counts.rulesRejected++;
-      counts.byCriterion.yoe++;
-      continue;
+      const yoe = deps.classifyYoe(jd);
+      if (yoe.reject) {
+        deps.recordDecision(db, p.id, 'rejected', 'rules:yoe');
+        counts.rulesRejected++;
+        counts.byCriterion.yoe++;
+        continue;
+      }
     }
 
     try {

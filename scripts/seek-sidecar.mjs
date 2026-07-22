@@ -86,30 +86,50 @@ if (toRun.length === 0) {
 }
 
 // Best-effort DOM extraction (D-04): workatastartup.com and jobright.ai have
-// no public API and no stable contract — selectors are fragile by design and
-// are expected to need live-DOM tuning (see 09-05 checkpoint). Zero listings
+// no public API and no stable contract — selectors were live-DOM-tuned
+// 2026-07-22 (the 09-05 checkpoint's anticipated tuning pass). Zero listings
 // found is not an error; it just posts an empty array.
+//
+// YC: /jobs lists role cards. The job anchor's own text is the title; the
+// enclosing card also carries a /companies/ anchor whose text is
+// "Company (Batch)•tagline"; the meta line starts with the employment type
+// and mashes location + role category together — good enough location signal
+// for the rules/LLM without further splitting.
 async function scrapeYC(page) {
-  await page.goto('https://www.workatastartup.com/companies', { waitUntil: 'domcontentloaded' });
-  await page.waitForTimeout(3000);
+  await page.goto('https://www.workatastartup.com/jobs', { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(4000);
   const raw = await page.evaluate(() => {
-    const anchors = Array.from(document.querySelectorAll('a[href*="/companies/"]'));
-    return anchors.map((a) => {
-      const container = a.closest('[class*="company"]') || a.parentElement || a;
-      const lines = (container.innerText || '').split('\n').map((s) => s.trim()).filter(Boolean);
-      return {
-        url: a.href,
-        company: lines[0] || '',
-        title: lines[1] || '',
-        location: lines.find((l) => /,\s*[A-Z]{2}\b/.test(l)) || lines[2] || '',
-      };
-    });
+    const seen = new Set();
+    const out = [];
+    for (const a of document.querySelectorAll('a[href*="/jobs/"]')) {
+      if (!/\/jobs\/\d+/.test(a.href) || seen.has(a.href)) continue;
+      const title = (a.innerText || '').trim();
+      if (!title) continue;
+      let node = a.parentElement;
+      let card = null;
+      for (let i = 0; i < 8 && node; i++) {
+        if (node.querySelector('a[href*="/companies/"]')) {
+          card = node;
+          break;
+        }
+        node = node.parentElement;
+      }
+      const companyRaw = card ? (card.querySelector('a[href*="/companies/"]').innerText || '') : '';
+      const company = companyRaw
+        .split('•')[0]
+        .replace(/\s*\([^)]*\)\s*$/, '')
+        .trim();
+      const lines = card ? (card.innerText || '').split('\n').map((s) => s.trim()).filter(Boolean) : [];
+      const metaLine = lines.find((l) => /^(full-?time|contract|internship|intern|part-?time)/i.test(l)) || '';
+      const location = metaLine.replace(/^(full-?time|contract|internship|intern|part-?time)/i, '').trim();
+      seen.add(a.href);
+      out.push({ url: a.href, company, title, location });
+    }
+    return out;
   });
-  const seen = new Set();
   const postings = [];
   for (const r of raw) {
-    if (!r.url || !r.company || seen.has(r.url)) continue;
-    seen.add(r.url);
+    if (!r.url || !r.company) continue;
     postings.push({
       company: r.company.slice(0, 200),
       title: (r.title || 'Unknown role').slice(0, 200),
@@ -125,35 +145,69 @@ async function scrapeYC(page) {
   return postings;
 }
 
+// Jobright: /jobs/recommend cards (`a[href*="/jobs/info"]`, closest
+// [class*="job-card"]). Card text is a line stack: a noise header ("6 hours
+// ago", alumni, early-applicant), then title, company, industry, geo
+// ("San Mateo, CA"), employment type, salary, work mode, level. The "N
+// <unit>s ago" line is a source timestamp — parsed into posted_at with
+// posted_at_trusted so the D-01 freshness rule applies to Jobright.
+function parseAgo(agoLine, now) {
+  const m = /(\d+)\s*(minute|hour|day|week)s?\s+ago/i.exec(agoLine || '');
+  if (!m) return null;
+  const unitMs = { minute: 60e3, hour: 3600e3, day: 86400e3, week: 604800e3 }[m[2].toLowerCase()];
+  return new Date(now - parseInt(m[1], 10) * unitMs).toISOString();
+}
+
 async function scrapeJobright(page) {
-  await page.goto('https://jobright.ai/', { waitUntil: 'domcontentloaded' });
-  await page.waitForTimeout(3000);
+  await page.goto('https://jobright.ai/jobs/recommend', { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(6000);
   const raw = await page.evaluate(() => {
-    const anchors = Array.from(document.querySelectorAll('a[href*="/jobs/"], a[href*="/job/"]'));
-    return anchors.map((a) => {
-      const container = a.closest('[class*="job"]') || a.parentElement || a;
-      const lines = (container.innerText || '').split('\n').map((s) => s.trim()).filter(Boolean);
-      return {
+    const NOISE = [
+      /\bago$/i,
+      /alumni/i,
+      /early applicant/i,
+      /^good match$/i,
+      /^\d+%$/,
+      /^\/$/,
+      /^why this job/i,
+      /^no h1b$/i,
+      /^growth opportunities$/i,
+    ];
+    const seen = new Set();
+    const out = [];
+    for (const a of document.querySelectorAll('a[href*="/jobs/info"]')) {
+      if (!a.href || seen.has(a.href)) continue;
+      seen.add(a.href);
+      const card = a.closest('[class*="job-card"]') || a.parentElement || a;
+      const allLines = (card.innerText || '').split('\n').map((s) => s.trim()).filter(Boolean);
+      const agoLine = allLines.find((l) => /\bago$/i.test(l)) || '';
+      const lines = allLines.filter((l) => !NOISE.some((re) => re.test(l)));
+      out.push({
         url: a.href,
         title: lines[0] || '',
         company: lines[1] || '',
-        location: lines.find((l) => /,\s*[A-Z]{2}\b/.test(l)) || lines[2] || '',
-      };
-    });
+        location:
+          lines.find((l) => /,\s*[A-Z]{2}\b/.test(l)) ||
+          lines.find((l) => /\b(remote|united states)\b/i.test(l)) ||
+          '',
+        agoLine,
+      });
+    }
+    return out;
   });
-  const seen = new Set();
+  const now = Date.now();
   const postings = [];
   for (const r of raw) {
-    if (!r.url || !r.title || seen.has(r.url)) continue;
-    seen.add(r.url);
+    if (!r.url || !r.title) continue;
+    const postedAt = parseAgo(r.agoLine, now);
     postings.push({
       company: (r.company || 'Unknown').slice(0, 200),
       title: r.title.slice(0, 200),
       location: (r.location || '').slice(0, 200),
       url: r.url,
       source: 'jobright',
-      posted_at: null,
-      posted_at_trusted: false,
+      posted_at: postedAt,
+      posted_at_trusted: postedAt !== null,
       login_gated: true,
       not_fillable: false,
     });
@@ -171,9 +225,12 @@ async function postToHelper(source, postings) {
   console.log(`[seek-sidecar] ${source}: scraped ${postings.length}, posted`);
 }
 
+// --headless: scrape without opening windows (login must already be saved).
+const headless = args.includes('--headless');
+
 let ctx;
 try {
-  ctx = await chromium.launchPersistentContext(PROFILE_DIR, { headless: false });
+  ctx = await chromium.launchPersistentContext(PROFILE_DIR, { headless });
 
   // Each source is fully isolated (D-13): a throw anywhere in one source's
   // scrape-or-post path is logged and skipped, the other source still runs.

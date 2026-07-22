@@ -1,20 +1,15 @@
-// Shared full-sweep entrypoint (D-12) — also the job Phase 11's scheduler
-// drives. Sequence: POST /seek runs the fetch sources (Greenhouse/Lever/Ashby/
-// HN), then the Playwright sidecar runs the login-gated sources (YC/Jobright)
-// and POSTs its own findings to /seek/results. A missing/failing sidecar never
-// aborts the sweep (fail-open, D-13) — per-source failure is not a sweep
-// failure, so this script always exits 0 once the fetch-source POST completes.
+// Thin fire-and-poll client of POST /sweep (D-10/SCHED-02) — the CLI and the
+// dashboard button both reach the exact same helper route, which itself
+// drives runSweepJob (fetch sources, then filter/promote, then the
+// helper-owned Playwright sidecar for the login-gated sources). This script
+// never holds a single request open for the sweep's duration; each poll is a
+// fresh short fetch.
 
-import { spawn } from 'node:child_process';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const HELPER = 'http://127.0.0.1:7877';
 const TOKEN = process.env.JOBFILL_TOKEN ?? 'REDACTED-TOKEN';
 
-function printCounts(label, results) {
-  console.log(`[seek] ${label}:`);
+function printCounts(results) {
+  console.log('[seek] fetch sources:');
   for (const r of results) {
     if (r.error) console.log(`  ${r.source}: error — ${r.error}`);
     else console.log(`  ${r.source}: fetched ${r.fetched}, upserted ${r.upserted ?? 0}`);
@@ -31,37 +26,59 @@ function printFilterCounts(counts) {
   );
 }
 
-// --no-filter: discovery-only debugging (D-09 escape hatch) — skips the
-// filter->promote stage server-side via ?filter=0, no decision counts printed.
-const noFilter = process.argv.includes('--no-filter');
-const seekUrl = noFilter ? `${HELPER}/seek?filter=0` : `${HELPER}/seek`;
+function printSidecar(sidecar) {
+  if (!sidecar) return;
+  if (!sidecar.ran) {
+    console.log(`[seek] sidecar: did not run${sidecar.error ? ` (${sidecar.error})` : ''}`);
+    return;
+  }
+  console.log(`[seek] sidecar: exited with code ${sidecar.exitCode}`);
+  if (sidecar.authExpired?.length) {
+    console.log(`  auth-expired: ${sidecar.authExpired.join(', ')}`);
+  }
+}
 
-// The filtering sweep holds this request open for up to LLM_CAP × ~60s of
-// relevance calls; Bun's default 5-minute fetch timeout would abort it mid-run.
-const res = await fetch(seekUrl, {
+const startRes = await fetch(`${HELPER}/sweep`, {
   method: 'POST',
   headers: { 'x-jobfill-token': TOKEN },
-  timeout: false,
-  signal: AbortSignal.timeout(3 * 60 * 60 * 1000),
 });
-if (!res.ok) {
-  console.error(`[seek] POST /seek failed: HTTP ${res.status}`);
+if (startRes.status === 409) {
+  const body = await startRes.json();
+  console.log(`[seek] sweep already running (run ${body.runId})`);
+  process.exit(0);
+}
+if (!startRes.ok) {
+  console.error(`[seek] POST /sweep failed: HTTP ${startRes.status}`);
   process.exit(1);
 }
-const body = await res.json();
-printCounts('fetch sources', body.fetch);
-if (body.filter) printFilterCounts(body.filter);
+const { id } = await startRes.json();
+console.log(`[seek] sweep started (run ${id})`);
 
-try {
-  const sidecarPath = join(ROOT, 'scripts', 'seek-sidecar.mjs');
-  const exitCode = await new Promise((resolve, reject) => {
-    const proc = spawn(process.execPath, [sidecarPath], { stdio: 'inherit' });
-    proc.on('error', reject);
-    proc.on('exit', code => resolve(code));
-  });
-  console.log(`[seek] sidecar exited with code ${exitCode}`);
-} catch (err) {
-  console.error(`[seek] sidecar did not run (${err?.message ?? err}) — continuing, fetch sources already swept`);
+const POLL_INTERVAL_MS = 3 * 1000;
+const MAX_POLL_MS = 4 * 60 * 60 * 1000;
+const deadline = Date.now() + MAX_POLL_MS;
+
+let row = null;
+while (Date.now() < deadline) {
+  const res = await fetch(`${HELPER}/sweeps/${id}`, { headers: { 'x-jobfill-token': TOKEN } });
+  if (!res.ok) {
+    console.error(`[seek] GET /sweeps/${id} failed: HTTP ${res.status}`);
+    process.exit(1);
+  }
+  row = await res.json();
+  if (row.status !== 'running') break;
+  await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
 }
 
-console.log('[seek] sweep complete');
+if (!row || row.status === 'running') {
+  console.error(`[seek] timed out waiting for run ${id} to finish`);
+  process.exit(1);
+}
+
+const detail = row.detail ?? {};
+if (detail.fetch) printCounts(detail.fetch);
+if (detail.filter) printFilterCounts(detail.filter);
+printSidecar(detail.sidecar);
+
+console.log(`[seek] sweep ${row.status === 'ok' ? 'complete' : 'failed'}`);
+if (row.status !== 'ok') process.exit(1);

@@ -85,6 +85,30 @@ if (toRun.length === 0) {
   process.exit(0);
 }
 
+// Auth-expiry detection (D-16, 11-05): a POSITIVE signal only — Pitfall 7
+// forbids inferring expiry from zero scraped results (a slow day looks
+// identical to a logged-out session). Two independent signals, either firing
+// is enough: (1) page.url() reflects a post-redirect login path/host, (2) a
+// login-form DOM marker (password input, or a visible "sign in"/"log in"
+// control) is present. The exact logged-out URL/DOM is [ASSUMED] (11-RESEARCH
+// A1, not live-verified against a real logged-out session) so both signals
+// are checked defensively. Never throws — a failed DOM check is not itself a
+// signal, it just means this check found nothing (stays logged-in).
+async function detectAuthExpired(page, loginUrlRe) {
+  if (loginUrlRe.test(page.url())) return true;
+  try {
+    return await page.evaluate(() => {
+      if (document.querySelector('input[type="password"]')) return true;
+      const control = Array.from(document.querySelectorAll('a, button')).find(
+        (el) => /sign in|log in/i.test((el.textContent || '').trim()) && el.offsetParent !== null,
+      );
+      return Boolean(control);
+    });
+  } catch {
+    return false;
+  }
+}
+
 // Best-effort DOM extraction (D-04): workatastartup.com and jobright.ai have
 // no public API and no stable contract — selectors were live-DOM-tuned
 // 2026-07-22 (the 09-05 checkpoint's anticipated tuning pass). Zero listings
@@ -97,6 +121,10 @@ if (toRun.length === 0) {
 // for the rules/LLM without further splitting.
 async function scrapeYC(page) {
   await page.goto('https://www.workatastartup.com/jobs', { waitUntil: 'domcontentloaded' });
+  if (await detectAuthExpired(page, /\/(login|sign_in)\b|^https:\/\/account\./i)) {
+    console.log('[auth-expired] yc');
+    return [];
+  }
   await page.waitForTimeout(4000);
   const raw = await page.evaluate(() => {
     const seen = new Set();
@@ -160,6 +188,10 @@ function parseAgo(agoLine, now) {
 
 async function scrapeJobright(page) {
   await page.goto('https://jobright.ai/jobs/recommend', { waitUntil: 'domcontentloaded' });
+  if (await detectAuthExpired(page, /\/(login|sign-in)\b/i)) {
+    console.log('[auth-expired] jobright');
+    return [];
+  }
   await page.waitForTimeout(6000);
   const raw = await page.evaluate(() => {
     const NOISE = [

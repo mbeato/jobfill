@@ -1,5 +1,7 @@
 const FIELD_ATTR = 'data-jobfill-id';
-const SKIP_TYPES = new Set(['hidden', 'submit', 'button', 'reset', 'image']);
+// 'password': never inventory login-wall credential fields — jobfill has no
+// business filling passwords, and a login page should scrape as empty.
+const SKIP_TYPES = new Set(['hidden', 'submit', 'button', 'reset', 'image', 'password']);
 
 let nextId = 0;
 const registry = new Map(); // id -> { el } | { els }

@@ -83,15 +83,18 @@ await opts.close();
 // Step 2: navigate to the posting in its own tab
 const postingPage = await ctx.newPage();
 await postingPage.goto(row.url, { waitUntil: 'domcontentloaded' });
-// Step 3: sanity check — a real form rendered (SPA may lag; poll up to 60s)
+// Step 3: sanity check — a real form rendered (SPA may lag; poll up to 60s).
+// Visible controls only: login walls and SPA skeletons carry hidden inputs
+// (CSRF tokens, framework state) that would pass a raw count.
+const VISIBLE_FIELDS = 'input:visible:not([type=hidden]), textarea:visible, select:visible';
 let formOk = false;
 for (let i = 0; i < 20 && !formOk; i++) {
   await postingPage.waitForTimeout(3000);
-  formOk = (await postingPage.locator('input, textarea, select').count()) > 2;
+  formOk = (await postingPage.locator(VISIBLE_FIELDS).count()) > 2;
 }
 if (!formOk) {
   const title = await postingPage.title();
-  const inputs = await postingPage.locator('input, textarea, select').count();
+  const inputs = await postingPage.locator(VISIBLE_FIELDS).count();
   const excerpt = (await postingPage.locator('body').innerText().catch(() => '')).slice(0, 300).replace(/\s+/g, ' ');
   console.log(`[runner] DIAG title="${title}" inputs=${inputs} body="${excerpt}"`);
   console.log('[runner] no real form rendered (login wall / CAPTCHA / empty SPA?) — stopping for the operator, browser left open');

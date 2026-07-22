@@ -19,7 +19,7 @@ const REASON_YOE = 'rules:yoe';
 const BARE_SENIORITY_RE = /\b(senior|principal|sr\.?|vp|director|head of)\b/i;
 // "staff"/"lead" are ambiguous alone (e.g. "Member of Technical Staff" must survive),
 // so they only count as seniority markers when adjacent to an engineering role word.
-const STAFF_ENGINEER_RE = /\bstaff\s+(?:engineer|developer)\b/i;
+const STAFF_ENGINEER_RE = /\bstaff\s+(?:software\s+)?(?:engineer|developer)\b/i;
 const LEAD_ENGINEER_RE = /\blead\s+(?:software\s+)?(?:engineer|developer)\b|\bengineering\s+lead\b/i;
 
 const NON_ENGINEERING_RE =

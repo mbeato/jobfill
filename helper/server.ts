@@ -122,9 +122,14 @@ try {
   }
 }
 
-// Partial UNIQUE index: covers every backfilled row, exempts only the rare
-// oldest-wins collision-duplicate rows intentionally left NULL above.
-db.run('CREATE UNIQUE INDEX IF NOT EXISTS idx_queue_url_key ON queue(url_key) WHERE url_key IS NOT NULL');
+// FULL UNIQUE index — must match queue.ts's fresh-create `url_key TEXT UNIQUE`
+// column constraint, because insertQueueEntryFromPosting's bare
+// `ON CONFLICT(url_key)` target does not match a partial index (SQLite throws
+// "ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint").
+// NULL url_keys (oldest-wins collision dupes) are still safe: SQLite treats
+// NULLs as distinct in unique indexes, so no partial WHERE is needed.
+db.run('DROP INDEX IF EXISTS idx_queue_url_key');
+db.run('CREATE UNIQUE INDEX IF NOT EXISTS idx_queue_url_key_full ON queue(url_key)');
 
 // D-15 last-sweep summary store: a tiny key/value table, one JSON row.
 db.run('CREATE TABLE IF NOT EXISTS seek_meta (key TEXT PRIMARY KEY, value TEXT)');

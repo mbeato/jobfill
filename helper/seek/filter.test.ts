@@ -179,3 +179,8 @@ test('classifyYoe never throws on null/garbage input and survives', () => {
   expect(() => classifyYoe(undefined as unknown as string)).not.toThrow();
   expect(classifyYoe(undefined as unknown as string)).toEqual({ reject: false });
 });
+
+test('classifyMetadata rejects "Staff Software Engineer" as rules:title (staff + intervening software)', () => {
+  const result = classifyMetadata(mkPosting({ title: 'Staff Software Engineer, Government' }));
+  expect(result).toEqual({ reject: true, reason: 'rules:title' });
+});

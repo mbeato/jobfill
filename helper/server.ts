@@ -7,6 +7,15 @@ import { normalizeQuestion, matchLibrary, selectFewShot, groupByQuestion, type A
 import { createFailuresTable, insertFailures, listFailures, type FailureRecordInput } from './failures';
 import { createQueueTable, insertQueueEntry, updateQueueStatus, listQueue, InvalidQueueStatusError } from './queue';
 import { mapViaCLI } from './mapping';
+import { normalizeUrl } from './seek/normalize';
+import { createPostingsTable, upsertPosting } from './seek/postings';
+import { loadSeekConfig } from './seek/config';
+import { runSweep } from './seek/sweep';
+import { fetchGreenhouse } from './seek/greenhouse';
+import { fetchLever } from './seek/lever';
+import { fetchAshby } from './seek/ashby';
+import { fetchHNPostings } from './seek/hn';
+import type { SourceName } from './seek/types';
 
 const PORT = 7877;
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -54,11 +63,14 @@ db.run(`CREATE TABLE IF NOT EXISTS answers (
 
 createFailuresTable(db);
 createQueueTable(db);
+createPostingsTable(db);
 
 // Shared secret with the extension (must match HELPER_TOKEN in extension/background.js).
 // No CORS headers are served: cross-origin pages can neither read responses nor pass
 // preflight, so only the extension (token) and the same-origin dashboard get through.
 const TOKEN = 'REDACTED-TOKEN';
+
+const SEEK_SOURCES: Set<SourceName> = new Set(['greenhouse', 'lever', 'ashby', 'hn', 'yc', 'jobright']);
 
 function authorized(req: Request): boolean {
   if (req.headers.get('x-jobfill-token') === TOKEN) return true;
@@ -83,17 +95,6 @@ function parseSummary(stored: string): string[] | null {
     return Array.isArray(arr) && arr.length ? arr : null;
   } catch {
     return null;
-  }
-}
-
-function normalizeUrl(u: string): string {
-  const raw = String(u ?? '').trim().slice(0, 300);
-  try {
-    const parsed = new URL(raw);
-    const path = parsed.pathname.replace(/\/$/, '');
-    return `${parsed.host.toLowerCase()}${path}`;
-  } catch {
-    return raw;
   }
 }
 
@@ -351,6 +352,23 @@ Bun.serve({
           if (e instanceof InvalidQueueStatusError) return json({ error: e.message }, 400);
           throw e;
         }
+      }
+      if (pathname === '/seek' && req.method === 'POST') {
+        const config = await loadSeekConfig();
+        return json(
+          await runSweep(db, config, { fetchGreenhouse, fetchLever, fetchAshby, fetchHNPostings, upsertPosting }),
+        );
+      }
+      if (pathname === '/seek/results' && req.method === 'POST') {
+        const b = await req.json();
+        const source = b?.source;
+        if (!SEEK_SOURCES.has(source)) return json({ error: 'invalid source' }, 400);
+        const postings = Array.isArray(b?.postings) ? b.postings : [];
+        let upserted = 0;
+        for (const p of postings) {
+          if (upsertPosting(db, { ...p, source })) upserted++;
+        }
+        return json({ source, upserted });
       }
       if (pathname === '/tailor' && req.method === 'POST') {
         return json(await tailor(await req.json()));

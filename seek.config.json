@@ -1,0 +1,60 @@
+{
+  "greenhouse": {
+    "enabled": true,
+    "tokens": [
+      "stripe",
+      "airbnb",
+      "robinhood",
+      "datadog",
+      "gitlab",
+      "pinterest",
+      "lyft",
+      "affirm",
+      "squarespace",
+      "coinbase",
+      "betterment",
+      "cloudflare",
+      "chime",
+      "peloton",
+      "toast",
+      "twitch",
+      "mongodb",
+      "justworks"
+    ]
+  },
+  "lever": {
+    "enabled": true,
+    "tokens": [
+      "palantir",
+      "wealthfront",
+      "gopuff"
+    ]
+  },
+  "ashby": {
+    "enabled": true,
+    "tokens": [
+      "ramp",
+      "notion",
+      "linear",
+      "benchling",
+      "watershed",
+      "openai",
+      "cohere",
+      "harvey",
+      "sierra",
+      "attio",
+      "decagon",
+      "hightouch",
+      "modal"
+    ]
+  },
+  "hn": {
+    "enabled": true
+  },
+  "yc": {
+    "enabled": true
+  },
+  "jobright": {
+    "enabled": true
+  }
+}

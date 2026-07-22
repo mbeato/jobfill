@@ -67,3 +67,84 @@ export function extractApplicationUrl(text: string): { url: string; fromComment:
     return { url: '', fromComment: false };
   }
 }
+
+interface AlgoliaSearchHit {
+  objectID: string;
+  title: string;
+  created_at_i: number;
+}
+
+interface AlgoliaComment {
+  id: number;
+  text: string;
+  created_at_i: number;
+  author?: string;
+}
+
+const WHO_IS_HIRING_RE = /who is hiring/i;
+
+/**
+ * Finds the current month's "Ask HN: Who is hiring?" thread via the Algolia API
+ * and returns its objectID. Throws a descriptive Error on a non-2xx response or
+ * when no matching hit is found (Algolia results are already sorted by date).
+ */
+export async function findCurrentHNThread(fetchImpl: typeof fetch = fetch): Promise<string> {
+  const res = await fetchImpl(
+    'https://hn.algolia.com/api/v1/search_by_date?tags=story,author_whoishiring&query=hiring',
+  );
+  if (!res.ok) {
+    throw new Error(`Algolia search_by_date failed: ${res.status}`);
+  }
+  const body = (await res.json()) as { hits?: AlgoliaSearchHit[] };
+  const hit = (body.hits ?? []).find(h => WHO_IS_HIRING_RE.test(h.title ?? ''));
+  if (!hit) {
+    throw new Error('No "Who is hiring?" thread found in Algolia search results');
+  }
+  return hit.objectID;
+}
+
+/**
+ * Fetches the current month's HN Who's Hiring thread, comment-level
+ * freshness-filters it, and parses each surviving top-level comment into a
+ * candidate NormalizedPosting (D-08/D-09). Throws on fetch/parse failure of
+ * the Algolia request itself; the /seek route isolates per-source failure.
+ */
+export async function fetchHNPostings(
+  opts: { maxAgeDays?: number } = {},
+  fetchImpl: typeof fetch = fetch,
+): Promise<NormalizedPosting[]> {
+  const maxAgeDays = opts.maxAgeDays ?? 45;
+  const objectID = await findCurrentHNThread(fetchImpl);
+  const res = await fetchImpl(`https://hn.algolia.com/api/v1/items/${objectID}`);
+  if (!res.ok) {
+    throw new Error(`Algolia items fetch failed: ${res.status}`);
+  }
+  const body = (await res.json()) as { children?: AlgoliaComment[] };
+  const children = body.children ?? [];
+  const cutoff = Date.now() / 1000 - maxAgeDays * 24 * 60 * 60;
+
+  const postings: NormalizedPosting[] = [];
+  for (const comment of children) {
+    if (!comment || typeof comment.created_at_i !== 'number' || comment.created_at_i < cutoff) continue;
+    const text = comment.text ?? '';
+    const parsed = parseHNComment(text);
+    const applyUrl = extractApplicationUrl(text);
+    const permalink = `https://news.ycombinator.com/item?id=${comment.id}`;
+    postings.push({
+      company: parsed.company,
+      title: parsed.role,
+      location: parsed.location,
+      url: applyUrl.fromComment ? applyUrl.url : permalink,
+      source: 'hn',
+      posted_at: new Date(comment.created_at_i * 1000).toISOString(),
+      posted_at_trusted: true,
+      login_gated: false,
+      // D-09: no recognizable apply link -> fall back to the (inert) HN
+      // permalink and flag not_fillable so batch fill skips it.
+      ...(applyUrl.fromComment ? {} : { not_fillable: true }),
+      // D-08: non-conforming comment kept, but flagged low-confidence.
+      ...(parsed.confident ? {} : { low_confidence: true }),
+    });
+  }
+  return postings;
+}

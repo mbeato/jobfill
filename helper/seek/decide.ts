@@ -105,7 +105,7 @@ export async function runFilterPromote(db: Database, deps: DecideDeps): Promise<
     let jd: string;
     if (p.login_gated) {
       jd =
-        'Job description unavailable (login-gated source). Judge relevance from the posting metadata alone (title, company, location); reject if the metadata is insufficient to establish a clear fit.';
+        'Job description unavailable (login-gated source; a human reviews every queued posting before applying). Judge from the title, company, and location alone: queue when the title matches the target roles with no seniority markers and the location is acceptable; reject only on a visible mismatch (seniority-marked or non-engineering title, out-of-market location). Do NOT reject merely because the description is missing — missing-description uncertainty is acceptable for these postings.';
     } else {
       try {
         jd = await deps.fetchJD(p);

@@ -112,7 +112,20 @@ if (!formOk) {
   let done = false;
   while (!done && Date.now() - t0 < BUDGET_MS) {
     await new Promise((r) => setTimeout(r, POLL_MS));
-    const cur = await q();
+    // Fail-open (docs/runner-protocol.md): a transient helper hiccup or a vanished
+    // row must never crash the process — that would kill the headed browser and
+    // destroy the filled form the operator is meant to review.
+    let cur;
+    try {
+      cur = await q();
+    } catch (e) {
+      console.log(`[runner] poll failed (helper hiccup?) — retrying: ${e.message}`);
+      continue;
+    }
+    if (!cur) {
+      console.log(`[runner] row ${queueId} vanished from queue — stopping poll; browser left open`);
+      break;
+    }
     if (cur.status !== last) { console.log(`[runner] status: ${cur.status}`); last = cur.status; }
     if (cur.status !== 'queued' && cur.status !== 'filling') {
       console.log('[runner] RESULT ' + JSON.stringify(cur));

@@ -87,6 +87,20 @@ test('oversized company/title/location text is truncated to MAX_TEXT at the writ
   expect(row!.title.length).toBe(2000);
 });
 
+test('posted_at is coerced to a bounded string (or null) at the write boundary', () => {
+  const db = makeDb();
+  const row = upsertPosting(db, posting({ posted_at: 'z'.repeat(500) }));
+  expect(row!.posted_at!.length).toBe(64);
+  // Remote JSON is untyped — a non-string value must not make the sqlite bind throw.
+  const coerced = upsertPosting(
+    db,
+    posting({ url: 'https://boards.greenhouse.io/acme/jobs/9', posted_at: { nested: true } as unknown as string }),
+  );
+  expect(typeof coerced!.posted_at).toBe('string');
+  const kept = upsertPosting(db, posting({ url: 'https://boards.greenhouse.io/acme/jobs/10', posted_at: null }));
+  expect(kept!.posted_at).toBeNull();
+});
+
 test('an XSS-shaped title string is stored as inert bounded text, never executed', () => {
   const db = makeDb();
   const xssTitle = '<img src=x onerror=alert(1)>';

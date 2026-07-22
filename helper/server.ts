@@ -369,7 +369,8 @@ Bun.serve({
         const b = await req.json();
         const source = b?.source;
         if (!GATED_SOURCES.has(source)) return json({ error: 'invalid source' }, 400);
-        const postings = Array.isArray(b?.postings) ? b.postings : [];
+        // Cap how many rows one request can write to the staging table.
+        const postings = (Array.isArray(b?.postings) ? b.postings : []).slice(0, 5000);
         let upserted = 0;
         for (const p of postings) {
           if (upsertPosting(db, { ...p, source, login_gated: true })) upserted++;

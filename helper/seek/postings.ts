@@ -99,7 +99,7 @@ export function upsertPosting(db: Database, p: NormalizedPosting): PostingRow | 
       String(p.title ?? '').slice(0, MAX_TEXT),
       String(p.location ?? '').slice(0, MAX_TEXT),
       p.source,
-      p.posted_at ?? null,
+      p.posted_at == null ? null : String(p.posted_at).slice(0, 64),
       p.posted_at_trusted ? 1 : 0,
       p.login_gated ? 1 : 0,
       p.not_fillable ? 1 : 0,

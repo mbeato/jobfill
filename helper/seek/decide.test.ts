@@ -3,7 +3,7 @@ import { Database } from 'bun:sqlite';
 import { createPostingsTable, upsertPosting, recordDecision, listPostingsToDecide } from './postings';
 import { createQueueTable } from '../queue';
 import { promotePosting } from './promote';
-import { runFilterPromote, type DecideDeps } from './decide';
+import { runFilterPromote, LLM_CAP, type DecideDeps } from './decide';
 import type { NormalizedPosting } from './types';
 
 function makeDb(): Database {
@@ -58,6 +58,23 @@ beforeEach(() => {
 afterEach(() => {
   if (ORIGINAL_CAP === undefined) delete process.env.SEEK_LLM_CAP;
   else process.env.SEEK_LLM_CAP = ORIGINAL_CAP;
+});
+
+test('LLM_CAP defaults to 100 when SEEK_LLM_CAP is unset', () => {
+  expect(LLM_CAP()).toBe(100);
+});
+
+test('LLM_CAP reads a valid numeric SEEK_LLM_CAP', () => {
+  process.env.SEEK_LLM_CAP = '5';
+  expect(LLM_CAP()).toBe(5);
+});
+
+// WR-02: a non-numeric SEEK_LLM_CAP must fail closed to the safe default,
+// not silently become NaN (every `>= NaN` comparison is false, which would
+// make the cap check never trip and process the entire backlog unbounded).
+test('LLM_CAP falls back to 100 on a non-numeric SEEK_LLM_CAP', () => {
+  process.env.SEEK_LLM_CAP = 'unlimited';
+  expect(LLM_CAP()).toBe(100);
 });
 
 test('metadata reject: fetchJD and scoreRelevance are never called, decision is rejected with the rules reason', async () => {

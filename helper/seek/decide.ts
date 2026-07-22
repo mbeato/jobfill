@@ -15,8 +15,12 @@ import type { QueueRow } from '../queue';
 // Read fresh on every call (not frozen at import) so a sweep-to-sweep env
 // change — or a test setting process.env.SEEK_LLM_CAP before calling — takes
 // effect without a process restart, mirroring config.ts's fresh-read style.
+// WR-02: fail closed (not open) on a misconfigured env var — a non-numeric
+// SEEK_LLM_CAP (e.g. a typo) must fall back to the safe default, not silently
+// become NaN (every `>= NaN` comparison is false, so the cap would never trip).
 export function LLM_CAP(): number {
-  return Number(process.env.SEEK_LLM_CAP ?? 100);
+  const n = Number(process.env.SEEK_LLM_CAP ?? 100);
+  return Number.isFinite(n) && n >= 0 ? n : 100;
 }
 
 export interface DecideDeps {

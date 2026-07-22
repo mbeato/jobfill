@@ -70,7 +70,13 @@ createPostingsTable(db);
 // preflight, so only the extension (token) and the same-origin dashboard get through.
 const TOKEN = 'REDACTED-TOKEN';
 
-const SEEK_SOURCES: Set<SourceName> = new Set(['greenhouse', 'lever', 'ashby', 'hn', 'yc', 'jobright']);
+// Only the login-gated sidecar sources may POST /seek/results — the fetch
+// sources (greenhouse/lever/ashby/hn) are swept in-process via POST /seek and
+// never cross this boundary. login_gated is re-asserted server-side in the
+// handler: the "all YC/Jobright postings are login_gated" invariant (Phase 12
+// reads this flag to decide what never to auto-fill) must hold at the
+// persistence boundary regardless of what the client sent.
+const GATED_SOURCES: Set<SourceName> = new Set(['yc', 'jobright']);
 
 function authorized(req: Request): boolean {
   if (req.headers.get('x-jobfill-token') === TOKEN) return true;
@@ -362,11 +368,11 @@ Bun.serve({
       if (pathname === '/seek/results' && req.method === 'POST') {
         const b = await req.json();
         const source = b?.source;
-        if (!SEEK_SOURCES.has(source)) return json({ error: 'invalid source' }, 400);
+        if (!GATED_SOURCES.has(source)) return json({ error: 'invalid source' }, 400);
         const postings = Array.isArray(b?.postings) ? b.postings : [];
         let upserted = 0;
         for (const p of postings) {
-          if (upsertPosting(db, { ...p, source })) upserted++;
+          if (upsertPosting(db, { ...p, source, login_gated: true })) upserted++;
         }
         return json({ source, upserted });
       }

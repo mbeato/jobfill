@@ -1,6 +1,6 @@
 import { test, expect } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { createPostingsTable, upsertPosting, listPostings } from './postings';
+import { createPostingsTable, upsertPosting, listPostings, recordDecision, listPostingsToDecide, DECISION_VALUES } from './postings';
 import type { NormalizedPosting } from './types';
 
 function makeDb(): Database {
@@ -131,4 +131,58 @@ test('listPostings returns rows newest-first with boolean flags surfaced', () =>
   expect(rows[0].not_fillable).toBe(true);
   expect(rows[0].low_confidence).toBe(true);
   expect(rows[0].posted_at_trusted).toBe(true);
+});
+
+test('recordDecision (D-13) writes decision/decision_reason/decided_at and returns the updated row', () => {
+  const db = makeDb();
+  const row = upsertPosting(db, posting())!;
+  expect(row.decision).toBeNull();
+  const updated = recordDecision(db, row.id, 'rejected', 'rules:yoe');
+  expect(updated!.decision).toBe('rejected');
+  expect(updated!.decision_reason).toBe('rules:yoe');
+  expect(updated!.decided_at).not.toBeNull();
+});
+
+test('recordDecision throws on a decision value outside the allowlist', () => {
+  const db = makeDb();
+  const row = upsertPosting(db, posting())!;
+  expect(() => recordDecision(db, row.id, 'maybe', 'rules:yoe')).toThrow();
+  expect(DECISION_VALUES.has('queued')).toBe(true);
+  expect(DECISION_VALUES.has('rejected')).toBe(true);
+  expect(DECISION_VALUES.has('held')).toBe(true);
+  expect(DECISION_VALUES.has('maybe')).toBe(false);
+});
+
+test('recordDecision slices an overlong/XSS-shaped reason to MAX_TEXT before write', () => {
+  const db = makeDb();
+  const row = upsertPosting(db, posting())!;
+  const longReason = `<img src=x onerror=alert(1)>${'x'.repeat(5000)}`;
+  const updated = recordDecision(db, row.id, 'held', longReason);
+  expect(updated!.decision_reason!.length).toBe(2000);
+});
+
+test('listPostingsToDecide returns only null/held decisions, oldest-fetched-first, and honors limit', () => {
+  const db = makeDb();
+  const a = upsertPosting(db, posting({ url: 'https://boards.greenhouse.io/acme/jobs/1' }))!;
+  const b = upsertPosting(db, posting({ url: 'https://boards.greenhouse.io/acme/jobs/2' }))!;
+  const c = upsertPosting(db, posting({ url: 'https://boards.greenhouse.io/acme/jobs/3' }))!;
+  db.query(`UPDATE postings SET fetched_at = datetime('now', '-2 hour') WHERE id = ?`).run(a.id);
+  db.query(`UPDATE postings SET fetched_at = datetime('now', '-1 hour') WHERE id = ?`).run(b.id);
+  recordDecision(db, a.id, 'held', 'llm:hold-for-retry');
+  recordDecision(db, c.id, 'queued', 'llm:relevant');
+  const rows = listPostingsToDecide(db);
+  expect(rows.map(r => r.id)).toEqual([a.id, b.id]);
+  const limited = listPostingsToDecide(db, 1);
+  expect(limited.map(r => r.id)).toEqual([a.id]);
+});
+
+test('upsertPosting re-run on a decided posting never clobbers decision/decision_reason/decided_at (D-14)', () => {
+  const db = makeDb();
+  const row = upsertPosting(db, posting())!;
+  const decided = recordDecision(db, row.id, 'rejected', 'rules:location')!;
+  const reupserted = upsertPosting(db, posting({ company: 'Acme Renamed' }))!;
+  expect(reupserted.decision).toBe('rejected');
+  expect(reupserted.decision_reason).toBe('rules:location');
+  expect(reupserted.decided_at).toBe(decided.decided_at);
+  expect(reupserted.company).toBe('Acme Renamed');
 });

@@ -11,7 +11,7 @@
 // fields, one fill in flight, no auto-retry.
 
 import { chromium } from 'playwright';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -25,9 +25,11 @@ const BUDGET_MS = 10 * 60_000;
 
 const args = process.argv.slice(2);
 const queueId = Number(args[0]);
-const resumePath = args.includes('--resume')
-  ? args[args.indexOf('--resume') + 1]
-  : '/Users/you/resume/resume.pdf';
+const resumeFlag = args.indexOf('--resume');
+const explicitResume = resumeFlag !== -1;
+if (explicitResume && !args[resumeFlag + 1]) { console.error('--resume requires a path'); process.exit(1); }
+const resumePath = explicitResume ? args[resumeFlag + 1] : '/Users/you/resume/resume.pdf';
+if (explicitResume && !existsSync(resumePath)) { console.error(`--resume file not found: ${resumePath}`); process.exit(1); }
 if (!queueId) { console.error('usage: node scripts/runner.mjs <queueId> [--resume pdf]'); process.exit(1); }
 
 const q = async () => {
@@ -58,11 +60,13 @@ console.log(`[runner] extension loaded: ${extId}`);
 const opts = await ctx.newPage();
 await opts.goto(`chrome-extension://${extId}/options/options.html`, { waitUntil: 'domcontentloaded' });
 const state = await opts.evaluate(() => chrome.storage.local.get(['apiKey', 'profile', 'resume']));
-if (!state.profile || !state.resume) {
+// An explicit --resume is authoritative: reseed even if storage already holds a
+// resume from a previous run (otherwise the flag is silently a no-op forever).
+if (!state.profile || !state.resume || explicitResume) {
   const profile = JSON.parse(readFileSync(join(ROOT, 'profile.local.json'), 'utf8'));
   const resume = { name: basename(resumePath), b64: readFileSync(resumePath).toString('base64') };
   await opts.evaluate((seed) => chrome.storage.local.set(seed), { profile, resume });
-  console.log('[runner] seeded profile + resume into extension storage');
+  console.log(`[runner] seeded profile + resume (${basename(resumePath)}) into extension storage`);
   await opts.reload();
 }
 if (!state.apiKey) {

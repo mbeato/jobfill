@@ -1,6 +1,22 @@
 import { test, expect } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { createQueueTable, insertQueueEntry, updateQueueStatus, listQueue, QUEUE_STATUSES } from './queue';
+import { createQueueTable, insertQueueEntry, updateQueueStatus, listQueue, QUEUE_STATUSES, insertQueueEntryFromPosting } from './queue';
+import { createPostingsTable, upsertPosting } from './seek/postings';
+import type { NormalizedPosting } from './seek/types';
+
+function posting(overrides: Partial<NormalizedPosting> = {}) {
+  return {
+    company: 'Acme',
+    title: 'Fullstack SWE',
+    location: 'New York, NY',
+    url: 'https://boards.greenhouse.io/acme/jobs/1',
+    source: 'greenhouse' as const,
+    posted_at: '2026-07-20',
+    posted_at_trusted: true,
+    login_gated: false,
+    ...overrides,
+  };
+}
 
 function makeDb(): Database {
   const db = new Database(':memory:');
@@ -91,4 +107,58 @@ test('listQueue returns rows newest first', () => {
   const rows = listQueue(db);
   expect(rows[0].id).toBe(b.id);
   expect(rows[1].id).toBe(a.id);
+});
+
+function makePostingsDb(): Database {
+  const db = new Database(':memory:');
+  createQueueTable(db);
+  createPostingsTable(db);
+  return db;
+}
+
+test('insertQueueEntryFromPosting (D-10) maps posting fields onto a queued row', () => {
+  const db = makePostingsDb();
+  const p = upsertPosting(db, posting())!;
+  const row = insertQueueEntryFromPosting(db, p);
+  expect(row!.status).toBe('queued');
+  expect(row!.company).toBe('Acme');
+  expect(row!.role).toBe('Fullstack SWE');
+  expect(row!.url_key).toBe('boards.greenhouse.io/acme/jobs/1');
+});
+
+test('a second insertQueueEntryFromPosting with the same url_key returns null (D-11 dedupe), first row untouched', () => {
+  const db = makePostingsDb();
+  const p = upsertPosting(db, posting())!;
+  const first = insertQueueEntryFromPosting(db, p);
+  const second = insertQueueEntryFromPosting(db, p);
+  expect(second).toBeNull();
+  const rows = listQueue(db);
+  expect(rows.length).toBe(1);
+  expect(rows[0].id).toBe(first!.id);
+});
+
+test('insertQueueEntryFromPosting rejects a non-http(s) posting url', () => {
+  const db = makePostingsDb();
+  const p = { ...upsertPosting(db, posting())!, url: 'javascript:alert(1)' };
+  expect(insertQueueEntryFromPosting(db, p)).toBeNull();
+});
+
+test('insertQueueEntryFromPosting carries login_gated/not_fillable through as 1 (D-10)', () => {
+  const db = makePostingsDb();
+  const p = upsertPosting(
+    db,
+    posting({ url: 'https://www.workatastartup.com/jobs/123', source: 'yc', login_gated: true, not_fillable: true }),
+  )!;
+  const row = insertQueueEntryFromPosting(db, p);
+  expect(row!.login_gated).toBe(1);
+  expect(row!.not_fillable).toBe(1);
+});
+
+test('legacy insertQueueEntry rows (NULL url_key) coexist with each other under the UNIQUE constraint', () => {
+  const db = makeDb();
+  const a = insertQueueEntry(db, 'https://x.com/a');
+  const b = insertQueueEntry(db, 'https://x.com/b');
+  const rows = listQueue(db);
+  expect(rows.length).toBe(2);
+  expect(a.id).not.toBe(b.id);
 });

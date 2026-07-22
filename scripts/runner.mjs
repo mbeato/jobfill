@@ -99,9 +99,16 @@ if (!formOk) {
   const dash = await ctx.newPage();
   await dash.goto(`${HELPER}/`, { waitUntil: 'domcontentloaded' });
 
-  // Step 5: fire-and-forget trigger from the dashboard page context
+  // Step 5: fire the trigger from the dashboard page context. Non-blocking — the
+  // evaluate returns immediately ('fired'); the sendMessage callback reports back
+  // later through an exposed binding. Duplicate and trigger-rejection outcomes
+  // exist ONLY on this callback (they occur before the 'filling' PATCH), so
+  // discarding it means a 10-minute TIMEOUT with no cause.
+  let triggerResp = null;
+  await dash.exposeFunction('__runnerResult', (r) => { triggerResp = r; });
   await dash.evaluate(([id, url, qid]) => {
-    chrome.runtime.sendMessage(id, { type: 'jobfill.trigger', url, queueId: qid }, () => void chrome.runtime.lastError);
+    chrome.runtime.sendMessage(id, { type: 'jobfill.trigger', url, queueId: qid },
+      (resp) => window.__runnerResult(chrome.runtime.lastError ? { state: 'error', error: chrome.runtime.lastError.message } : resp));
     return 'fired';
   }, [extId, row.url, queueId]);
   console.log('[runner] trigger fired; polling queue');
@@ -112,6 +119,15 @@ if (!formOk) {
   let done = false;
   while (!done && Date.now() - t0 < BUDGET_MS) {
     await new Promise((r) => setTimeout(r, POLL_MS));
+    // The trigger callback carries outcomes that never reach the queue row
+    // (duplicate early-return, resolveTargetTab rejection) — end the poll with
+    // the real reason instead of burning the full budget into a fake TIMEOUT.
+    if (triggerResp?.state === 'duplicate' || triggerResp?.state === 'error') {
+      console.log('[runner] TRIGGER ' + JSON.stringify(triggerResp));
+      console.log(`[runner] trigger ended as '${triggerResp.state}' — row stays queued; stopping poll, browser left open`);
+      done = true;
+      break;
+    }
     // Fail-open (docs/runner-protocol.md): a transient helper hiccup or a vanished
     // row must never crash the process — that would kill the headed browser and
     // destroy the filled form the operator is meant to review.

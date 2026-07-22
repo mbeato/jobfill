@@ -38,6 +38,11 @@
   .s-failed { color: #d32f2f; } .s-reviewed { color: #1565c0; } .s-submitted { color: #2e7d32; font-weight: 600; }
   .queue-toggle { color: #1565c0; cursor: pointer; }
   .queue-actions button { margin-right: 8px; padding: 4px 10px; cursor: pointer; border: 1px solid #ccc; background: #fff; border-radius: 4px; }
+  .d-queued { color: #2e7d32; }
+  .d-rejected { color: #999; }
+  .d-held { color: #e65100; }
+  .seek-actions button { margin-right: 8px; padding: 4px 10px; cursor: pointer; border: 1px solid #ccc; background: #fff; border-radius: 4px; }
+  .decision-toggle { color: #1565c0; cursor: pointer; }
 </style>
 <body>
   <h1>jobfill tracker</h1>
@@ -45,6 +50,12 @@
   <div id="queue">
     <h2>posting queue</h2>
     <div id="queueBody"></div>
+  </div>
+  <div id="seek">
+    <h2>seek decisions</h2>
+    <div id="seekStats"></div>
+    <div class="filters" id="seekFilters"></div>
+    <div id="seekBody"></div>
   </div>
   <div class="filters" id="filters"></div>
   <table>
@@ -416,9 +427,146 @@ function toggleQueueResults(id) {
   arrow.textContent = expanded ? '▾' : '▴';
 }
 
+// D-15/FILT-04: seek decisions section. Two independent scopes on one screen —
+// #seekStats is the persisted LAST SWEEP summary (from GET /seek/last, server-
+// authored counts, never derived from #seekBody's rows), while #seekFilters'
+// counts and #seekBody's table are the CURRENT, browsable state across all
+// /postings rows. Mirrors QUEUE_STATUSES: decision is untrusted stored state,
+// so it's allowlisted before it reaches a class attribute (stored-XSS sink).
+const DECISION_VALUES = new Set(['queued', 'rejected', 'held']);
+let lastSweep = null;
+let postingsRows = [];
+let seekFilter = 'all';
+let seekBreakdownExpanded = false;
+
+async function loadPostings() {
+  [lastSweep, postingsRows] = await Promise.all([
+    fetch('/seek/last').then(r => r.json()),
+    fetch('/postings').then(r => r.json()),
+  ]);
+  renderSeekStats(lastSweep);
+  renderSeekFilters(postingsRows);
+  renderPostings(postingsRows);
+}
+
+// Translates a stored decision_reason code into the operator-facing copy — never render
+// a raw code (UI-SPEC Reason Label Map). The llm: branches carry an untrusted
+// LLM-derived one-liner about third-party JD content, so it's esc()-escaped here.
+function reasonLabel(code) {
+  if (!code) return '—';
+  if (code === 'rules:location') return 'rejected — not NY-based or remote-friendly';
+  if (code === 'rules:title') return 'rejected — title outside target roles';
+  if (code === 'rules:yoe') return 'rejected — requires more experience than target (incl. seniority-marker titles)';
+  if (code === 'rules:stale') return 'rejected — posted more than 2 days ago';
+  if (code.startsWith('llm:not-relevant')) {
+    return `not relevant — ${esc(code.replace(/^llm:not-relevant\s*—\s*/, ''))}`;
+  }
+  if (code.startsWith('llm:relevant')) {
+    return `relevant — ${esc(code.replace(/^llm:relevant\s*—\s*/, ''))}`;
+  }
+  if (code === 'queued: manual') return 'queued manually by the operator';
+  if (code === 'held:jd-fetch-error') return 'held: could not fetch job description — will retry next sweep';
+  if (code === 'held:llm-error') return 'held: LLM check failed — will retry next sweep';
+  if (code.startsWith('dedupe:')) return 'duplicate — already queued or applied';
+  if (code.startsWith('rules:')) return 'rejected — did not match target criteria';
+  return esc(code);
+}
+
+function toggleSeekBreakdown() {
+  seekBreakdownExpanded = !seekBreakdownExpanded;
+  renderSeekStats(lastSweep);
+}
+
+// lastSweep's numeric counts (fetched/rejected/held/queued/byCriterion/deduped)
+// are server-authored — rendered as numbers, never as raw HTML (T-10-11).
+function renderSeekStats(ls) {
+  const el = document.getElementById('seekStats');
+  if (!ls) {
+    el.innerHTML = `<div class="muted">no seek sweep run yet</div>`;
+    return;
+  }
+  const summary = `${ls.fetched} fetched · ${ls.rejected} rejected · ${ls.held} held · ${ls.queued} queued`;
+  if (!ls.rejected) {
+    el.innerHTML = `<div>${summary}</div>`;
+    return;
+  }
+  const bc = ls.byCriterion || {};
+  const toggleTitle = seekBreakdownExpanded ? 'hide rejection breakdown' : 'show rejection breakdown';
+  const breakdown = seekBreakdownExpanded
+    ? ` (location ${bc.location ?? 0} · title ${bc.title ?? 0} · yoe ${bc.yoe ?? 0} · stale ${bc.stale ?? 0} · llm ${bc.llm ?? 0} · duplicate ${ls.deduped ?? 0})`
+    : '';
+  el.innerHTML = `<div>${summary}
+    <span class="decision-toggle" title="${toggleTitle}" onclick="toggleSeekBreakdown()">${seekBreakdownExpanded ? '▴' : '▾'}</span><span class="muted">${breakdown}</span>
+  </div>`;
+}
+
+function renderSeekFilters(rows) {
+  const counts = {
+    all: rows.length,
+    queued: rows.filter(r => r.decision === 'queued').length,
+    rejected: rows.filter(r => r.decision === 'rejected').length,
+    held: rows.filter(r => r.decision === 'held').length,
+    unscored: rows.filter(r => r.decision == null).length,
+  };
+  document.getElementById('seekFilters').innerHTML = ['all', 'queued', 'rejected', 'held', 'unscored']
+    .map(s => `<button class="${seekFilter === s ? 'active' : ''}" onclick="seekFilter='${s}';renderPostings(postingsRows)">${s} (${counts[s]})</button>`)
+    .join('');
+}
+
+function renderPostings(rows) {
+  const body = document.getElementById('seekBody');
+  if (!rows.length) {
+    body.innerHTML = `
+      <div class="muted">no postings decided yet</div>
+      <div class="muted" style="font-size: 12px">run a seek sweep (\`bun run seek\`) to discover and filter postings.</div>`;
+    return;
+  }
+  const shown = seekFilter === 'all' ? rows
+    : seekFilter === 'unscored' ? rows.filter(r => r.decision == null)
+    : rows.filter(r => r.decision === seekFilter);
+  if (!shown.length) {
+    body.innerHTML = `<div class="muted">no postings match this filter</div>`;
+    return;
+  }
+  body.innerHTML = `
+    <table>
+      <thead><tr><th>date</th><th>company / role</th><th>source</th><th>decision</th><th>reason</th><th>action</th></tr></thead>
+      <tbody>
+        ${shown.map(p => {
+          const decisionClass = DECISION_VALUES.has(p.decision) ? `d-${p.decision}` : 'muted';
+          const decisionLabel = p.decision ? esc(p.decision) : '—';
+          return `
+            <tr>
+              <td class="muted">${(p.fetched_at || '').slice(0, 10)}</td>
+              <td><strong>${esc(p.company)}</strong> · ${esc(p.title)}</td>
+              <td>${esc(p.source)}</td>
+              <td><span class="${decisionClass}">${decisionLabel}</span></td>
+              <td class="muted">${reasonLabel(p.decision_reason)}</td>
+              <td class="seek-actions">
+                ${p.decision === 'rejected' || p.decision === 'held' ? `<button onclick="queueReject(${p.id})">queue anyway</button>` : ''}
+              </td>
+            </tr>`;
+        }).join('')}
+      </tbody>
+    </table>`;
+}
+
+// Additive/promotive override (D-16) — no confirm() dialog, matching the
+// non-destructive "mark reviewed" button. Reloads first so the two re-renders
+// don't wipe an inserted notice (mirrors triggerFill's reload-then-notify order).
+async function queueReject(id) {
+  const resp = await (await fetch(`/postings/${id}/promote`, { method: 'POST' })).json();
+  await loadPostings();
+  await loadQueue();
+  if (resp && resp.promoted === false) {
+    document.getElementById('seekBody').insertAdjacentHTML('afterbegin', `<div class="muted">already queued or applied</div>`);
+  }
+}
+
 load();
 loadLibrary();
 loadFailures();
 loadQueue();
+loadPostings();
 </script>
 </body>

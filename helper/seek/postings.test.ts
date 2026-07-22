@@ -46,6 +46,24 @@ test('re-upserting the same posting (or a query-param variant) leaves exactly on
   expect(secondFetchedAt >= firstFetchedAt).toBe(true);
 });
 
+test('a conflicting re-upsert never downgrades login_gated true -> false', () => {
+  const db = makeDb();
+  const first = upsertPosting(
+    db,
+    posting({ url: 'https://www.workatastartup.com/jobs/123', source: 'yc', login_gated: true }),
+  );
+  expect(first!.login_gated).toBe(true);
+  // A later sweep stage (e.g. HN finding the same link in a comment) writes
+  // login_gated: false — the stored flag must not flip back.
+  const second = upsertPosting(
+    db,
+    posting({ url: 'https://www.workatastartup.com/jobs/123', source: 'hn', login_gated: false }),
+  );
+  expect(second!.login_gated).toBe(true);
+  const rows = db.query('SELECT count(*) as c FROM postings').get() as { c: number };
+  expect(rows.c).toBe(1);
+});
+
 test('a posting with a source outside the six-source allowlist is skipped, not stored', () => {
   const db = makeDb();
   const row = upsertPosting(db, posting({ source: 'wellfound' as NormalizedPosting['source'] }));

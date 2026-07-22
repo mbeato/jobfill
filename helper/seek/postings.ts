@@ -73,6 +73,9 @@ export function upsertPosting(db: Database, p: NormalizedPosting): PostingRow | 
     .query(
       `INSERT INTO postings (url, url_key, company, title, location, source, posted_at, posted_at_trusted, login_gated, not_fillable, low_confidence)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       -- login_gated only ever ratchets up on conflict: once a URL is known to
+       -- be login-walled, no later sweep stage (e.g. HN re-discovering the same
+       -- link) may downgrade it back into the fillable pool.
        ON CONFLICT(url_key) DO UPDATE SET
          fetched_at = datetime('now'),
          company = excluded.company,
@@ -81,7 +84,7 @@ export function upsertPosting(db: Database, p: NormalizedPosting): PostingRow | 
          source = excluded.source,
          posted_at = excluded.posted_at,
          posted_at_trusted = excluded.posted_at_trusted,
-         login_gated = excluded.login_gated,
+         login_gated = MAX(postings.login_gated, excluded.login_gated),
          not_fillable = excluded.not_fillable,
          low_confidence = excluded.low_confidence
        RETURNING *`,

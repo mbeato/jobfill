@@ -6,6 +6,10 @@
 import type { NormalizedPosting } from './types';
 
 const KNOWN_ATS_HOSTS = ['greenhouse.io', 'lever.co', 'ashbyhq.com'];
+// Hosts that sit behind a login wall (the sidecar's territory) — a comment
+// linking one of these still gets stored, but flagged login_gated so it never
+// enters the fillable pool via the HN path.
+const LOGIN_GATED_HOSTS = ['workatastartup.com', 'jobright.ai'];
 const JOBS_ISH = /jobs|careers|apply|greenhouse|lever|ashby/i;
 const URL_RE = /https?:\/\/[^\s"'<>)]+/g;
 
@@ -139,7 +143,7 @@ export async function fetchHNPostings(
       source: 'hn',
       posted_at: new Date(comment.created_at_i * 1000).toISOString(),
       posted_at_trusted: true,
-      login_gated: false,
+      login_gated: applyUrl.fromComment && LOGIN_GATED_HOSTS.some(host => applyUrl.url.includes(host)),
       // D-09: no recognizable apply link -> fall back to the (inert) HN
       // permalink and flag not_fillable so batch fill skips it.
       ...(applyUrl.fromComment ? {} : { not_fillable: true }),

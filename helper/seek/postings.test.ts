@@ -80,6 +80,14 @@ test('a posting with an empty/missing url is skipped — URL-less postings must 
   expect(rows.c).toBe(0);
 });
 
+test('a non-http(s) url is rejected at the persistence boundary, never stored', () => {
+  const db = makeDb();
+  expect(upsertPosting(db, posting({ url: "javascript:alert(1)//'/job/'" }))).toBeNull();
+  expect(upsertPosting(db, posting({ url: 'file:///etc/passwd' }))).toBeNull();
+  const rows = db.query('SELECT count(*) as c FROM postings').get() as { c: number };
+  expect(rows.c).toBe(0);
+});
+
 test('oversized company/title/location text is truncated to MAX_TEXT at the write boundary', () => {
   const db = makeDb();
   const longTitle = 'x'.repeat(5000);

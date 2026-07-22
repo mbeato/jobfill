@@ -68,6 +68,10 @@ function toRow(raw: Record<string, unknown>): PostingRow {
 
 export function upsertPosting(db: Database, p: NormalizedPosting): PostingRow | null {
   if (!VALID_SOURCES.has(p.source)) return null;
+  // Persistence-boundary scheme allowlist (mirrors POST /queue): postings are
+  // rendered as anchors and promoted into `queue` by Phase 10 — never store a
+  // non-http(s) URL (sidecar hrefs come from untrusted third-party DOM).
+  if (!/^https?:\/\//i.test(String(p.url ?? ''))) return null;
   const urlKey = normalizeUrl(p.url);
   // An empty key would make every URL-less posting collide on UNIQUE(url_key)
   // and clobber each other into one chimera row — skip them instead.

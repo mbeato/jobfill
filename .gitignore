@@ -2,3 +2,4 @@ node_modules/
 extension/content.bundle.js
 profile.local.json
 helper/jobfill.db
+.runner-profile/

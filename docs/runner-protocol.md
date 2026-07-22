@@ -1,11 +1,28 @@
 # Runner Protocol
 
-This is the operational runbook for a Claude-in-Chrome (CiC) session acting as the
-**runner**: the agent that works jobfill's posting queue end to end — selecting a
-queued posting, navigating to it, triggering the existing fill pipeline, waiting for
-it to finish, and reporting the outcome back to the operator. It is a living document, not a
-dated design spec (see `docs/superpowers/specs/` for those) — update it in place as
-the protocol evolves.
+This is the operational runbook for the **runner**: the agent that works jobfill's
+posting queue end to end — selecting a queued posting, navigating to it, triggering
+the existing fill pipeline, waiting for it to finish, and reporting the outcome back
+to the operator. It is a living document, not a dated design spec (see `docs/superpowers/specs/`
+for those) — update it in place as the protocol evolves.
+
+Two runner implementations exist; the sequence, review rules, and hard invariants
+below apply identically to both:
+
+- **Playwright runner (`scripts/runner.mjs`) — the default, proven live 2026-07-22.**
+  A Claude Code session (or the operator) runs `node scripts/runner.mjs <queueId>`. It launches
+  a headed Chromium with the jobfill unpacked extension loaded from `extension/`
+  (unpacked IDs are path-derived, so the ID matches the one in `helper/dashboard.html`),
+  self-seeds `profile`/`resume` into extension storage from `profile.local.json` and
+  the resume PDF, waits for the operator to paste the API key in the options page on first run
+  (the key persists in `.runner-profile/`, gitignored), then executes Steps 2–6 below
+  mechanically. The browser stays open after the run so the operator can review the filled form.
+  First live run: queue row 4, Netic Agent Platform New Grad — 10/10 fields filled,
+  all read-backs stuck, tailor ran, zero flags.
+- **Claude-in-Chrome (CiC) session** — the original design; a CiC session follows the
+  same steps using its browser tools. Requires the Claude Chrome extension connected
+  in the same profile (see Preconditions). Use when interactive judgment mid-run is
+  wanted (e.g. unfamiliar ATS layouts).
 
 Every mechanism this protocol drives already shipped and is code-verified in Phase 7
 (`extension/background.js`, `helper/queue.ts`, `helper/dashboard.html`). Phase 8 adds

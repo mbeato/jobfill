@@ -21,7 +21,22 @@ function printCounts(label, results) {
   }
 }
 
-const res = await fetch(`${HELPER}/seek`, {
+function printFilterCounts(counts) {
+  console.log('[seek] filter/decide:');
+  console.log(
+    `  rulesRejected ${counts.rulesRejected}, llmRejected ${counts.llmRejected}, queued ${counts.queued}, held ${counts.held}, deduped ${counts.deduped}, unscored ${counts.unscored}`,
+  );
+  console.log(
+    `  byCriterion: title ${counts.byCriterion.title}, location ${counts.byCriterion.location}, stale ${counts.byCriterion.stale}, yoe ${counts.byCriterion.yoe}, llm ${counts.byCriterion.llm}`,
+  );
+}
+
+// --no-filter: discovery-only debugging (D-09 escape hatch) — skips the
+// filter->promote stage server-side via ?filter=0, no decision counts printed.
+const noFilter = process.argv.includes('--no-filter');
+const seekUrl = noFilter ? `${HELPER}/seek?filter=0` : `${HELPER}/seek`;
+
+const res = await fetch(seekUrl, {
   method: 'POST',
   headers: { 'x-jobfill-token': TOKEN },
 });
@@ -29,8 +44,9 @@ if (!res.ok) {
   console.error(`[seek] POST /seek failed: HTTP ${res.status}`);
   process.exit(1);
 }
-const fetchResults = await res.json();
-printCounts('fetch sources', fetchResults);
+const body = await res.json();
+printCounts('fetch sources', body.fetch);
+if (body.filter) printFilterCounts(body.filter);
 
 try {
   const sidecarPath = join(ROOT, 'scripts', 'seek-sidecar.mjs');

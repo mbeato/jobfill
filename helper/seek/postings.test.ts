@@ -34,16 +34,18 @@ test('inserting a NormalizedPosting stores source, login_gated, posted_at_truste
   expect(raw.url_key).toBe('boards.greenhouse.io/acme/jobs/1');
 });
 
-test('re-upserting the same posting (or a query-param variant) leaves exactly one row and refreshes fetched_at', async () => {
+test('re-upserting the same posting (or a query-param variant) leaves exactly one row and refreshes fetched_at', () => {
   const db = makeDb();
   const first = upsertPosting(db, posting());
+  // Backdate the stored timestamp so a real refresh must yield a strictly
+  // greater value — no sleep, and a no-op ON CONFLICT can no longer pass.
+  db.query(`UPDATE postings SET fetched_at = datetime('now', '-1 hour') WHERE id = ?`).run(first!.id);
   const firstFetchedAt = (db.query('SELECT fetched_at FROM postings WHERE id = ?').get(first!.id) as { fetched_at: string }).fetched_at;
-  await new Promise(r => setTimeout(r, 1100));
   const second = upsertPosting(db, posting({ url: 'https://boards.greenhouse.io/acme/jobs/1?utm=x' }));
   const rows = db.query('SELECT count(*) as c FROM postings').get() as { c: number };
   expect(rows.c).toBe(1);
   const secondFetchedAt = (db.query('SELECT fetched_at FROM postings WHERE id = ?').get(second!.id) as { fetched_at: string }).fetched_at;
-  expect(secondFetchedAt >= firstFetchedAt).toBe(true);
+  expect(secondFetchedAt > firstFetchedAt).toBe(true);
 });
 
 test('a conflicting re-upsert never downgrades login_gated true -> false', () => {

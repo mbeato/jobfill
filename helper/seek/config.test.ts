@@ -60,3 +60,36 @@ test('reading is fresh: editing the fixture between two calls returns the update
   const second = await loadSeekConfig(path);
   expect(second.greenhouse).toEqual({ enabled: true, tokens: ['acme'] });
 });
+
+test('a well-formed schedule section round-trips enabled and targetHour', async () => {
+  const path = fixturePath('schedule-wellformed');
+  await Bun.write(path, JSON.stringify({ schedule: { enabled: true, targetHour: 9 } }));
+  const config = await loadSeekConfig(path);
+  expect(config.schedule).toEqual({ enabled: true, targetHour: 9 });
+});
+
+test('a missing schedule key defaults to disabled/targetHour 7', async () => {
+  const path = fixturePath('schedule-missing');
+  await Bun.write(path, JSON.stringify({ greenhouse: { enabled: true, tokens: [] } }));
+  const config = await loadSeekConfig(path);
+  expect(config.schedule).toEqual({ enabled: false, targetHour: 7 });
+});
+
+test('a non-numeric targetHour falls back to 7 (fail-closed), enabled still honored', async () => {
+  const path = fixturePath('schedule-nan');
+  await Bun.write(path, JSON.stringify({ schedule: { enabled: true, targetHour: 'nope' } }));
+  const config = await loadSeekConfig(path);
+  expect(config.schedule).toEqual({ enabled: true, targetHour: 7 });
+});
+
+test('an out-of-range targetHour falls back to 7', async () => {
+  const path = fixturePath('schedule-outofrange');
+  await Bun.write(path, JSON.stringify({ schedule: { enabled: true, targetHour: 25 } }));
+  const config = await loadSeekConfig(path);
+  expect(config.schedule).toEqual({ enabled: true, targetHour: 7 });
+});
+
+test('a missing/malformed config file still returns the default schedule section', async () => {
+  const config = await loadSeekConfig('/nonexistent/path/seek.config.json');
+  expect(config.schedule).toEqual({ enabled: false, targetHour: 7 });
+});

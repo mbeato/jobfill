@@ -16,3 +16,10 @@ test('a non-URL string returns the trimmed/sliced raw fallback without throwing'
   expect(() => normalizeUrl('not a url')).not.toThrow();
   expect(normalizeUrl('  not a url  ')).toBe('not a url');
 });
+
+test('HN item permalinks keep their identity-bearing id param instead of collapsing to one key', () => {
+  const a = normalizeUrl('https://news.ycombinator.com/item?id=48747987');
+  const b = normalizeUrl('https://news.ycombinator.com/item?id=48748003');
+  expect(a).toBe('news.ycombinator.com/item?id=48747987');
+  expect(a).not.toBe(b);
+});

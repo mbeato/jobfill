@@ -8,7 +8,14 @@ export function normalizeUrl(u: string): string {
   try {
     const parsed = new URL(raw);
     const path = parsed.pathname.replace(/\/$/, '');
-    return `${parsed.host.toLowerCase()}${path}`;
+    const host = parsed.host.toLowerCase();
+    // HN item permalinks are only distinguished by ?id= — dropping the query
+    // would collapse every comment in a thread to one dedup key.
+    const id = parsed.searchParams.get('id');
+    if (host === 'news.ycombinator.com' && path === '/item' && id) {
+      return `${host}${path}?id=${id}`;
+    }
+    return `${host}${path}`;
   } catch {
     return raw;
   }

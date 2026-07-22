@@ -69,6 +69,9 @@ function toRow(raw: Record<string, unknown>): PostingRow {
 export function upsertPosting(db: Database, p: NormalizedPosting): PostingRow | null {
   if (!VALID_SOURCES.has(p.source)) return null;
   const urlKey = normalizeUrl(p.url);
+  // An empty key would make every URL-less posting collide on UNIQUE(url_key)
+  // and clobber each other into one chimera row — skip them instead.
+  if (!urlKey) return null;
   const raw = db
     .query(
       `INSERT INTO postings (url, url_key, company, title, location, source, posted_at, posted_at_trusted, login_gated, not_fillable, low_confidence)

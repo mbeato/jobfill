@@ -72,6 +72,14 @@ test('a posting with a source outside the six-source allowlist is skipped, not s
   expect(rows.c).toBe(0);
 });
 
+test('a posting with an empty/missing url is skipped — URL-less postings must not share one dedup key', () => {
+  const db = makeDb();
+  expect(upsertPosting(db, posting({ url: '' }))).toBeNull();
+  expect(upsertPosting(db, posting({ url: '', company: 'Other Co' }))).toBeNull();
+  const rows = db.query('SELECT count(*) as c FROM postings').get() as { c: number };
+  expect(rows.c).toBe(0);
+});
+
 test('oversized company/title/location text is truncated to MAX_TEXT at the write boundary', () => {
   const db = makeDb();
   const longTitle = 'x'.repeat(5000);

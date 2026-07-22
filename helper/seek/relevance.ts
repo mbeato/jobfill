@@ -50,7 +50,14 @@ function buildPrompt(profileSummary: string, jdText: string, posting: PostingRow
   // guidance must live HERE, on the trusted side of the prompt — anything
   // placed in the JD slot is untrusted data the injection rule below tells
   // the model to ignore.
-  const metadataOnly = jdText.trim() === '';
+  //
+  // WR-01: this must key off the posting's own login_gated flag, not off
+  // jdText being empty — an ordinary (non-login-gated) fetch can also
+  // legitimately return '' (a bare-bones upstream posting, or an HN
+  // fallback string built from an empty company), and that case must not
+  // be told "this posting comes from a login-gated source".
+  const metadataOnly = posting.login_gated;
+  const emptyJd = jdText.trim() === '';
   const metadataGuidance = metadataOnly
     ? `
 This posting comes from a login-gated source: no job description is available, and the operator reviews every queued posting by hand before applying. Judge from the title, company, and location alone — mark relevant when the title matches the target roles with no seniority markers and the location is acceptable; reject only on a visible mismatch (seniority-marked or non-engineering title, out-of-market location). Do NOT reject merely because the description is missing.
@@ -71,7 +78,7 @@ Company: ${posting.company}
 Title: ${posting.title}
 Location: ${posting.location}
 Job description:
-${metadataOnly ? '(not available — login-gated source)' : jdText}
+${metadataOnly ? '(not available — login-gated source)' : emptyJd ? '(job description was empty)' : jdText}
 === END POSTING DATA ===
 
 Return a verdict: relevant (true/false) and a one-line reason explaining the verdict.`;

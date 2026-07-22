@@ -59,12 +59,16 @@ test('results_summary above MAX_SUMMARY is truncated structurally, never mid-JSO
   const results = Array.from({ length: 300 }, (_, i) => ({
     id: `0:field-${i}`, status: 'filled', kind: 'essay', confidence: 'high', reused: false,
     label: 'x'.repeat(40),
+    // field 1 is a didn't-stick field: status stays 'filled', stuck === false is
+    // the ONLY didn't-stick signal — it must survive structural truncation
+    ...(i === 1 ? { stuck: false } : {}),
   }));
   const updated = updateQueueStatus(db, row.id, { results_summary: JSON.stringify(results) });
   const parsed = JSON.parse(updated!.results_summary); // must not throw
   expect(Array.isArray(parsed)).toBe(true);
   expect(parsed.length).toBeLessThanOrEqual(200);
   expect(parsed[0]).toEqual({ id: '0:field-0', status: 'filled', label: 'x'.repeat(40) });
+  expect(parsed[1]).toEqual({ id: '0:field-1', status: 'filled', label: 'x'.repeat(40), stuck: false });
 });
 
 test('a run-state patch never regresses a human-set reviewed/submitted row', () => {

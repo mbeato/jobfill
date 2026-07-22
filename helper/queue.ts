@@ -37,18 +37,22 @@ const MAX_TEXT = 2000;
 const MAX_SUMMARY = 20_000;
 
 // Never slice a JSON string lexically: over the bound, re-serialize a reduced
-// per-field summary (id/label/status only); if even that is too big or the input
-// isn't valid JSON, store a marker object the dashboard can render safely.
+// per-field summary (id/label/status, plus the review-gating `stuck` flag —
+// a didn't-stick field's status is still 'filled', so dropping `stuck` here
+// would silently unflag it for the dashboard and the runner's review rules);
+// if even that is too big or the input isn't valid JSON, store a marker object
+// the dashboard can render safely.
 function truncateResultsSummary(raw: string): string {
   if (raw.length <= MAX_SUMMARY) return raw;
   try {
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) {
       const reduced = JSON.stringify(
-        parsed.slice(0, 200).map((r: { id?: unknown; label?: unknown; status?: unknown }) => ({
+        parsed.slice(0, 200).map((r: { id?: unknown; label?: unknown; status?: unknown; stuck?: unknown }) => ({
           id: r?.id,
           label: r?.label,
           status: r?.status,
+          ...(typeof r?.stuck === 'boolean' ? { stuck: r.stuck } : {}),
         })),
       );
       if (reduced.length <= MAX_SUMMARY) return reduced;

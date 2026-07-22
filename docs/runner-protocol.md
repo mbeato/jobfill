@@ -9,7 +9,7 @@ for those) — update it in place as the protocol evolves.
 Two runner implementations exist; the sequence, review rules, and hard invariants
 below apply identically to both:
 
-- **Playwright runner (`scripts/runner.mjs`) — the default, proven live 2026-07-22.**
+- **Playwright runner (`scripts/runner.mjs`) — the default, proven live 2026-07-21.**
   A Claude Code session (or the operator) runs `node scripts/runner.mjs <queueId>`. It launches
   a headed Chromium with the jobfill unpacked extension loaded from `extension/`
   (unpacked IDs are path-derived, so the ID matches the one in `helper/dashboard.html`),
@@ -25,17 +25,34 @@ below apply identically to both:
   wanted (e.g. unfamiliar ATS layouts).
 
 Every mechanism this protocol drives already shipped and is code-verified in Phase 7
-(`extension/background.js`, `helper/queue.ts`, `helper/dashboard.html`). Phase 8 adds
-no new extension or helper code paths — this doc is the missing piece: the exact
-sequence a runner session follows to drive that surface safely, without the operator touching
-a single step himself.
+(`extension/background.js`, `helper/queue.ts`, `helper/dashboard.html`). Phase 8's own
+code additions are small: the `company`/`role` fields on the extension's filled PATCH
+(`extension/background.js`), didn't-stick flag rendering in the dashboard queue view
+(`helper/dashboard.html`), and the Playwright runner itself (`scripts/runner.mjs`).
+This doc ties them together: the exact sequence a runner session follows to drive
+that surface safely, without the operator touching a single step himself.
 
 ## Preconditions
 
-Before starting any run, confirm all of the following are true:
+Preconditions differ by runner variant — confirm the ones that apply before starting
+any run.
+
+**Both variants:**
 
 - **Helper is running** on `http://127.0.0.1:7877` (`bun helper/server.ts`). Every step
   below reads and writes through this origin.
+
+**Playwright runner only:**
+
+- **The `extension/` directory is present** in the repo checkout — the runner loads
+  the unpacked extension itself into its own headed Chromium (no real-Chrome-profile
+  setup and no `EXTENSION_ID` configuration needed; unpacked IDs are path-derived).
+- **The Anthropic API key has been seeded once**: on the first run the runner opens
+  the options page and waits for the operator to paste and save the key; it persists in
+  `.runner-profile/` (gitignored) for every run after that.
+
+**CiC variant only:**
+
 - **The jobfill unpacked extension is loaded** in the real Chrome profile, and its real
   `EXTENSION_ID` (from `chrome://extensions`, developer mode) is set in
   `helper/dashboard.html`'s `EXTENSION_ID` constant — not the literal placeholder
@@ -52,7 +69,8 @@ Before starting any run, confirm all of the following are true:
   names and parameter shapes may drift between Claude Code releases, and this is the
   first-party way to confirm what's actually available before relying on it.
 
-If any precondition fails, stop and surface it to the operator rather than guessing around it.
+If any applicable precondition fails, stop and surface it to the operator rather than guessing
+around it.
 
 ## Operational sequence
 

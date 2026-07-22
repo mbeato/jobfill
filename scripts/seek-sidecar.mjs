@@ -27,7 +27,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const HELPER = 'http://127.0.0.1:7877';
-const TOKEN = 'REDACTED-TOKEN';
+const TOKEN = process.env.JOBFILL_TOKEN ?? 'REDACTED-TOKEN';
 const PROFILE_DIR = join(ROOT, '.runner-profile');
 
 const args = process.argv.slice(2);

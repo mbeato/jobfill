@@ -68,7 +68,9 @@ createPostingsTable(db);
 // Shared secret with the extension (must match HELPER_TOKEN in extension/background.js).
 // No CORS headers are served: cross-origin pages can neither read responses nor pass
 // preflight, so only the extension (token) and the same-origin dashboard get through.
-const TOKEN = 'REDACTED-TOKEN';
+// JOBFILL_TOKEN env overrides the committed fallback everywhere it appears
+// (here, scripts/seek.mjs, scripts/seek-sidecar.mjs) so rotation is one export.
+const TOKEN = process.env.JOBFILL_TOKEN ?? 'REDACTED-TOKEN';
 
 // Only the login-gated sidecar sources may POST /seek/results — the fetch
 // sources (greenhouse/lever/ashby/hn) are swept in-process via POST /seek and

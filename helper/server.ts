@@ -10,7 +10,6 @@ import { mapViaCLI } from './mapping';
 import { normalizeUrl } from './seek/normalize';
 import { createPostingsTable, upsertPosting, listPostings, recordDecision, listPostingsToDecide } from './seek/postings';
 import { loadSeekConfig } from './seek/config';
-import { runSweep } from './seek/sweep';
 import { fetchGreenhouse } from './seek/greenhouse';
 import { fetchLever } from './seek/lever';
 import { fetchAshby } from './seek/ashby';
@@ -20,7 +19,16 @@ import { classifyMetadata, classifyYoe } from './seek/filter';
 import { fetchJD } from './seek/jd-fetch';
 import { scoreRelevance, loadProfileSummary } from './seek/relevance';
 import { promotePosting } from './seek/promote';
-import { runFilterPromote } from './seek/decide';
+import {
+  createSweepsTable,
+  reconcileInterruptedSweeps,
+  listSweeps,
+  getSweepById,
+  getRunningSweep,
+  getLastRunState,
+} from './seek/runs';
+import { beginSweep, runSweepJob, spawnSidecar, SweepAlreadyRunningError, type JobDeps } from './seek/job';
+import { shouldFireToday } from './seek/scheduler';
 
 const PORT = 7877;
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -69,6 +77,7 @@ db.run(`CREATE TABLE IF NOT EXISTS answers (
 createFailuresTable(db);
 createQueueTable(db);
 createPostingsTable(db);
+createSweepsTable(db);
 
 // Live-DB migrations (idempotent, re-run safe): both createQueueTable and
 // createPostingsTable's CREATE TABLE IF NOT EXISTS strings already include
@@ -137,6 +146,12 @@ db.run('CREATE UNIQUE INDEX IF NOT EXISTS idx_queue_url_key_full ON queue(url_ke
 // D-15 last-sweep summary store: a tiny key/value table, one JSON row.
 db.run('CREATE TABLE IF NOT EXISTS seek_meta (key TEXT PRIMARY KEY, value TEXT)');
 
+// RESEARCH Pattern 5: any sweeps row still 'running' when the process starts
+// back up can only mean the prior process crashed mid-sweep — flip it to
+// 'failed' before any route or scheduler tick can act, so a crash can never
+// permanently wedge the single-flight lock (T-11-03-02).
+reconcileInterruptedSweeps(db);
+
 // Shared secret with the extension (must match HELPER_TOKEN in extension/background.js).
 // No CORS headers are served: cross-origin pages can neither read responses nor pass
 // preflight, so only the extension (token) and the same-origin dashboard get through.
@@ -151,6 +166,45 @@ const TOKEN = process.env.JOBFILL_TOKEN ?? 'REDACTED-TOKEN';
 // reads this flag to decide what never to auto-fill) must hold at the
 // persistence boundary regardless of what the client sent.
 const GATED_SOURCES: Set<SourceName> = new Set(['yc', 'jobright']);
+
+// The single dependency-injection contract runSweepJob needs — assembled
+// once from the real fetch/filter/promote implementations already imported
+// above, plus the helper-owned sidecar spawn. Both POST /sweep and the
+// scheduler tick pass this same object into the same runSweepJob (SCHED-02:
+// identical code path by construction).
+const jobDeps: JobDeps = {
+  fetchGreenhouse,
+  fetchLever,
+  fetchAshby,
+  fetchHNPostings,
+  upsertPosting,
+  classifyMetadata,
+  classifyYoe,
+  fetchJD,
+  scoreRelevance,
+  loadProfileSummary,
+  promotePosting,
+  recordDecision,
+  listPostingsToDecide,
+  spawnSidecar,
+};
+
+// Anacron-style ~15-min tick (SCHED-01/04): loads the schedule config fresh,
+// checks shouldFireToday against the last recorded run, and — if due — runs
+// exactly the same beginSweep + runSweepJob path POST /sweep uses. Wrapped
+// defensively (T-11-03-05): this function must never throw to the event
+// loop, or a bad tick would crash the whole helper process.
+async function checkSchedule() {
+  const cfg = await loadSeekConfig();
+  const last = getLastRunState(db);
+  if (!shouldFireToday(new Date(), cfg.schedule, last)) return;
+  try {
+    const { runId } = beginSweep(db, 'scheduled');
+    await runSweepJob(db, cfg, jobDeps, runId);
+  } catch (e) {
+    console.error('[scheduler] tick:', String((e as Error)?.message ?? e));
+  }
+}
 
 function authorized(req: Request): boolean {
   if (req.headers.get('x-jobfill-token') === TOKEN) return true;
@@ -433,45 +487,36 @@ Bun.serve({
           throw e;
         }
       }
-      if (pathname === '/seek' && req.method === 'POST') {
-        const config = await loadSeekConfig();
-        const fetchResults = await runSweep(db, config, {
-          fetchGreenhouse,
-          fetchLever,
-          fetchAshby,
-          fetchHNPostings,
-          upsertPosting,
-        });
-        // D-09 escape hatch: ?filter=0 skips the filter->promote stage entirely
-        // (discovery-only debugging). The prior last-sweep summary is preserved.
-        const noFilter = new URL(req.url).searchParams.get('filter') === '0';
-        if (noFilter) return json({ fetch: fetchResults, filter: null });
-
-        const filterCounts = await runFilterPromote(db, {
-          classifyMetadata,
-          classifyYoe,
-          fetchJD,
-          scoreRelevance,
-          loadProfileSummary,
-          promotePosting,
-          recordDecision,
-          listPostingsToDecide,
-        });
-        const fetchedTotal = fetchResults.reduce((sum, r) => sum + (r.fetched ?? 0), 0);
-        // D-15: rejected folds in deduped (decide.ts stores dedupe rejections as
-        // decision='rejected' too, matching how /postings groups them) — deduped
-        // is also carried separately for the dashboard's expandable breakdown.
-        const lastSweep = {
-          at: new Date().toISOString(),
-          fetched: fetchedTotal || filterCounts.toDecide,
-          rejected: filterCounts.rulesRejected + filterCounts.llmRejected + filterCounts.deduped,
-          deduped: filterCounts.deduped,
-          held: filterCounts.held,
-          queued: filterCounts.queued,
-          byCriterion: filterCounts.byCriterion,
-        };
-        db.run('INSERT OR REPLACE INTO seek_meta(key, value) VALUES (?, ?)', ['last_sweep', JSON.stringify(lastSweep)]);
-        return json({ fetch: fetchResults, filter: filterCounts });
+      if (pathname === '/sweep' && req.method === 'POST') {
+        const running = getRunningSweep(db);
+        if (running) return json({ error: 'sweep already running', runId: running.id }, 409);
+        let runId: number;
+        try {
+          ({ runId } = beginSweep(db, 'manual'));
+        } catch (e) {
+          if (e instanceof SweepAlreadyRunningError) return json({ error: e.message, runId: e.runId }, 409);
+          throw e;
+        }
+        // Fire-and-poll (D-10): the job runs in the background — this route
+        // returns immediately with the run id, it never holds the request
+        // open for the sweep's duration. The .catch prevents an unhandled
+        // rejection from crashing the process (T-11-03-05).
+        runSweepJob(db, await loadSeekConfig(), jobDeps, runId).catch(e =>
+          console.error('[sweep] background job failed:', e),
+        );
+        return json({ id: runId }, 202);
+      }
+      if (pathname === '/sweeps' && req.method === 'GET') {
+        const limitParam = Number(new URL(req.url).searchParams.get('limit'));
+        const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, 100) : 20;
+        const rows = listSweeps(db, limit).map(r => ({ ...r, detail: r.detail ? JSON.parse(r.detail) : null }));
+        return json(rows);
+      }
+      const sweepById = pathname.match(/^\/sweeps\/(\d+)$/);
+      if (sweepById && req.method === 'GET') {
+        const row = getSweepById(db, Number(sweepById[1]));
+        if (!row) return json({ error: 'not found' }, 404);
+        return json({ ...row, detail: row.detail ? JSON.parse(row.detail) : null });
       }
       if (pathname === '/seek/last' && req.method === 'GET') {
         const row = db.query('SELECT value FROM seek_meta WHERE key = ?').get('last_sweep') as { value: string } | null;
@@ -541,3 +586,11 @@ Bun.serve({
 });
 
 console.log(`jobfill helper on http://127.0.0.1:${PORT} (dashboard at /)`);
+
+// ~15-min anacron tick (SCHED-01/04). An immediate invocation on startup
+// means a RunAtLoad start past the target hour catches up right away instead
+// of waiting up to 15 minutes for the first interval fire.
+setInterval(() => {
+  checkSchedule().catch(e => console.error('[scheduler]', e));
+}, 15 * 60 * 1000);
+checkSchedule().catch(e => console.error('[scheduler]', e));

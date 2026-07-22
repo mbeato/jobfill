@@ -8,7 +8,7 @@ import { createFailuresTable, insertFailures, listFailures, type FailureRecordIn
 import { createQueueTable, insertQueueEntry, updateQueueStatus, listQueue, InvalidQueueStatusError } from './queue';
 import { mapViaCLI } from './mapping';
 import { normalizeUrl } from './seek/normalize';
-import { createPostingsTable, upsertPosting, recordDecision, listPostingsToDecide } from './seek/postings';
+import { createPostingsTable, upsertPosting, listPostings, recordDecision, listPostingsToDecide } from './seek/postings';
 import { loadSeekConfig } from './seek/config';
 import { runSweep } from './seek/sweep';
 import { fetchGreenhouse } from './seek/greenhouse';
@@ -464,6 +464,45 @@ Bun.serve({
         };
         db.run('INSERT OR REPLACE INTO seek_meta(key, value) VALUES (?, ?)', ['last_sweep', JSON.stringify(lastSweep)]);
         return json({ fetch: fetchResults, filter: filterCounts });
+      }
+      if (pathname === '/seek/last' && req.method === 'GET') {
+        const row = db.query('SELECT value FROM seek_meta WHERE key = ?').get('last_sweep') as { value: string } | null;
+        return json(row ? JSON.parse(row.value) : null);
+      }
+      if (pathname === '/postings' && req.method === 'GET') {
+        return json(listPostings(db));
+      }
+      const postingPromote = pathname.match(/^\/postings\/(\d+)\/promote$/);
+      if (postingPromote && req.method === 'POST') {
+        const id = Number(postingPromote[1]);
+        const posting = db.query('SELECT * FROM postings WHERE id = ?').get(id) as
+          | (Record<string, unknown> & { id: number; url: string; company: string; title: string; login_gated: number; not_fillable: number })
+          | null;
+        if (!posting) return json({ error: 'not found' }, 404);
+        const result = promotePosting(db, {
+          id: posting.id,
+          url: posting.url as string,
+          url_key: posting.url_key as string,
+          company: posting.company as string,
+          title: posting.title as string,
+          location: posting.location as string,
+          source: posting.source as string,
+          posted_at: (posting.posted_at as string | null) ?? null,
+          posted_at_trusted: posting.posted_at_trusted === 1,
+          login_gated: posting.login_gated === 1,
+          not_fillable: posting.not_fillable === 1,
+          low_confidence: posting.low_confidence === 1,
+          decision: (posting.decision as string | null) ?? null,
+          decision_reason: (posting.decision_reason as string | null) ?? null,
+          decided_at: (posting.decided_at as string | null) ?? null,
+          fetched_at: posting.fetched_at as string,
+          created_at: posting.created_at as string,
+        });
+        if (result.promoted) {
+          recordDecision(db, id, 'queued', 'queued: manual');
+          return json(result.queueRow);
+        }
+        return json({ promoted: false, reason: result.reason });
       }
       if (pathname === '/seek/results' && req.method === 'POST') {
         const b = await req.json();

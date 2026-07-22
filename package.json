@@ -7,7 +7,11 @@
     "watch": "esbuild extension/content/main.js --bundle --format=iife --outfile=extension/content.bundle.js --watch",
     "test": "vitest run",
     "helper": "bun helper/server.ts",
-    "seek": "bun scripts/seek.mjs"
+    "seek": "bun scripts/seek.mjs",
+    "agent:install": "bun scripts/agent-install.mjs",
+    "agent:uninstall": "bun scripts/agent-uninstall.mjs",
+    "agent:restart": "launchctl kickstart -k gui/$(id -u)/com.jobfill.helper",
+    "agent:status": "bun scripts/agent-status.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.25.0",

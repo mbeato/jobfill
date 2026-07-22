@@ -154,6 +154,26 @@ test('insertQueueEntryFromPosting carries login_gated/not_fillable through as 1 
   expect(row!.not_fillable).toBe(1);
 });
 
+// WR-03: low_confidence (hn.ts's non-conforming-comment flag, D-08) must
+// survive the promotion boundary into queue — it's the signal that warns
+// the operator to double-check the company/role guess before filling.
+test('insertQueueEntryFromPosting carries low_confidence through as 1 (WR-03)', () => {
+  const db = makePostingsDb();
+  const p = upsertPosting(
+    db,
+    posting({ url: 'https://news.ycombinator.com/item?id=123', source: 'hn', low_confidence: true }),
+  )!;
+  const row = insertQueueEntryFromPosting(db, p);
+  expect(row!.low_confidence).toBe(1);
+});
+
+test('insertQueueEntryFromPosting defaults low_confidence to 0 when unset', () => {
+  const db = makePostingsDb();
+  const p = upsertPosting(db, posting())!;
+  const row = insertQueueEntryFromPosting(db, p);
+  expect(row!.low_confidence).toBe(0);
+});
+
 test('legacy insertQueueEntry rows (NULL url_key) coexist with each other under the UNIQUE constraint', () => {
   const db = makeDb();
   const a = insertQueueEntry(db, 'https://x.com/a');

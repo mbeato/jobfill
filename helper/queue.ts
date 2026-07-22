@@ -17,11 +17,13 @@ export interface QueueRow {
   results_summary: string;
   error: string;
   // Raw shape as returned by sqlite — url_key is a dedup key (D-11), not a
-  // fillable URL; login_gated/not_fillable arrive as 0/1 integers, same as
-  // listQueue/updateQueueStatus already return for every other row.
+  // fillable URL; login_gated/not_fillable/low_confidence arrive as 0/1
+  // integers, same as listQueue/updateQueueStatus already return for every
+  // other row.
   url_key: string | null;
   login_gated: number;
   not_fillable: number;
+  low_confidence: number;
   created_at: string;
   updated_at: string;
 }
@@ -99,6 +101,7 @@ export function createQueueTable(db: Database) {
     url_key TEXT UNIQUE,
     login_gated INTEGER DEFAULT 0,
     not_fillable INTEGER DEFAULT 0,
+    low_confidence INTEGER DEFAULT 0,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
   )`);
@@ -121,8 +124,8 @@ export function insertQueueEntryFromPosting(db: Database, posting: PostingRow): 
   if (!urlKey) return null;
   const raw = db
     .query(
-      `INSERT INTO queue (url, url_key, company, role, login_gated, not_fillable, status)
-       VALUES (?, ?, ?, ?, ?, ?, 'queued')
+      `INSERT INTO queue (url, url_key, company, role, login_gated, not_fillable, low_confidence, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'queued')
        ON CONFLICT(url_key) DO NOTHING
        RETURNING *`,
     )
@@ -133,6 +136,7 @@ export function insertQueueEntryFromPosting(db: Database, posting: PostingRow): 
       String(posting.title ?? '').slice(0, MAX_TEXT),
       posting.login_gated ? 1 : 0,
       posting.not_fillable ? 1 : 0,
+      posting.low_confidence ? 1 : 0,
     ) as QueueRow | undefined;
   return raw ?? null;
 }

@@ -93,6 +93,9 @@ try {
 try {
   db.run(`ALTER TABLE queue ADD COLUMN not_fillable INTEGER DEFAULT 0`);
 } catch {}
+try {
+  db.run(`ALTER TABLE queue ADD COLUMN low_confidence INTEGER DEFAULT 0`);
+} catch {}
 
 // D-11 backfill: existing queue rows (inserted via insertQueueEntry(db, url),
 // no url_key) must be dedupe-protected before the UNIQUE index below is

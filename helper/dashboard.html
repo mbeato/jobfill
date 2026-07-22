@@ -551,6 +551,18 @@ function renderPostings(rows) {
     </table>`;
 }
 
+// Additive/promotive override (D-16) — no confirm() dialog, matching the
+// non-destructive "mark reviewed" button. Reloads first so the two re-renders
+// don't wipe an inserted notice (mirrors triggerFill's reload-then-notify order).
+async function queueReject(id) {
+  const resp = await (await fetch(`/postings/${id}/promote`, { method: 'POST' })).json();
+  await loadPostings();
+  await loadQueue();
+  if (resp && resp.promoted === false) {
+    document.getElementById('seekBody').insertAdjacentHTML('afterbegin', `<div class="muted">already queued or applied</div>`);
+  }
+}
+
 load();
 loadLibrary();
 loadFailures();

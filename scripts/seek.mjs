@@ -36,9 +36,13 @@ function printFilterCounts(counts) {
 const noFilter = process.argv.includes('--no-filter');
 const seekUrl = noFilter ? `${HELPER}/seek?filter=0` : `${HELPER}/seek`;
 
+// The filtering sweep holds this request open for up to LLM_CAP × ~60s of
+// relevance calls; Bun's default 5-minute fetch timeout would abort it mid-run.
 const res = await fetch(seekUrl, {
   method: 'POST',
   headers: { 'x-jobfill-token': TOKEN },
+  timeout: false,
+  signal: AbortSignal.timeout(3 * 60 * 60 * 1000),
 });
 if (!res.ok) {
   console.error(`[seek] POST /seek failed: HTTP ${res.status}`);

@@ -6,7 +6,10 @@ Edit this file directly to change what "relevant" means — no code change neede
 ## Target roles
 
 Software engineer, fullstack software engineer, AI engineer / applied AI
-engineer, member of technical staff. Early-career only — no seniority track.
+engineer, member of technical staff, founding engineer at early-stage
+startups (founder-evaluated — a "Founding Engineer" title is NOT a seniority
+marker and should not be rejected for implied experience). Early-career only
+— no conventional seniority track (Senior/Staff/Principal/Lead).
 
 ## Years of experience
 

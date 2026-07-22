@@ -100,12 +100,14 @@ export async function runFilterPromote(db: Database, deps: DecideDeps): Promise<
 
     // D-10: login-gated sources (YC/Jobright) have no reachable JD — fetching
     // would fail every sweep and strand the posting in a permanent held loop.
-    // Score them on metadata alone; the YOE rule needs JD text, so it is
-    // skipped and seniority stays covered by the title rule + LLM.
+    // Score them on metadata alone: an EMPTY jd triggers relevance.ts's
+    // trusted-side metadata-only guidance. (Guidance text must never ride in
+    // the jd slot — the prompt's injection rule makes the model ignore it.)
+    // The YOE rule needs JD text, so it is skipped; seniority stays covered
+    // by the title rule + LLM.
     let jd: string;
     if (p.login_gated) {
-      jd =
-        'Job description unavailable (login-gated source; a human reviews every queued posting before applying). Judge from the title, company, and location alone: queue when the title matches the target roles with no seniority markers and the location is acceptable; reject only on a visible mismatch (seniority-marked or non-engineering title, out-of-market location). Do NOT reject merely because the description is missing — missing-description uncertainty is acceptable for these postings.';
+      jd = '';
     } else {
       try {
         jd = await deps.fetchJD(p);

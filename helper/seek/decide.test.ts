@@ -320,7 +320,9 @@ test('login-gated posting: fetchJD and classifyYoe are skipped, LLM judges on me
 
   expect(fetchCalls).toBe(0);
   expect(yoeCalls).toBe(0);
-  expect(seenJd).toContain('login-gated');
+  // Empty jd is the metadata-only signal — guidance lives on relevance.ts's
+  // trusted prompt side, never in the untrusted jd slot.
+  expect(seenJd).toBe('');
   expect(counts.queued).toBe(1);
   const stored = db.query('SELECT decision FROM postings WHERE id = ?').get(row.id) as { decision: string };
   expect(stored.decision).toBe('queued');

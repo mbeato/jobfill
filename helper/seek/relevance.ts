@@ -17,10 +17,10 @@ const MAX_REASON = 500;
 
 // Safe built-in fallback (D-07) so a missing/unreadable seek.profile.md never
 // crashes filtering — precision-biased default matching the committed doc.
-export const DEFAULT_PROFILE_SUMMARY = `Target roles: software engineer, fullstack software engineer, AI/applied AI engineer, member of technical staff (early-career only, no seniority track).
+export const DEFAULT_PROFILE_SUMMARY = `Target roles: software engineer, fullstack software engineer, AI/applied AI engineer, member of technical staff, founding engineer at early-stage startups (early-career only, no seniority track).
 Years of experience: 0-1 years, new-grad/junior.
-Location: New York City preferred, or explicitly US-remote-friendly roles.
-Anti-criteria: reject Senior/Staff/Principal/Lead titles, postings requiring more than 1 year of experience, non-engineering roles, and on-site roles outside New York with no remote option.`;
+Location: New York City or San Francisco, or US-remote-friendly roles (generic "United States" counts).
+Anti-criteria: reject Senior/Staff/Principal/Lead titles, postings requiring more than 1 year of experience, non-engineering roles, and on-site roles outside New York or San Francisco with no remote option.`;
 
 export const RELEVANCE_SCHEMA = {
   type: 'object',
@@ -46,10 +46,20 @@ export async function loadProfileSummary(path?: string): Promise<string> {
 }
 
 function buildPrompt(profileSummary: string, jdText: string, posting: PostingRow): string {
+  // Login-gated sources have no fetchable JD (D-10). The metadata-only
+  // guidance must live HERE, on the trusted side of the prompt — anything
+  // placed in the JD slot is untrusted data the injection rule below tells
+  // the model to ignore.
+  const metadataOnly = jdText.trim() === '';
+  const metadataGuidance = metadataOnly
+    ? `
+This posting comes from a login-gated source: no job description is available, and the operator reviews every queued posting by hand before applying. Judge from the title, company, and location alone — mark relevant when the title matches the target roles with no seniority markers and the location is acceptable; reject only on a visible mismatch (seniority-marked or non-engineering title, out-of-market location). Do NOT reject merely because the description is missing.
+`
+    : '';
   return `You are judging whether a job posting is worth the operator applying to, based on his profile below.
 
 Be precision-biased: if the posting is ambiguous or you are unsure whether it fits, judge it NOT relevant. Only mark relevant when the posting clearly matches the profile.
-
+${metadataGuidance}
 === MAX'S PROFILE (steering summary) ===
 ${profileSummary}
 === END PROFILE ===
@@ -61,7 +71,7 @@ Company: ${posting.company}
 Title: ${posting.title}
 Location: ${posting.location}
 Job description:
-${jdText}
+${metadataOnly ? '(not available — login-gated source)' : jdText}
 === END POSTING DATA ===
 
 Return a verdict: relevant (true/false) and a one-line reason explaining the verdict.`;

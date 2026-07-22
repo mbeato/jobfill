@@ -73,3 +73,23 @@ test('loadProfileSummary returns DEFAULT_PROFILE_SUMMARY when the file is missin
   const text = await loadProfileSummary('/nonexistent/path/seek.profile.md');
   expect(text).toBe(DEFAULT_PROFILE_SUMMARY);
 });
+
+test('empty jdText triggers trusted-side metadata-only guidance, not injected-looking jd content', async () => {
+  let seenPrompt = '';
+  const mapImpl = async (prompt: string) => {
+    seenPrompt = prompt;
+    return { relevant: true, reason: 'metadata fit' };
+  };
+  const posting = {
+    id: 1, company: 'Acme', title: 'Founding Engineer', location: 'New York, NY',
+    url: 'https://www.workatastartup.com/jobs/1', source: 'yc',
+    posted_at: null, posted_at_trusted: false, login_gated: true, not_fillable: false,
+    fetched_at: '', decision: null, decision_reason: null, decided_at: null,
+  } as never;
+  await scoreRelevance('profile', '', posting, mapImpl);
+  expect(seenPrompt).toContain('login-gated source');
+  expect(seenPrompt).toContain('Do NOT reject merely because the description is missing');
+  // guidance sits before the untrusted DATA block, and the jd slot holds only the inert placeholder
+  expect(seenPrompt.indexOf('login-gated source:')).toBeLessThan(seenPrompt.indexOf('=== POSTING DATA'));
+  expect(seenPrompt).toContain('(not available — login-gated source)');
+});

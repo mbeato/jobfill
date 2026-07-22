@@ -8,7 +8,7 @@ import { createFailuresTable, insertFailures, listFailures, type FailureRecordIn
 import { createQueueTable, insertQueueEntry, updateQueueStatus, listQueue, InvalidQueueStatusError } from './queue';
 import { mapViaCLI } from './mapping';
 import { normalizeUrl } from './seek/normalize';
-import { createPostingsTable, upsertPosting } from './seek/postings';
+import { createPostingsTable, upsertPosting, recordDecision, listPostingsToDecide } from './seek/postings';
 import { loadSeekConfig } from './seek/config';
 import { runSweep } from './seek/sweep';
 import { fetchGreenhouse } from './seek/greenhouse';
@@ -16,6 +16,11 @@ import { fetchLever } from './seek/lever';
 import { fetchAshby } from './seek/ashby';
 import { fetchHNPostings } from './seek/hn';
 import type { SourceName } from './seek/types';
+import { classifyMetadata, classifyYoe } from './seek/filter';
+import { fetchJD } from './seek/jd-fetch';
+import { scoreRelevance, loadProfileSummary } from './seek/relevance';
+import { promotePosting } from './seek/promote';
+import { runFilterPromote } from './seek/decide';
 
 const PORT = 7877;
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -64,6 +69,65 @@ db.run(`CREATE TABLE IF NOT EXISTS answers (
 createFailuresTable(db);
 createQueueTable(db);
 createPostingsTable(db);
+
+// Live-DB migrations (idempotent, re-run safe): both createQueueTable and
+// createPostingsTable's CREATE TABLE IF NOT EXISTS strings already include
+// these columns for a fresh database, but the live jobfill.db predates them —
+// ALTER-guard each column exactly like the applications summary/tailor_state
+// blocks above (T-10-09).
+try {
+  db.run(`ALTER TABLE postings ADD COLUMN decision TEXT`);
+} catch {}
+try {
+  db.run(`ALTER TABLE postings ADD COLUMN decision_reason TEXT`);
+} catch {}
+try {
+  db.run(`ALTER TABLE postings ADD COLUMN decided_at TEXT`);
+} catch {}
+try {
+  db.run(`ALTER TABLE queue ADD COLUMN url_key TEXT`);
+} catch {}
+try {
+  db.run(`ALTER TABLE queue ADD COLUMN login_gated INTEGER DEFAULT 0`);
+} catch {}
+try {
+  db.run(`ALTER TABLE queue ADD COLUMN not_fillable INTEGER DEFAULT 0`);
+} catch {}
+
+// D-11 backfill: existing queue rows (inserted via insertQueueEntry(db, url),
+// no url_key) must be dedupe-protected before the UNIQUE index below is
+// created. Oldest-id-wins on a normalizeUrl collision — the redundant newer
+// duplicate is left with a NULL url_key (never deleted, WR-05) so the index
+// creation can never fail on a pre-existing internal duplicate.
+{
+  const legacy = db.query('SELECT id, url FROM queue WHERE url_key IS NULL ORDER BY id ASC').all() as {
+    id: number;
+    url: string;
+  }[];
+  // Seed `seen` with url_keys already persisted from a prior boot (not just
+  // this run's in-memory set) — otherwise a re-boot re-attempts backfilling a
+  // permanently-NULL collision-duplicate row into a key an earlier boot
+  // already assigned to another row, violating the UNIQUE index created below.
+  const seen = new Set(
+    (db.query('SELECT url_key FROM queue WHERE url_key IS NOT NULL').all() as { url_key: string }[]).map(
+      r => r.url_key,
+    ),
+  );
+  for (const row of legacy) {
+    const key = normalizeUrl(row.url);
+    if (key && !seen.has(key)) {
+      db.run('UPDATE queue SET url_key = ? WHERE id = ?', [key, row.id]);
+      seen.add(key);
+    }
+  }
+}
+
+// Partial UNIQUE index: covers every backfilled row, exempts only the rare
+// oldest-wins collision-duplicate rows intentionally left NULL above.
+db.run('CREATE UNIQUE INDEX IF NOT EXISTS idx_queue_url_key ON queue(url_key) WHERE url_key IS NOT NULL');
+
+// D-15 last-sweep summary store: a tiny key/value table, one JSON row.
+db.run('CREATE TABLE IF NOT EXISTS seek_meta (key TEXT PRIMARY KEY, value TEXT)');
 
 // Shared secret with the extension (must match HELPER_TOKEN in extension/background.js).
 // No CORS headers are served: cross-origin pages can neither read responses nor pass
@@ -363,9 +427,43 @@ Bun.serve({
       }
       if (pathname === '/seek' && req.method === 'POST') {
         const config = await loadSeekConfig();
-        return json(
-          await runSweep(db, config, { fetchGreenhouse, fetchLever, fetchAshby, fetchHNPostings, upsertPosting }),
-        );
+        const fetchResults = await runSweep(db, config, {
+          fetchGreenhouse,
+          fetchLever,
+          fetchAshby,
+          fetchHNPostings,
+          upsertPosting,
+        });
+        // D-09 escape hatch: ?filter=0 skips the filter->promote stage entirely
+        // (discovery-only debugging). The prior last-sweep summary is preserved.
+        const noFilter = new URL(req.url).searchParams.get('filter') === '0';
+        if (noFilter) return json({ fetch: fetchResults, filter: null });
+
+        const filterCounts = await runFilterPromote(db, {
+          classifyMetadata,
+          classifyYoe,
+          fetchJD,
+          scoreRelevance,
+          loadProfileSummary,
+          promotePosting,
+          recordDecision,
+          listPostingsToDecide,
+        });
+        const fetchedTotal = fetchResults.reduce((sum, r) => sum + (r.fetched ?? 0), 0);
+        // D-15: rejected folds in deduped (decide.ts stores dedupe rejections as
+        // decision='rejected' too, matching how /postings groups them) — deduped
+        // is also carried separately for the dashboard's expandable breakdown.
+        const lastSweep = {
+          at: new Date().toISOString(),
+          fetched: fetchedTotal || filterCounts.toDecide,
+          rejected: filterCounts.rulesRejected + filterCounts.llmRejected + filterCounts.deduped,
+          deduped: filterCounts.deduped,
+          held: filterCounts.held,
+          queued: filterCounts.queued,
+          byCriterion: filterCounts.byCriterion,
+        };
+        db.run('INSERT OR REPLACE INTO seek_meta(key, value) VALUES (?, ?)', ['last_sweep', JSON.stringify(lastSweep)]);
+        return json({ fetch: fetchResults, filter: filterCounts });
       }
       if (pathname === '/seek/results' && req.method === 'POST') {
         const b = await req.json();

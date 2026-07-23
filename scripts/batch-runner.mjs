@@ -16,7 +16,18 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setupRunner, fillOne } from './lib/runner-core.mjs';
 import { loadSeekConfig } from '../helper/seek/config';
-import { selectEligible } from '../helper/seek/batch-eligibility';
+import { selectEligible, classifyReviewFlags } from '../helper/seek/batch-eligibility';
+
+// fillOne state -> detail.failed[].reason mapping (the two enums differ ONLY
+// in the 'failed'->'fill-failed' rename; a caught thrown fillOne is given
+// synthetic state 'failed' below, so it maps through here too).
+const REASON_MAP = {
+  failed: 'fill-failed',
+  'no-form': 'no-form',
+  timeout: 'timeout',
+  'trigger-error': 'trigger-error',
+  duplicate: 'duplicate',
+};
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const EXT_DIR = join(ROOT, 'extension');
@@ -101,41 +112,83 @@ try {
   throw e;
 }
 
-// Stubbed counters/stopReason threaded through for Task 2 to fill in with
-// cap enforcement, the circuit breaker, and auto-review classification.
 let filled = 0;
 let failed = 0;
+let consecutiveFailures = 0;
 let stopReason = 'queue empty';
 const filledDetail = [];
 const failedDetail = [];
 
-for (const item of toFill) {
-  let outcome;
-  try {
-    // BATCH-02: one bad posting never stops the run — a thrown fillOne is
-    // caught, counted as a failure, and the loop continues.
-    outcome = await fillOne(ctx, extId, dashPage, { id: item.queueId, url: item.url }, { pollMs: POLL_MS, budgetMs: BUDGET_MS });
-  } catch (e) {
-    console.log(`[batch-runner] ${item.company} / ${item.role}: fillOne threw (${e.message}) — isolated, continuing`);
-    outcome = { state: 'failed', tab: null };
+// A browser is alive from here on (or will be, once the loop opens tabs) —
+// nothing below may throw uncaught, or the operator loses both the browser and the
+// filled-tab review queue it was holding open. This guard records a failed
+// run and still idles rather than letting the process die.
+try {
+  for (const item of toFill) {
+    // Refreshed at least every posting; fillOne itself is bounded by
+    // BUDGET_MS but the ~25s poll keeps gaps well inside the 3min stale
+    // window reconcileInterruptedBatchRuns checks (helper/seek/batch.ts).
+    await patchRun({ heartbeat: true });
+
+    let outcome;
+    try {
+      // BATCH-02: one bad posting never stops the run — a thrown fillOne is
+      // caught, counted as a failure, and the loop continues.
+      outcome = await fillOne(ctx, extId, dashPage, { id: item.queueId, url: item.url }, { pollMs: POLL_MS, budgetMs: BUDGET_MS });
+    } catch (e) {
+      console.log(`[batch-runner] ${item.company} / ${item.role}: fillOne threw (${e.message}) — isolated, continuing`);
+      outcome = { state: 'failed', tab: null };
+    }
+
+    if (outcome.state === 'filled') {
+      filled++;
+      consecutiveFailures = 0;
+      // D-03: zero flagged fields -> advance to 'reviewed'; any flag -> leave
+      // 'filled' for the operator's own review pass. NEVER 'submitted'.
+      const { flagged } = classifyReviewFlags(outcome.row?.results_summary ?? '');
+      if (!flagged) {
+        await patchQueue(item.queueId, { status: 'reviewed' });
+        console.log(`[batch-runner] ${item.company} / ${item.role}: filled, clean — marked reviewed`);
+        filledDetail.push({ queueId: item.queueId, company: item.company, role: item.role, reviewed: true });
+      } else {
+        console.log(`[batch-runner] ${item.company} / ${item.role}: filled, flagged — left for review`);
+        filledDetail.push({ queueId: item.queueId, company: item.company, role: item.role, reviewed: false });
+      }
+    } else {
+      // D-11: no-form / failed / timeout / trigger-error / duplicate all
+      // close the posting tab and move on. 'filled' is the only outcome
+      // that leaves its tab open for review.
+      failed++;
+      consecutiveFailures++;
+      if (outcome.tab) await outcome.tab.close().catch(() => {});
+      const reason = REASON_MAP[outcome.state] ?? 'fill-failed';
+      console.log(`[batch-runner] ${item.company} / ${item.role}: ${reason}`);
+      failedDetail.push({ queueId: item.queueId, company: item.company, role: item.role, reason });
+
+      // D-12: 3 consecutive failures signals a systemic outage (e.g. helper
+      // down, extension broken) rather than bad-luck individual postings —
+      // abort the run instead of burning through the rest of the queue.
+      // Skips never reach this counter (selectEligible pre-filters them
+      // before the loop), so only real fill attempts can trip it.
+      if (consecutiveFailures >= 3) {
+        stopReason = 'circuit breaker';
+        console.log('[batch-runner] 3 consecutive failures — circuit breaker tripped, stopping');
+        break;
+      }
+    }
   }
 
-  if (outcome.state === 'filled') {
-    filled++;
-    console.log(`[batch-runner] ${item.company} / ${item.role}: filled`);
-    filledDetail.push({ queueId: item.queueId, company: item.company, role: item.role, reviewed: false });
-  } else {
-    // D-11: no-form / failed / timeout / trigger-error / duplicate all close
-    // the posting tab and move on. 'filled' is the only outcome that leaves
-    // its tab open for review.
-    failed++;
-    if (outcome.tab) await outcome.tab.close().catch(() => {});
-    console.log(`[batch-runner] ${item.company} / ${item.role}: ${outcome.state}`);
-    failedDetail.push({ queueId: item.queueId, company: item.company, role: item.role, reason: outcome.state });
+  if (stopReason !== 'circuit breaker') {
+    // toFill was already sliced to headroom by selectEligible, so the
+    // natural end-of-loop stop is either every eligible posting got filled
+    // (capReached false) or eligible postings remained beyond headroom
+    // (capReached true).
+    stopReason = capReached ? 'cap' : 'queue empty';
   }
+} catch (e) {
+  console.error(`[batch-runner] unexpected error mid-run: ${e.message} — recording run, browser stays open`);
+  stopReason = 'interrupted';
 }
-
-stopReason = capReached ? 'cap' : 'queue empty';
 
 const detail = {
   headline: { filled, skipped: skipped.length, failed },
@@ -144,6 +197,9 @@ const detail = {
   failed: failedDetail,
   filled: filledDetail,
 };
+// status is 'ok' even for a circuit-breaker/interrupted abort — the browser
+// did start and holds filled tabs; only a browser-busy start (above) is
+// recorded 'failed'.
 await patchRun({ status: 'ok', detail });
 console.log(`[batch-runner] done: ${JSON.stringify(detail.headline)} stop_reason=${stopReason}`);
 

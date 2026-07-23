@@ -47,12 +47,15 @@
   .s-running { color: #e65100; } .s-ok { color: #2e7d32; }
   .sweep-toggle { color: #1565c0; cursor: pointer; }
   .auth-badge { color: #d32f2f; font-weight: 600; margin: 4px 0; }
+  .batch-actions button { margin-right: 8px; padding: 4px 10px; cursor: pointer; border: 1px solid #ccc; background: #fff; border-radius: 4px; }
+  .batch-toggle { color: #1565c0; cursor: pointer; }
 </style>
 <body>
   <h1>jobfill tracker</h1>
   <div id="stats"></div>
   <div id="queue">
     <h2>posting queue</h2>
+    <div id="queueSummary"></div>
     <div id="queueBody"></div>
   </div>
   <div id="sweeps">
@@ -60,6 +63,11 @@
     <div class="sweep-actions"><button onclick="triggerSweep()">Trigger sweep now</button></div>
     <div id="sweepsBadges"></div>
     <div id="sweepsBody"></div>
+  </div>
+  <div id="batch">
+    <h2>batch fills</h2>
+    <div class="batch-actions"><button onclick="triggerBatch()">Trigger batch now</button></div>
+    <div id="batchBody"></div>
   </div>
   <div id="seek">
     <h2>seek decisions</h2>
@@ -360,7 +368,20 @@ async function patchQueue(id, body) {
   loadQueue();
 }
 
+// D-03: reviewed/filled split summary — reinforces the existing s-filled (green,
+// review first)/s-reviewed (blue, ready to submit) color meaning at a glance. Omit
+// entirely when both counts are zero, matching the terse-empty-state convention.
+function renderQueueSummary(rows) {
+  const el = document.getElementById('queueSummary');
+  const filledCount = rows.filter(r => r.status === 'filled').length;
+  const reviewedCount = rows.filter(r => r.status === 'reviewed').length;
+  el.innerHTML = (filledCount || reviewedCount)
+    ? `<span class="s-filled">${filledCount} filled</span> — look closer first · <span class="s-reviewed">${reviewedCount} reviewed</span> — just submit`
+    : '';
+}
+
 function renderQueue(rows) {
+  renderQueueSummary(rows);
   const body = document.getElementById('queueBody');
   if (!rows.length) {
     body.innerHTML = `
@@ -368,6 +389,11 @@ function renderQueue(rows) {
       <div class="muted" style="font-size: 12px">add a posting URL from the popup, or POST it to /queue, to start the queue.</div>`;
     return;
   }
+  // D-09: skip badges — cross-reference the LATEST FINISHED batch run's skip list
+  // (mirrors renderAuthBadges' rows.find(r => r.status !== 'running' && r.detail)).
+  // A row skipped two runs ago and absent from the latest run shows no badge.
+  const latestBatch = batchRows.find(r => r.status !== 'running' && r.detail);
+  const skippedThisBatch = new Map((latestBatch?.detail?.skipped || []).map(s => [s.queueId, s.reason]));
   body.innerHTML = `
     <table>
       <thead><tr><th>date</th><th>company / role</th><th>url</th><th>status</th><th>results</th><th>actions</th></tr></thead>
@@ -387,6 +413,7 @@ function renderQueue(rows) {
           // WR-01-style guard (mirrors the failures table): stored urls are untrusted —
           // esc() does not neutralize a javascript: scheme, so only emit an anchor for http(s).
           const safeUrl = /^https?:\/\//i.test(q.url) ? q.url : '';
+          const skipReason = q.status === 'queued' ? skippedThisBatch.get(q.id) : undefined;
           return `
             <tr>
               <td class="muted">${(q.created_at || '').slice(0, 10)}</td>
@@ -396,6 +423,7 @@ function renderQueue(rows) {
               </td>
               <td><span class="${statusClass}">${esc(q.status)}</span>
                 ${q.status === 'failed' ? `<div class="muted">fill failed — ${esc(q.error)}. check the field results below, or retry from the popup.</div>` : ''}
+                ${skipReason ? `<div class="muted">skipped last batch — ${esc(SKIP_REASON_LABELS[skipReason] || skipReason)}</div>` : ''}
               </td>
               <td>
                 <div class="muted queue-toggle" onclick="toggleQueueResults(${q.id})">results <span id="qarrow-${q.id}">▾</span></div>
@@ -701,11 +729,145 @@ function toggleSweepDetail(id) {
   arrow.textContent = expanded ? '▾' : '▴';
 }
 
+// BATCH-02/BATCH-03: batch fills run-history — mirrors the sweeps section's
+// trigger/poll/detail pattern exactly. Status is untrusted server-authored state,
+// allowlisted before it reaches a class attribute (stored-XSS sink), mirroring
+// SWEEP_STATUSES above. Stop/skip/failed reasons are translated via fixed label
+// maps below — no raw internal code (e.g. 'fill-failed', 'trigger-error') ever
+// reaches the DOM (UI-SPEC Copywriting Contract).
+const BATCH_STATUSES = new Set(['running', 'ok', 'failed']);
+let batchRows = [];
+let batchPollHandle = null;
+
+const STOP_REASON_LABELS = {
+  cap: 'stopped — reached the review backlog cap',
+  'queue empty': 'stopped — no more eligible postings',
+  'browser busy': "didn't start — browser busy, review pending tabs first",
+  'circuit breaker': 'stopped early — 3 fills in a row failed',
+  interrupted: 'stopped — run was interrupted (browser closed)',
+};
+
+const SKIP_REASON_LABELS = {
+  'login-gated': 'skipped — login required',
+  'not-fillable': 'skipped — not fillable',
+  'unsupported-host': 'skipped — host not on allowlist',
+};
+
+const FAILED_REASON_LABELS = {
+  'no-form': 'failed — no form rendered',
+  'fill-failed': "failed — couldn't complete the fill",
+  timeout: 'failed — timed out',
+  'trigger-error': "failed — couldn't start the fill",
+  duplicate: 'failed — already applied',
+};
+
+// Re-renders the queue after batchRows populates — REQUIRED, not optional. The
+// "skipped last batch" badge cross-references batchRows, but loadQueue() and
+// loadBatch() are independent unawaited fetches at page load (see bottom-of-file
+// initial load), so batchRows is still [] on the queue's first render. Making
+// loadBatch re-render the queue keeps badge correctness fetch-order-independent.
+async function loadBatch() {
+  batchRows = await (await fetch('/batch-runs')).json();
+  renderBatch(batchRows);
+  renderQueue(queueRows);
+}
+
+// Fire-and-poll (mirrors triggerSweep): reload-then-notify order. Two distinct 409
+// notices — sweep running (D-08 mutual exclusion) vs batch already running.
+async function triggerBatch() {
+  const resp = await fetch('/batch', { method: 'POST' });
+  const body = await resp.json();
+  await loadBatch();
+  if (resp.status === 409) {
+    const notice = String(body.error || '').includes('sweep')
+      ? "can't start batch — sweep is running, try again after it finishes"
+      : `batch already running (run ${Number(body.runId) || ''})`;
+    document.getElementById('batchBody').insertAdjacentHTML('afterbegin', `<div class="muted">${notice}</div>`);
+    return;
+  }
+  if (resp.ok && body.id) pollBatch(body.id);
+}
+
+// Mirrors pollSweep — re-renders the in-progress run every ~3s, stops once status
+// leaves 'running'. One extra loadBatch() on the terminal tick so the just-finished
+// run's skip list badges the queue rows immediately.
+function pollBatch(runId) {
+  if (batchPollHandle) clearInterval(batchPollHandle);
+  batchPollHandle = setInterval(async () => {
+    const run = await (await fetch(`/batch-runs/${runId}`)).json();
+    batchRows = [run, ...batchRows.filter(r => r.id !== runId)];
+    renderBatch(batchRows);
+    if (run.status !== 'running') {
+      clearInterval(batchPollHandle);
+      loadBatch();
+    }
+  }, 3000);
+}
+
+function renderBatch(rows) {
+  const body = document.getElementById('batchBody');
+  if (!rows.length) {
+    body.innerHTML = `
+      <div class="muted">no batch fills run yet</div>
+      <div class="muted" style="font-size: 12px">trigger one above, or wait for the daily scheduled batch after today's sweep.</div>`;
+    return;
+  }
+  body.innerHTML = `
+    <table>
+      <thead><tr><th>started</th><th>trigger</th><th>duration</th><th>headline</th><th>status</th><th>detail</th></tr></thead>
+      <tbody>
+        ${rows.map(r => {
+          const statusClass = BATCH_STATUSES.has(r.status) ? `s-${r.status}` : 'muted';
+          const h = r.detail?.headline;
+          const headline = h ? `${h.filled} filled · ${h.skipped} skipped · ${h.failed} failed` : '—';
+          const stopReasonLine = r.status !== 'running' && r.stop_reason
+            ? `<div class="muted">${esc(STOP_REASON_LABELS[r.stop_reason] || r.stop_reason)}</div>`
+            : '';
+          return `
+            <tr>
+              <td class="muted">${esc((r.started_at || '').replace('T', ' ').slice(0, 19))}</td>
+              <td>${esc(r.trigger)}</td>
+              <td>${fmtDuration(r.started_at, r.finished_at, r.status)}</td>
+              <td>${headline}</td>
+              <td><span class="${statusClass}">${esc(r.status)}</span>${stopReasonLine}</td>
+              <td>
+                ${r.detail ? `
+                  <div class="batch-toggle" onclick="toggleBatchDetail(${r.id})">skips <span id="barrow-${r.id}">▾</span></div>
+                  <div id="bdetail-${r.id}" style="display:none">${renderBatchDetail(r.detail)}</div>
+                ` : `<span class="muted">in progress…</span>`}
+              </td>
+            </tr>`;
+        }).join('')}
+      </tbody>
+    </table>`;
+}
+
+// detail.skipped/detail.failed carry third-party-derived company/role text
+// (untrusted stored data) — esc() every one, mirroring renderSweepSourceDetail.
+function renderBatchDetail(detail) {
+  const skipLines = (detail.skipped || [])
+    .map(s => `<div class="muted" style="padding-left:4px">${esc(s.company)} · ${esc(s.role)}: ${esc(SKIP_REASON_LABELS[s.reason] || s.reason)}</div>`)
+    .join('');
+  const failLines = (detail.failed || [])
+    .map(f => `<div class="muted" style="padding-left:4px">${esc(f.company)} · ${esc(f.role)}: ${esc(FAILED_REASON_LABELS[f.reason] || f.reason)}</div>`)
+    .join('');
+  return skipLines + failLines;
+}
+
+function toggleBatchDetail(id) {
+  const body = document.getElementById(`bdetail-${id}`);
+  const arrow = document.getElementById(`barrow-${id}`);
+  const expanded = body.style.display !== 'none';
+  body.style.display = expanded ? 'none' : 'block';
+  arrow.textContent = expanded ? '▾' : '▴';
+}
+
 load();
 loadLibrary();
 loadFailures();
 loadQueue();
 loadPostings();
 loadSweeps();
+loadBatch();
 </script>
 </body>

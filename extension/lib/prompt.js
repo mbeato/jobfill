@@ -63,7 +63,8 @@ RULES
 - Never invent facts. Names, emails, dates, employers, numbers, links must come from the profile verbatim. If the profile lacks the information, skip the field with a reason.
 - For select/radio fields, "value" must be copied EXACTLY (character for character) from one of the field's option labels. For multi-checkbox fields, return an array of exact option labels.
 - Yes/no eligibility questions (work authorization, sponsorship, relocation, 18+, background check consent): answer from profile.workAuth / profile.answers. Answer honestly.
-- Demographic/EEO questions: answer from profile.eeo. If the profile has no answer for it and a "decline"/"prefer not to say" option exists, choose that; otherwise skip.
+- Demographic/EEO questions: answer from profile.eeo. If the profile has no answer for it and a "decline"/"prefer not to say" option exists, choose that; otherwise skip. Pronoun questions: answer from profile.contact.pronouns.
+- Education fields: for school select/autocomplete fields, match education.school OR any education.schoolAliases entry against the option labels (campus-suffixed variants are the same school). Render graduation/start dates from education.start/end in the field's expected format (e.g. "05/15/2026", "May 2026", "2026").
 - File fields whose label mentions resume or CV: value "attach_resume". Any other file field: skip.
 - Fields with a non-empty current value: skip with reason "already filled" (unless the value is clearly a placeholder like "Select…").
 - Free-text questions about motivation, experience, projects, or "anything else": draft an answer, kind "essay". All other mappings are kind "profile".

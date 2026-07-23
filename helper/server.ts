@@ -121,6 +121,9 @@ try {
 try {
   db.run(`ALTER TABLE queue ADD COLUMN low_confidence INTEGER DEFAULT 0`);
 } catch {}
+try {
+  db.run(`ALTER TABLE queue ADD COLUMN resume_name TEXT DEFAULT ''`);
+} catch {}
 
 // D-11 backfill: existing queue rows (inserted via insertQueueEntry(db, url),
 // no url_key) must be dedupe-protected before the UNIQUE index below is
@@ -379,7 +382,11 @@ Hard rules:
 
   const pdfBytes = await Bun.file(pdfPath).arrayBuffer();
   return {
-    name: `resume_${effectiveSlug}.pdf`,
+    // Attachment name is deliberately suffix-free: recruiters see this filename,
+    // and the slug is 'unknown' whenever tailoring ran before mapping resolved
+    // the company. The on-disk archive path (rounds/<slug>/<name>_<date>.pdf)
+    // keeps the full provenance.
+    name: 'resume.pdf',
     path: pdfPath,
     b64: Buffer.from(pdfBytes).toString('base64'),
     mime: 'application/pdf',

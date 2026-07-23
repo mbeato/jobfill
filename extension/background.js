@@ -282,7 +282,7 @@ async function runFill(tabId, force = false, opts = {}) {
         await helperFetch(`/queue/${queueId}`, {
           method: 'PATCH',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ status: 'filled', company: mapping.company || '', role: mapping.role || '', results_summary: JSON.stringify(finalStatus.results) }),
+          body: JSON.stringify({ status: 'filled', company: mapping.company || '', role: mapping.role || '', results_summary: JSON.stringify(finalStatus.results), resume_name: attachedResume?.name || '' }),
         });
       } catch (e) {
         console.info('jobfill queue-status update skipped (helper unavailable)', e);

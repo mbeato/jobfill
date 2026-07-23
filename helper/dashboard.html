@@ -437,7 +437,8 @@ function renderQueue(rows) {
           return `
             <tr>
               <td class="muted">${(q.created_at || '').slice(0, 10)}</td>
-              <td><strong>${esc(q.company)}</strong>${q.role ? ` · ${esc(q.role)}` : ''}</td>
+              <td><strong>${esc(q.company)}</strong>${q.role ? ` · ${esc(q.role)}` : ''}
+                ${q.resume_name ? `<div class="muted">resume: ${esc(q.resume_name)}</div>` : ''}</td>
               <td style="text-overflow: ellipsis; white-space: nowrap; overflow: hidden; max-width: 240px">
                 ${safeUrl ? `<a href="${esc(safeUrl)}" target="_blank">${esc(safeUrl)}</a>` : esc(q.url)}
               </td>

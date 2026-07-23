@@ -24,6 +24,7 @@ export interface QueueRow {
   login_gated: number;
   not_fillable: number;
   low_confidence: number;
+  resume_name: string;
   created_at: string;
   updated_at: string;
 }
@@ -35,6 +36,7 @@ export interface QueueUpdatePatch {
   application_id?: number | null;
   results_summary?: string;
   error?: string;
+  resume_name?: string;
 }
 
 // WR-04-style bound: defend the persistence boundary regardless of caller.
@@ -102,6 +104,7 @@ export function createQueueTable(db: Database) {
     login_gated INTEGER DEFAULT 0,
     not_fillable INTEGER DEFAULT 0,
     low_confidence INTEGER DEFAULT 0,
+    resume_name TEXT DEFAULT '',
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
   )`);
@@ -176,6 +179,10 @@ export function updateQueueStatus(db: Database, id: number, patch: QueueUpdatePa
   if (patch.error !== undefined) {
     fields.push('error = ?');
     vals.push(String(patch.error).slice(0, MAX_TEXT));
+  }
+  if (patch.resume_name !== undefined) {
+    fields.push('resume_name = ?');
+    vals.push(String(patch.resume_name).slice(0, MAX_TEXT));
   }
   if (fields.length) {
     db.query(`UPDATE queue SET ${fields.join(', ')}, updated_at = datetime('now') WHERE id = ?`).run(...vals, id);

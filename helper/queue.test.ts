@@ -1,6 +1,6 @@
-import { test, expect } from 'bun:test';
+import { test, expect, describe } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { createQueueTable, insertQueueEntry, updateQueueStatus, listQueue, QUEUE_STATUSES, insertQueueEntryFromPosting } from './queue';
+import { createQueueTable, insertQueueEntry, updateQueueStatus, deleteQueueEntry, listQueue, QUEUE_STATUSES, insertQueueEntryFromPosting } from './queue';
 import { createPostingsTable, upsertPosting } from './seek/postings';
 import type { NormalizedPosting } from './seek/types';
 
@@ -181,4 +181,29 @@ test('legacy insertQueueEntry rows (NULL url_key) coexist with each other under 
   const rows = listQueue(db);
   expect(rows.length).toBe(2);
   expect(a.id).not.toBe(b.id);
+});
+
+describe('deleteQueueEntry', () => {
+  test('deletes a queued row', () => {
+    const db = makeDb();
+    const row = insertQueueEntry(db, 'https://example.com/job');
+    const result = deleteQueueEntry(db, row.id);
+    expect(result.deleted).toBe(true);
+    expect(db.query('SELECT * FROM queue WHERE id = ?').get(row.id)).toBeNull();
+  });
+
+  test('refuses to delete a filling row', () => {
+    const db = makeDb();
+    const row = insertQueueEntry(db, 'https://example.com/job2');
+    updateQueueStatus(db, row.id, { status: 'filling' });
+    const result = deleteQueueEntry(db, row.id);
+    expect(result.deleted).toBe(false);
+    expect(result.reason).toBe('fill in progress');
+    expect(db.query('SELECT * FROM queue WHERE id = ?').get(row.id)).not.toBeNull();
+  });
+
+  test('reports not found for missing rows', () => {
+    const db = makeDb();
+    expect(deleteQueueEntry(db, 9999)).toEqual({ deleted: false, reason: 'not found' });
+  });
 });

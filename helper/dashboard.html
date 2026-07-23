@@ -83,6 +83,8 @@
   [data-tab].tab-visible h2:first-child { margin-top: 16px; }
   .queue-actions button.primary { border-color: #1565c0; color: #1565c0; font-weight: 600; }
   .queue-actions button.primary:hover { background: #1565c0; color: #fff; }
+  .queue-actions button.q-remove { color: #d32f2f; border-color: #eee; }
+  .queue-actions button.q-remove:hover { border-color: #d32f2f; }
   .q-empty { padding: 16px 0; }
 </style>
 <body>
@@ -417,6 +419,30 @@ function markSubmitted(id) {
   patchQueue(id, { status: 'submitted' });
 }
 
+// Same two-click arm/confirm pattern as markSubmitted (no native dialogs — they
+// die in the runner browser). Removal is a hard delete for rows the operator won't pursue.
+const removeArm = new Map();
+async function removeFromQueue(id) {
+  if (!removeArm.has(id)) {
+    const btn = document.getElementById(`remove-btn-${id}`);
+    if (btn) btn.textContent = 'click again to remove';
+    removeArm.set(id, setTimeout(() => {
+      removeArm.delete(id);
+      const b = document.getElementById(`remove-btn-${id}`);
+      if (b) b.textContent = 'remove';
+    }, 4000));
+    return;
+  }
+  clearTimeout(removeArm.get(id));
+  removeArm.delete(id);
+  const res = await fetch(`/queue/${id}`, { method: 'DELETE' });
+  await loadQueue();
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    document.getElementById('queueBody').insertAdjacentHTML('afterbegin', `<div class="muted">remove failed — ${esc(body.error || `HTTP ${res.status}`)}</div>`);
+  }
+}
+
 async function patchQueue(id, body) {
   const res = await fetch(`/queue/${id}`, {
     method: 'PATCH',
@@ -517,6 +543,7 @@ function renderQueue(rows) {
             q.status === 'filling' ? `<button disabled>Fill now</button>` : '',
             q.status === 'filled' ? `<button onclick="patchQueue(${q.id}, {status: 'reviewed'})">mark reviewed</button>` : '',
             `<button id="submit-btn-${q.id}" ${q.status === 'reviewed' ? 'class="primary" ' : ''}onclick="markSubmitted(${q.id})">mark submitted</button>`,
+            q.status !== 'filling' ? `<button id="remove-btn-${q.id}" class="q-remove" onclick="removeFromQueue(${q.id})">remove</button>` : '',
           ].join('');
           return `
             <tr class="q-row${done ? ' q-done' : ''}">

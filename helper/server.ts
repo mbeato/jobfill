@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { normalizeQuestion, matchLibrary, selectFewShot, groupByQuestion, type AnswerRow } from './answers';
 import { createFailuresTable, insertFailures, listFailures, type FailureRecordInput } from './failures';
-import { createQueueTable, insertQueueEntry, updateQueueStatus, listQueue, InvalidQueueStatusError } from './queue';
+import { createQueueTable, insertQueueEntry, updateQueueStatus, deleteQueueEntry, listQueue, InvalidQueueStatusError } from './queue';
 import { mapViaCLI } from './mapping';
 import { normalizeUrl } from './seek/normalize';
 import { createPostingsTable, upsertPosting, listPostings, recordDecision, listPostingsToDecide } from './seek/postings';
@@ -630,6 +630,13 @@ Bun.serve({
           if (e instanceof InvalidQueueStatusError) return json({ error: e.message }, 400);
           throw e;
         }
+      }
+      if (queuePatch && req.method === 'DELETE') {
+        const result = deleteQueueEntry(db, Number(queuePatch[1]));
+        if (!result.deleted) {
+          return json({ error: result.reason }, result.reason === 'not found' ? 404 : 409);
+        }
+        return json({ deleted: true });
       }
       if (pathname === '/sweep' && req.method === 'POST') {
         const running = getRunningSweep(db);

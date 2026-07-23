@@ -190,6 +190,18 @@ export function updateQueueStatus(db: Database, id: number, patch: QueueUpdatePa
   return db.query('SELECT * FROM queue WHERE id = ?').get(id) as QueueRow | null;
 }
 
+// Hard removal for rows the operator decides not to pursue (wrong YoE, dead posting).
+// Refuses while a fill is in flight — the runner is actively writing to the row
+// and a mid-fill delete would strand its PATCHes. Postings-table decisions are
+// untouched, so a removed swept posting is not re-promoted (decided stays decided).
+export function deleteQueueEntry(db: Database, id: number): { deleted: boolean; reason?: string } {
+  const row = db.query('SELECT id, status FROM queue WHERE id = ?').get(id) as { id: number; status: string } | null;
+  if (!row) return { deleted: false, reason: 'not found' };
+  if (row.status === 'filling') return { deleted: false, reason: 'fill in progress' };
+  db.query('DELETE FROM queue WHERE id = ?').run(id);
+  return { deleted: true };
+}
+
 export function listQueue(db: Database): QueueRow[] {
   return db.query('SELECT * FROM queue ORDER BY created_at DESC, id DESC').all() as QueueRow[];
 }

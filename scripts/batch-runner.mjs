@@ -103,6 +103,25 @@ console.log(
   `[batch-runner] run ${runId}: ${toFill.length} eligible to fill, ${skipped.length} skipped, capReached=${capReached}`,
 );
 
+// Nothing to fill — record the outcome and exit WITHOUT ever opening a
+// browser. Launching one here would idle forever holding .runner-profile
+// with nothing to review, turning the next scheduled run into a
+// 'browser busy' failure over an empty tab set.
+if (toFill.length === 0) {
+  await patchRun({
+    status: 'ok',
+    detail: {
+      headline: { filled: 0, skipped: skipped.length, failed: 0 },
+      stop_reason: capReached ? 'cap' : 'queue empty',
+      skipped,
+      failed: [],
+      filled: [],
+    },
+  });
+  console.log('[batch-runner] nothing eligible to fill — exiting without opening a browser');
+  process.exit(0);
+}
+
 // The heartbeat must outlive any single fill: a fill legally runs up to
 // BUDGET_MS (10 min) — far past the 3-min stale window
 // reconcileInterruptedBatchRuns checks (helper/seek/batch.ts) — so a
@@ -145,6 +164,13 @@ try {
   }
   throw e;
 }
+
+// When the operator closes the review browser this process has nothing left to keep
+// alive — exit instead of idling as an immortal orphan (one per daily run).
+// Mid-run this is also correct: the browser dying ends the run; the row at
+// 'filling' (if any) and this run's record are picked up by the helper's
+// heartbeat-stale reconciliation (D-04).
+ctx.on('close', () => process.exit(0));
 
 let filled = 0;
 let failed = 0;

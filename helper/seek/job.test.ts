@@ -4,15 +4,19 @@ import { createPostingsTable, upsertPosting, recordDecision, listPostingsToDecid
 import { createQueueTable } from '../queue';
 import { promotePosting } from './promote';
 import { createSweepsTable, getSweepById } from './runs';
+import { createBatchRunsTable } from './batch';
 import { beginSweep, runSweepJob, spawnSidecar, SweepAlreadyRunningError, type JobDeps } from './job';
 import type { NormalizedPosting, SeekConfig } from './types';
 
 // In-memory DB with the full trio (sweeps/postings/queue) plus the minimal
 // applications-table mirror promotePosting's tracker dedupe scan needs
 // (mirrors decide.test.ts's makeDb) and seek_meta for the last_sweep upsert.
+// batch_runs is required too: beginSweep now checks isBatchRunning (D-08
+// reverse mutual exclusion, Phase 12).
 function makeDb(): Database {
   const db = new Database(':memory:');
   createSweepsTable(db);
+  createBatchRunsTable(db);
   createPostingsTable(db);
   createQueueTable(db);
   db.run(`CREATE TABLE applications (

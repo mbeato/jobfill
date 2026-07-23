@@ -28,12 +28,66 @@ async function renderTotals() {
   $('totals').textContent = `all-time: $${jobfillTotals.spendUSD.toFixed(2)} across ${jobfillTotals.fills} fills`;
 }
 
+// Weighted stage model: percent-by-stage is honest (LLM latency is unknowable,
+// so the bar fills by completed work, shimmering on the active segment).
+// Weights reflect real durations: tailoring dominates a fill.
+const STAGES = [
+  { key: 'scraping', label: 'scan the page', weight: 5, hint: 'a few seconds' },
+  { key: 'tailoring', label: 'tailor resume', weight: 60, hint: 'usually 1-3 min' },
+  { key: 'mapping', label: 'map fields', weight: 25, hint: 'about a minute' },
+  { key: 'filling', label: 'fill the form', weight: 10, hint: 'seconds' },
+];
+let tickHandle = null;
+let lastStatus = null;
+
+function fmtElapsed(ms) {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
+}
+
+function renderProgress(st) {
+  const idx = STAGES.findIndex(x => x.key === st.state);
+  const inFlight = idx !== -1;
+  const isDone = st.state === 'done';
+  $('progress').className = (inFlight || isDone) ? 'on' : '';
+  if (!inFlight && !isDone) { clearInterval(tickHandle); tickHandle = null; return; }
+
+  const pctDone = STAGES.slice(0, idx === -1 ? STAGES.length : idx).reduce((s, x) => s + x.weight, 0);
+  // Active stage credits half its weight while running — forward motion on every transition.
+  const pct = isDone ? 100 : pctDone + STAGES[idx].weight / 2;
+  const bar = $('barFill');
+  bar.style.width = `${pct}%`;
+  bar.classList.toggle('settled', isDone);
+  bar.style.background = isDone ? '#2e7d32' : '#1565c0';
+
+  const detail = {
+    scraping: '',
+    tailoring: st.company ? `for ${st.company}` : '',
+    mapping: st.fieldCount ? `${st.fieldCount} fields` : '',
+    filling: '',
+  };
+  $('steps').innerHTML = STAGES.map((s, i) => {
+    const state = isDone || i < idx ? 'done' : i === idx ? 'active' : '';
+    const tick = state === 'done' ? '✓' : state === 'active' ? '●' : '○';
+    const extra = state === 'active' && detail[s.key] ? ` <span class="muted">${esc(detail[s.key])}</span>` : '';
+    const hint = state === 'active'
+      ? `<span class="hint">${fmtElapsed(Date.now() - (st.stageStartedAt || st.startedAt || Date.now()))} · ${s.hint}</span>`
+      : '';
+    return `<div class="step ${state}"><span class="tick">${tick}</span><span>${s.label}${extra}</span>${hint}</div>`;
+  }).join('');
+
+  // Live elapsed ticker while a stage is active; popup-close clears it naturally.
+  if (inFlight && !tickHandle) tickHandle = setInterval(() => lastStatus && renderProgress(lastStatus), 1000);
+  if (!inFlight && tickHandle) { clearInterval(tickHandle); tickHandle = null; }
+}
+
 function render(st) {
   if (!st) return;
+  lastStatus = st;
   const labels = {
     scraping: 'scanning the page…',
-    mapping: `mapping ${st.fieldCount ?? ''} fields with claude…`,
-    tailoring: `tailoring resume for ${st.company || 'this role'}… (1-3 min)`,
+    mapping: 'mapping fields with claude…',
+    tailoring: `tailoring resume for ${st.company || 'this role'}…`,
     filling: 'filling…',
     done: 'done — review highlighted fields',
     duplicate: 'already applied to this job',
@@ -41,6 +95,7 @@ function render(st) {
   };
   $('status').textContent = labels[st.state] || st.state;
   $('status').className = st.state === 'error' || st.state === 'duplicate' ? '' : 'muted';
+  renderProgress(st);
 
   if (st.tailorState === 'ran') {
     $('tailorState').textContent = 'tailored resume attached';

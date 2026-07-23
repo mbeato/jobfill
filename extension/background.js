@@ -63,7 +63,11 @@ chrome.runtime.onMessageExternal.addListener((msg, sender, sendResponse) => {
 
 async function setStatus(patch) {
   const { jobfillStatus } = await chrome.storage.session.get('jobfillStatus');
-  await chrome.storage.session.set({ jobfillStatus: { ...jobfillStatus, ...patch } });
+  // Stamp stage transitions so the popup can show a live per-stage elapsed timer.
+  const stamped = patch.state && patch.state !== jobfillStatus?.state
+    ? { ...patch, stageStartedAt: Date.now() }
+    : patch;
+  await chrome.storage.session.set({ jobfillStatus: { ...jobfillStatus, ...stamped } });
 }
 
 async function runFill(tabId, force = false, opts = {}) {

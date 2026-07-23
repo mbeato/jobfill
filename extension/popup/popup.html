@@ -16,6 +16,25 @@
   .reused { color: #1565c0; }
   #cost { margin-top: 8px; font-weight: 600; }
   a { color: #555; font-size: 12px; }
+  /* fill progress: weighted stage bar + stepper */
+  #progress { margin-top: 10px; display: none; }
+  #progress.on { display: block; }
+  .bar-track { height: 6px; border-radius: 999px; background: #eee; overflow: hidden; position: relative; }
+  .bar-fill { height: 100%; border-radius: 999px; background: #1565c0; transition: width .6s ease; position: relative; }
+  .bar-fill::after { content: ''; position: absolute; top: 0; right: 0; width: 40%; max-width: 48px; height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,.55), transparent);
+    animation: shimmer 1.2s linear infinite; }
+  .bar-fill.settled::after { animation: none; content: none; }
+  @keyframes shimmer { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+  @media (prefers-reduced-motion: reduce) { .bar-fill::after { animation: none; } }
+  .steps { margin-top: 8px; }
+  .step { display: flex; align-items: baseline; gap: 7px; padding: 2px 0; color: #999; }
+  .step .tick { width: 12px; text-align: center; }
+  .step.done { color: #2e7d32; }
+  .step.active { color: #222; font-weight: 600; }
+  .step.active .tick { color: #1565c0; animation: pulse 1.2s ease-in-out infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+  .step .hint { font-weight: 400; color: #999; font-size: 12px; margin-left: auto; white-space: nowrap; }
   .summary-block { background: #fff8dc; padding: 8px; margin-top: 8px; }
   .summary-label { font-weight: 600; margin-bottom: 4px; }
   .summary-line { padding: 1px 0; }
@@ -23,6 +42,10 @@
 <body>
   <button id="fill">Fill this page</button>
   <div id="status" class="muted">idle</div>
+  <div id="progress">
+    <div class="bar-track"><div class="bar-fill" id="barFill" style="width:0%"></div></div>
+    <div class="steps" id="steps"></div>
+  </div>
   <div id="tailorState"></div>
   <div id="summary"></div>
   <div id="results"></div>

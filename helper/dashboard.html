@@ -686,7 +686,9 @@ function renderSweeps(rows) {
         ${rows.map(r => {
           const statusClass = SWEEP_STATUSES.has(r.status) ? `s-${r.status}` : 'muted';
           const h = r.detail?.headline;
-          const headline = h ? `${h.fetched} fetched · ${h.rejected} rejected · ${h.held} held · ${h.queued} queued` : '—';
+          // Stored detail is untrusted at this innerHTML sink — coerce to
+          // numbers, never interpolate raw (mirrors the batch headline).
+          const headline = h ? `${Number(h.fetched) || 0} fetched · ${Number(h.rejected) || 0} rejected · ${Number(h.held) || 0} held · ${Number(h.queued) || 0} queued` : '—';
           return `
             <tr>
               <td class="muted">${esc((r.started_at || '').replace('T', ' ').slice(0, 19))}</td>
@@ -819,7 +821,9 @@ function renderBatch(rows) {
         ${rows.map(r => {
           const statusClass = BATCH_STATUSES.has(r.status) ? `s-${r.status}` : 'muted';
           const h = r.detail?.headline;
-          const headline = h ? `${h.filled} filled · ${h.skipped} skipped · ${h.failed} failed` : '—';
+          // Stored detail is untrusted at this innerHTML sink (PATCHable by
+          // any authorized() client) — coerce to numbers, never interpolate raw.
+          const headline = h ? `${Number(h.filled) || 0} filled · ${Number(h.skipped) || 0} skipped · ${Number(h.failed) || 0} failed` : '—';
           const stopReasonLine = r.status !== 'running' && r.detail?.stop_reason
             ? `<div class="muted">${esc(STOP_REASON_LABELS[r.detail.stop_reason] || r.detail.stop_reason)}</div>`
             : '';

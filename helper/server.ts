@@ -43,7 +43,7 @@ import {
   InvalidBatchStatusError,
 } from './seek/batch';
 import { shouldFireBatchToday } from './seek/batch-scheduler';
-import { beginBatch, spawnBatchRunner, BatchAlreadyRunningError, SweepInProgressError } from './seek/batch-job';
+import { beginBatch, spawnBatchRunner, spawnFillRunner, BatchAlreadyRunningError, SweepInProgressError } from './seek/batch-job';
 
 const PORT = 7877;
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -579,6 +579,36 @@ Bun.serve({
             'content-disposition': `inline; filename="${full.split('/').pop()}"`,
           },
         });
+      }
+      // POST /fill/:id — spawn a Playwright single fill for one queued row via
+      // the runner protocol, so filling never depends on which browser the
+      // dashboard is open in (the runner browser carries its own extension +
+      // API key). Guards return honest 4xx instead of silent no-ops; runner.mjs
+      // itself enforces queued-only + single-instance on top of these.
+      const fillSpawn = pathname.match(/^\/fill\/(\d+)$/);
+      if (fillSpawn && req.method === 'POST') {
+        const row = db.query('SELECT * FROM queue WHERE id = ?').get(Number(fillSpawn[1])) as
+          | { id: number; status: string; login_gated: number; not_fillable: number }
+          | null;
+        if (!row) return json({ error: 'queue row not found' }, 404);
+        if (row.status !== 'queued') {
+          return json({ error: `row is '${row.status}' — the runner fills queued rows only. Re-queue it first if you want a fresh fill.` }, 409);
+        }
+        if (row.login_gated) {
+          return json({ error: 'login-gated posting — fill it from the extension popup in your signed-in browser (the runner browser has no logins).' }, 400);
+        }
+        if (row.not_fillable) return json({ error: 'row is flagged not fillable' }, 400);
+        const sweepNow = getRunningSweep(db);
+        if (sweepNow) return json({ error: 'sweep running', runId: sweepNow.id }, 409);
+        reconcileInterruptedBatchRuns(db);
+        const batchNow = getRunningBatch(db);
+        if (batchNow) return json({ error: 'batch already running', runId: batchNow.id }, 409);
+        const spawn = spawnFillRunner(row.id);
+        if (!spawn.spawned) return json({ error: `runner spawn failed: ${spawn.error}` }, 500);
+        // Fire-and-forget: the row's status (queued -> filling -> filled) is the
+        // result channel. If the runner browser is already open (profile lock),
+        // the spawn exits without touching the row — surfaced as a hint here.
+        return json({ started: true, queueId: row.id, note: "watch the row status — if it stays 'queued', the runner browser is already open (close it or review pending tabs first)." });
       }
       const queuePatch = pathname.match(/^\/queue\/(\d+)$/);
       if (queuePatch && req.method === 'PATCH') {

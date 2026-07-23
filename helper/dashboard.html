@@ -369,30 +369,27 @@ async function loadQueue() {
   renderQueue(queueRows);
 }
 
-function triggerFill(id) {
+// Fill via the helper-spawned Playwright runner (POST /fill/:id) — works from
+// any browser, no extension/API key needed where the dashboard is open. The
+// runner browser carries its own extension + key; the row's status is the
+// result channel. Login-gated rows are rejected server-side with a pointer at
+// the popup path (your signed-in browser has the sessions, the runner doesn't).
+async function triggerFill(id) {
   const q = queueRows.find(r => r.id === id);
   if (!q) return;
-  if (typeof chrome === 'undefined' || !chrome.runtime) {
-    document.getElementById('queueBody').insertAdjacentHTML('afterbegin', `<div class="muted">extension not detected</div>`);
-    return;
+  let notice = '';
+  try {
+    const resp = await fetch(`/fill/${id}`, { method: 'POST' });
+    const body = await resp.json();
+    notice = resp.ok ? `fill started — ${esc(body.note || 'watch the row status')}` : esc(body.error || `HTTP ${resp.status}`);
+  } catch (e) {
+    notice = `helper unreachable — ${esc(String(e?.message || e))}`;
   }
-  chrome.runtime.sendMessage(EXTENSION_ID, { type: 'jobfill.trigger', queueId: q.id, url: q.url }, async (resp) => {
-    // Always read lastError (silences "Unchecked runtime.lastError") and surface
-    // outcomes the queue row itself won't show (unreachable / duplicate / error).
-    let notice = '';
-    if (chrome.runtime.lastError) {
-      notice = `extension not reachable — ${esc(chrome.runtime.lastError.message)}`;
-    } else if (resp?.state === 'duplicate') {
-      notice = `already applied to ${esc(resp.prior?.company || '')} — use the popup's Fill anyway`;
-    } else if (resp?.state === 'error') {
-      notice = `fill failed — ${esc(resp.error || '')}`;
-    }
-    // reload first: renderQueue replaces queueBody's innerHTML and would wipe the notice
-    await loadQueue();
-    if (notice) {
-      document.getElementById('queueBody').insertAdjacentHTML('afterbegin', `<div class="muted">${notice}</div>`);
-    }
-  });
+  // reload first: renderQueue replaces queueBody's innerHTML and would wipe the notice
+  await loadQueue();
+  if (notice) {
+    document.getElementById('queueBody').insertAdjacentHTML('afterbegin', `<div class="muted">${notice}</div>`);
+  }
 }
 
 // D-02: the ONLY code path in the whole system that constructs a 'submitted' status —

@@ -66,6 +66,26 @@ export type SpawnFn = typeof Bun.spawn;
 // caller must NOT await proc.exited — the helper learns the run finished via
 // the batch_runs row's status, PATCHed by batch-runner.mjs itself over HTTP,
 // not via this process's exit.
+// Single-row fill via the proven runner (scripts/runner.mjs <queueId>) — same
+// detached no-kill-timeout contract as the batch spawn (D-06: killing the
+// process kills the browser and any open review tabs). runner.mjs owns its own
+// guards (queued-only refuse, PROFILE_LOCKED single-instance) and idles after
+// the fill to keep the browser open for review.
+export function spawnFillRunner(queueId: number, spawnFn: SpawnFn = Bun.spawn): SpawnBatchRunnerResult {
+  try {
+    const proc = spawnFn([process.execPath, join(REPO_ROOT, 'scripts', 'runner.mjs'), String(queueId)], {
+      cwd: REPO_ROOT,
+      env: process.env,
+      stdout: 'ignore',
+      stderr: 'ignore',
+    });
+    proc.unref();
+    return { spawned: true };
+  } catch (err) {
+    return { spawned: false, error: String((err as Error)?.message ?? err) };
+  }
+}
+
 export function spawnBatchRunner(runId: number, spawnFn: SpawnFn = Bun.spawn): SpawnBatchRunnerResult {
   try {
     // stdio is 'ignore', not 'pipe': nothing ever drains a pipe from a

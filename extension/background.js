@@ -317,6 +317,12 @@ async function runFill(tabId, force = false, opts = {}) {
       tailorState,
       tailorMessage,
       summary,
+      // Carry the attached PDF so the popup can offer a download — if a form
+      // submission mangles and the operator has to re-attach manually, regenerating the
+      // tailor (minutes + spend) shouldn't be the only way back to the file.
+      ...(tailorState === 'ran' && attachedResume?.b64
+        ? { resumeB64: attachedResume.b64, resumeName: attachedResume.name, resumeMime: attachedResume.mime }
+        : {}),
       company: mapping.company,
       role: mapping.role,
       results: results.map(r => ({ ...r, label: labelById.get(r.id) || r.id })),
@@ -337,7 +343,13 @@ async function runFill(tabId, force = false, opts = {}) {
     if (!trackRowId) {
       try {
         const rows = await helperFetch('/queue');
-        const existing = Array.isArray(rows) ? rows.find(r => r.url === pageContext.url) : null;
+        // Match exact URL, or by jobright id: jobright-sourced rows hold the
+        // jobright.ai URL while the fill happens on the real ATS page, which
+        // carries the same id back as a ?jr_id= param.
+        const jrId = (pageContext.url.match(/[?&]jr_id=([a-f0-9]{16,32})/) || [])[1];
+        const existing = Array.isArray(rows)
+          ? rows.find(r => r.url === pageContext.url) || (jrId ? rows.find(r => r.url.includes(jrId)) : null)
+          : null;
         trackRowId = existing
           ? existing.id
           : (await helperFetch('/queue', {

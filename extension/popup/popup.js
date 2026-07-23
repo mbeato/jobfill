@@ -98,7 +98,21 @@ function render(st) {
   renderProgress(st);
 
   if (st.tailorState === 'ran') {
-    $('tailorState').textContent = 'tailored resume attached';
+    if (st.resumeB64) {
+      $('tailorState').innerHTML = 'tailored resume attached · <a href="#" id="dlResume">download</a>';
+      $('dlResume').addEventListener('click', (e) => {
+        e.preventDefault();
+        const bytes = Uint8Array.from(atob(st.resumeB64), (c) => c.charCodeAt(0));
+        const url = URL.createObjectURL(new Blob([bytes], { type: st.resumeMime || 'application/pdf' }));
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = st.resumeName || 'resume.pdf';
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+      });
+    } else {
+      $('tailorState').textContent = 'tailored resume attached';
+    }
     $('tailorState').className = 'muted';
   } else if (st.tailorState === 'skipped') {
     $('tailorState').textContent = `static resume — ${esc(st.tailorMessage)}`;

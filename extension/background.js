@@ -330,9 +330,28 @@ async function runFill(tabId, force = false, opts = {}) {
     // QUEUE-02: a completed run counts as 'filled' even when some fields came back
     // needs_manual/verify — that per-field distinction is what RUN-02 is for, not this
     // coarser queue status (Pitfall 3). Fail-open.
-    if (queueId) {
+    // Ad-hoc fills (popup on a page not in the queue) self-register a queue row
+    // first so every fill is trackable — reuse an existing row when the URL is
+    // already queued (WR-05 keeps a reviewed/submitted row from regressing).
+    let trackRowId = queueId;
+    if (!trackRowId) {
       try {
-        await helperFetch(`/queue/${queueId}`, {
+        const rows = await helperFetch('/queue');
+        const existing = Array.isArray(rows) ? rows.find(r => r.url === pageContext.url) : null;
+        trackRowId = existing
+          ? existing.id
+          : (await helperFetch('/queue', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ url: pageContext.url }),
+            })).id;
+      } catch (e) {
+        console.info('jobfill queue self-register skipped (helper unavailable)', e);
+      }
+    }
+    if (trackRowId) {
+      try {
+        await helperFetch(`/queue/${trackRowId}`, {
           method: 'PATCH',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ status: 'filled', company: mapping.company || '', role: mapping.role || '', results_summary: JSON.stringify(finalStatus.results), resume_name: attachedResume?.name || '' }),

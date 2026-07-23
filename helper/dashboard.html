@@ -71,45 +71,65 @@
   .q-role a { color: #999; font-size: 12px; }
   .q-date { white-space: nowrap; }
   td.queue-actions { white-space: nowrap; }
+  /* tab navigation: sticky header, underline tabs (distinct from filter chips) */
+  .tabbar { position: sticky; top: 0; background: #fff; z-index: 10; display: flex; gap: 2px; border-bottom: 1px solid #eee; margin: 12px 0 4px; }
+  .tabbar button { border: none; background: none; cursor: pointer; padding: 8px 14px; font-size: 14px; color: #777; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+  .tabbar button:hover { color: #222; }
+  .tabbar button.active { color: #222; font-weight: 600; border-bottom-color: #222; }
+  .tabbar .tab-badge { display: inline-block; min-width: 16px; margin-left: 6px; padding: 0 5px; border-radius: 999px; background: rgba(21,101,192,.1); color: #1565c0; font-size: 11px; font-weight: 600; }
+  .tabbar .tab-badge:empty { display: none; }
+  [data-tab] { display: none; }
+  [data-tab].tab-visible { display: block; }
+  [data-tab].tab-visible h2:first-child { margin-top: 16px; }
   .queue-actions button.primary { border-color: #1565c0; color: #1565c0; font-weight: 600; }
   .queue-actions button.primary:hover { background: #1565c0; color: #fff; }
   .q-empty { padding: 16px 0; }
 </style>
 <body>
   <h1>jobfill tracker</h1>
-  <div id="stats"></div>
-  <div id="queue">
+  <nav class="tabbar" id="tabbar">
+    <button onclick="setTab('queue')" data-tabbtn="queue">queue<span class="tab-badge" id="tab-badge-queue"></span></button>
+    <button onclick="setTab('runs')" data-tabbtn="runs">runs</button>
+    <button onclick="setTab('applications')" data-tabbtn="applications">applications</button>
+    <button onclick="setTab('library')" data-tabbtn="library">library</button>
+    <button onclick="setTab('failures')" data-tabbtn="failures">failures</button>
+  </nav>
+  <div id="queue" data-tab="queue">
     <h2>posting queue</h2>
     <div id="queueSummary"></div>
     <div id="queueBody"></div>
   </div>
-  <div id="sweeps">
+  <div id="sweeps" data-tab="runs">
     <h2>sweeps</h2>
     <div class="sweep-actions"><button onclick="triggerSweep()">Trigger sweep now</button></div>
     <div id="sweepsBadges"></div>
     <div id="sweepsBody"></div>
   </div>
-  <div id="batch">
+  <div id="batch" data-tab="runs">
     <h2>batch fills</h2>
     <div class="batch-actions"><button onclick="triggerBatch()">Trigger batch now</button></div>
     <div id="batchBody"></div>
   </div>
-  <div id="seek">
+  <div id="seek" data-tab="runs">
     <h2>seek decisions</h2>
     <div id="seekStats"></div>
     <div class="filters" id="seekFilters"></div>
     <div id="seekBody"></div>
   </div>
-  <div class="filters" id="filters"></div>
-  <table>
-    <thead><tr><th>date</th><th>company</th><th>role</th><th>status</th><th>notes</th><th>links</th></tr></thead>
-    <tbody id="rows"></tbody>
-  </table>
-  <div id="library">
+  <div id="applications" data-tab="applications">
+    <h2>applications</h2>
+    <div id="stats"></div>
+    <div class="filters" id="filters"></div>
+    <table>
+      <thead><tr><th>date</th><th>company</th><th>role</th><th>status</th><th>notes</th><th>links</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+  <div id="library" data-tab="library">
     <h2>answer library</h2>
     <div id="libraryBody"></div>
   </div>
-  <div id="failures">
+  <div id="failures" data-tab="failures">
     <h2>widget failures</h2>
     <div id="failuresBody"></div>
   </div>
@@ -435,6 +455,9 @@ function renderQueueChips(rows) {
   const el = document.getElementById('queueSummary');
   const counts = {};
   for (const r of rows) counts[r.status] = (counts[r.status] || 0) + 1;
+  // Queue tab badge = the actionable morning number (ready to submit + needs review)
+  const actionable = (counts.reviewed || 0) + (counts.filled || 0);
+  document.getElementById('tab-badge-queue').textContent = actionable || '';
   el.innerHTML = `<div class="q-chips">${QUEUE_CHIPS
     .filter(c => c.key === 'all' || counts[c.key])
     .map(c => {
@@ -945,6 +968,22 @@ function toggleBatchDetail(id) {
   body.style.display = expanded ? 'none' : 'block';
   arrow.textContent = expanded ? '▾' : '▴';
 }
+
+// Tab navigation: one visible group at a time, persisted in the URL hash so a
+// reload (or a bookmarked #runs) lands where the operator left off. All sections stay in
+// the DOM and keep loading/rendering as before — tabs only control visibility.
+const TABS = ['queue', 'runs', 'applications', 'library', 'failures'];
+function setTab(name) {
+  if (!TABS.includes(name)) name = 'queue';
+  for (const el of document.querySelectorAll('[data-tab]')) {
+    el.classList.toggle('tab-visible', el.dataset.tab === name);
+  }
+  for (const b of document.querySelectorAll('[data-tabbtn]')) {
+    b.classList.toggle('active', b.dataset.tabbtn === name);
+  }
+  if (location.hash !== `#${name}`) history.replaceState(null, '', `#${name}`);
+}
+setTab(location.hash.replace('#', '') || 'queue');
 
 load();
 loadLibrary();

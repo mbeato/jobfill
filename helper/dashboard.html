@@ -820,8 +820,8 @@ function renderBatch(rows) {
           const statusClass = BATCH_STATUSES.has(r.status) ? `s-${r.status}` : 'muted';
           const h = r.detail?.headline;
           const headline = h ? `${h.filled} filled · ${h.skipped} skipped · ${h.failed} failed` : '—';
-          const stopReasonLine = r.status !== 'running' && r.stop_reason
-            ? `<div class="muted">${esc(STOP_REASON_LABELS[r.stop_reason] || r.stop_reason)}</div>`
+          const stopReasonLine = r.status !== 'running' && r.detail?.stop_reason
+            ? `<div class="muted">${esc(STOP_REASON_LABELS[r.detail.stop_reason] || r.detail.stop_reason)}</div>`
             : '';
           return `
             <tr>

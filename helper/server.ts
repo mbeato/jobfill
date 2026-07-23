@@ -1,6 +1,6 @@
 import { Database } from 'bun:sqlite';
 import { mkdirSync, existsSync, renameSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { normalizeQuestion, matchLibrary, selectFewShot, groupByQuestion, type AnswerRow } from './answers';
@@ -551,6 +551,31 @@ Bun.serve({
         // passed to chrome.tabs.query/create by the trigger — never store a non-http(s) scheme.
         if (!/^https?:\/\//i.test(String(b.url))) return json({ error: 'url must be http(s)' }, 400);
         return json(insertQueueEntry(db, b.url), 201);
+      }
+      // GET /queue/:id/resume — stream the PDF that was attached to this row's fill
+      // so the operator can review the actual content before submitting. Resolution mirrors
+      // the resume_name backfill: latest tailored application for the row's url,
+      // else the static base resume. Path containment: only .pdf files under
+      // ~/resume/ are ever served — resume_path is our own tailor output, but the
+      // guard makes traversal impossible regardless of what the DB holds.
+      const queueResume = pathname.match(/^\/queue\/(\d+)\/resume$/);
+      if (queueResume && req.method === 'GET') {
+        const row = db.query('SELECT url FROM queue WHERE id = ?').get(Number(queueResume[1])) as { url: string } | null;
+        if (!row) return json({ error: 'queue row not found' }, 404);
+        const app = db
+          .query(`SELECT resume_path FROM applications WHERE url = ? AND tailor_state = 'ran' AND resume_path != '' ORDER BY id DESC`)
+          .get(row.url) as { resume_path: string } | null;
+        const candidate = app?.resume_path || join(RESUME_DIR, 'resume.pdf');
+        const full = resolve(candidate);
+        if (!full.startsWith(resolve(RESUME_DIR) + '/') || !full.endsWith('.pdf') || !existsSync(full)) {
+          return json({ error: 'resume file not found on disk' }, 404);
+        }
+        return new Response(Bun.file(full), {
+          headers: {
+            'content-type': 'application/pdf',
+            'content-disposition': `inline; filename="${full.split('/').pop()}"`,
+          },
+        });
       }
       const queuePatch = pathname.match(/^\/queue\/(\d+)$/);
       if (queuePatch && req.method === 'PATCH') {

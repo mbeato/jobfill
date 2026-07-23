@@ -505,7 +505,7 @@ function renderQueue(rows) {
                 <div style="text-overflow: ellipsis; white-space: nowrap; overflow: hidden; max-width: 380px">
                   ${safeUrl ? `<a href="${esc(safeUrl)}" target="_blank">${esc(safeUrl)}</a>` : `<span class="muted">${esc(q.url)}</span>`}
                 </div>
-                ${q.resume_name ? `<div class="muted">resume: ${esc(q.resume_name)}</div>` : ''}
+                ${q.resume_name ? `<div class="muted">resume: <a href="/queue/${q.id}/resume" target="_blank">${esc(q.resume_name)}</a></div>` : ''}
                 ${q.status === 'failed' ? `<div class="muted">fill failed — ${esc(q.error)}. check the field results, or retry.</div>` : ''}
                 ${skipReason ? `<div class="muted">skipped last batch — ${esc((SKIP_REASON_LABELS[skipReason] || skipReason).replace(/^skipped — /, ''))}</div>` : ''}</td>
               <td class="muted q-date">${(q.created_at || '').slice(0, 10)}</td>

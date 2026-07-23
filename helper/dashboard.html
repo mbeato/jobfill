@@ -49,6 +49,31 @@
   .auth-badge { color: #d32f2f; font-weight: 600; margin: 4px 0; }
   .batch-actions button { margin-right: 8px; padding: 4px 10px; cursor: pointer; border: 1px solid #ccc; background: #fff; border-radius: 4px; }
   .batch-toggle { color: #1565c0; cursor: pointer; }
+  /* queue tracker overhaul: lifecycle chips + status pills + receded done-rows */
+  .q-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 2px; }
+  .q-chip { padding: 3px 10px; cursor: pointer; border: 1px solid #ddd; background: #fff; border-radius: 999px; font-size: 12px; color: #555; }
+  .q-chip:hover { border-color: #999; }
+  .q-chip.active { background: #222; color: #fff; border-color: #222; }
+  .q-chip .n { font-weight: 600; margin-left: 4px; }
+  .q-pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .q-pill::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .q-pill.s-queued { background: #f5f5f5; color: #666; }
+  .q-pill.s-filling { background: rgba(230,81,0,.08); color: #e65100; }
+  .q-pill.s-filled { background: rgba(46,125,50,.08); color: #2e7d32; }
+  .q-pill.s-reviewed { background: rgba(21,101,192,.08); color: #1565c0; }
+  .q-pill.s-failed { background: rgba(211,47,47,.07); color: #d32f2f; }
+  .q-pill.s-submitted { background: #f5f5f5; color: #666; }
+  .q-pill.s-submitted::before { content: '✓'; width: auto; height: auto; border-radius: 0; background: none; }
+  .q-row:hover td { background: #fafafa; }
+  .q-row td { padding: 10px; }
+  .q-done td { opacity: .55; }
+  .q-done:hover td { opacity: .8; }
+  .q-role a { color: #999; font-size: 12px; }
+  .q-date { white-space: nowrap; }
+  td.queue-actions { white-space: nowrap; }
+  .queue-actions button.primary { border-color: #1565c0; color: #1565c0; font-weight: 600; }
+  .queue-actions button.primary:hover { background: #1565c0; color: #fff; }
+  .q-empty { padding: 16px 0; }
 </style>
 <body>
   <h1>jobfill tracker</h1>
@@ -388,25 +413,54 @@ async function patchQueue(id, body) {
   }
 }
 
-// D-03: reviewed/filled split summary — reinforces the existing s-filled (green,
-// review first)/s-reviewed (blue, ready to submit) color meaning at a glance. Omit
-// entirely when both counts are zero, matching the terse-empty-state convention.
-function renderQueueSummary(rows) {
+// Lifecycle chip bar — the D-03 reviewed/filled split, upgraded into the tracker's
+// filter control. Chips sit in pipeline order with live counts; the active chip
+// filters the table. Labels speak the operator's language ("needs review", "ready to
+// submit"), not raw status enums.
+let queueFilter = 'all';
+const QUEUE_CHIPS = [
+  { key: 'all', label: 'all' },
+  { key: 'reviewed', label: 'ready to submit' },
+  { key: 'filled', label: 'needs review' },
+  { key: 'filling', label: 'filling' },
+  { key: 'queued', label: 'queued' },
+  { key: 'failed', label: 'failed' },
+  { key: 'submitted', label: 'submitted' },
+];
+function setQueueFilter(key) {
+  queueFilter = key;
+  renderQueue(queueRows);
+}
+function renderQueueChips(rows) {
   const el = document.getElementById('queueSummary');
-  const filledCount = rows.filter(r => r.status === 'filled').length;
-  const reviewedCount = rows.filter(r => r.status === 'reviewed').length;
-  el.innerHTML = (filledCount || reviewedCount)
-    ? `<span class="s-filled">${filledCount} filled</span> — look closer first · <span class="s-reviewed">${reviewedCount} reviewed</span> — just submit`
-    : '';
+  const counts = {};
+  for (const r of rows) counts[r.status] = (counts[r.status] || 0) + 1;
+  el.innerHTML = `<div class="q-chips">${QUEUE_CHIPS
+    .filter(c => c.key === 'all' || counts[c.key])
+    .map(c => {
+      const n = c.key === 'all' ? rows.length : counts[c.key];
+      return `<button class="q-chip${queueFilter === c.key ? ' active' : ''}" onclick="setQueueFilter('${c.key}')">${c.label}<span class="n">${n}</span></button>`;
+    }).join('')}</div>`;
 }
 
+// Actionability sort: what the operator should touch first floats to the top; submitted is
+// history and sinks to the bottom, visually receded (.q-done).
+const QUEUE_ORDER = { reviewed: 0, filled: 1, filling: 2, queued: 3, failed: 4, submitted: 5 };
 function renderQueue(rows) {
-  renderQueueSummary(rows);
+  renderQueueChips(rows);
   const body = document.getElementById('queueBody');
   if (!rows.length) {
     body.innerHTML = `
       <div class="muted">no postings queued yet</div>
       <div class="muted" style="font-size: 12px">add a posting URL from the popup, or POST it to /queue, to start the queue.</div>`;
+    return;
+  }
+  const shown = (queueFilter === 'all' ? rows : rows.filter(r => r.status === queueFilter))
+    .slice()
+    .sort((a, b) => (QUEUE_ORDER[a.status] ?? 9) - (QUEUE_ORDER[b.status] ?? 9)
+      || String(b.created_at || '').localeCompare(String(a.created_at || '')));
+  if (!shown.length) {
+    body.innerHTML = `<div class="muted q-empty">nothing here — pick another filter above.</div>`;
     return;
   }
   // D-09: skip badges — cross-reference the LATEST FINISHED batch run's skip list
@@ -416,9 +470,9 @@ function renderQueue(rows) {
   const skippedThisBatch = new Map((latestBatch?.detail?.skipped || []).map(s => [s.queueId, s.reason]));
   body.innerHTML = `
     <table>
-      <thead><tr><th>date</th><th>company / role</th><th>url</th><th>status</th><th>results</th><th>actions</th></tr></thead>
+      <thead><tr><th>status</th><th>company / role</th><th>added</th><th>results</th><th>actions</th></tr></thead>
       <tbody>
-        ${rows.map(q => {
+        ${shown.map(q => {
           const statusClass = QUEUE_STATUSES.includes(q.status) ? `s-${q.status}` : 'muted';
           // results_summary is a JSON STRING written by background.js (JSON.stringify of the
           // per-field results array) — never a display string. Guard the parse; on failure or
@@ -434,27 +488,32 @@ function renderQueue(rows) {
           // esc() does not neutralize a javascript: scheme, so only emit an anchor for http(s).
           const safeUrl = /^https?:\/\//i.test(q.url) ? q.url : '';
           const skipReason = q.status === 'queued' ? skippedThisBatch.get(q.id) : undefined;
+          const done = q.status === 'submitted';
+          // Contextual actions: only what makes sense for the row's lifecycle stage.
+          // 'mark submitted' stays available pre-submit (manual-apply path); submitted
+          // rows are history and get no buttons.
+          const actions = done ? '' : [
+            (q.status === 'queued' || q.status === 'failed') ? `<button onclick="triggerFill(${q.id})">Fill now</button>` : '',
+            q.status === 'filling' ? `<button disabled>Fill now</button>` : '',
+            q.status === 'filled' ? `<button onclick="patchQueue(${q.id}, {status: 'reviewed'})">mark reviewed</button>` : '',
+            `<button id="submit-btn-${q.id}" ${q.status === 'reviewed' ? 'class="primary" ' : ''}onclick="markSubmitted(${q.id})">mark submitted</button>`,
+          ].join('');
           return `
-            <tr>
-              <td class="muted">${(q.created_at || '').slice(0, 10)}</td>
-              <td><strong>${esc(q.company)}</strong>${q.role ? ` · ${esc(q.role)}` : ''}
-                ${q.resume_name ? `<div class="muted">resume: ${esc(q.resume_name)}</div>` : ''}</td>
-              <td style="text-overflow: ellipsis; white-space: nowrap; overflow: hidden; max-width: 240px">
-                ${safeUrl ? `<a href="${esc(safeUrl)}" target="_blank">${esc(safeUrl)}</a>` : esc(q.url)}
-              </td>
-              <td><span class="${statusClass}">${esc(q.status)}</span>
-                ${q.status === 'failed' ? `<div class="muted">fill failed — ${esc(q.error)}. check the field results below, or retry from the popup.</div>` : ''}
-                ${skipReason ? `<div class="muted">skipped last batch — ${esc(SKIP_REASON_LABELS[skipReason] || skipReason)}</div>` : ''}
-              </td>
+            <tr class="q-row${done ? ' q-done' : ''}">
+              <td><span class="q-pill ${statusClass}">${esc(q.status)}</span></td>
+              <td class="q-role"><strong>${esc(q.company)}</strong>${q.role ? ` · ${esc(q.role)}` : ''}
+                <div style="text-overflow: ellipsis; white-space: nowrap; overflow: hidden; max-width: 380px">
+                  ${safeUrl ? `<a href="${esc(safeUrl)}" target="_blank">${esc(safeUrl)}</a>` : `<span class="muted">${esc(q.url)}</span>`}
+                </div>
+                ${q.resume_name ? `<div class="muted">resume: ${esc(q.resume_name)}</div>` : ''}
+                ${q.status === 'failed' ? `<div class="muted">fill failed — ${esc(q.error)}. check the field results, or retry.</div>` : ''}
+                ${skipReason ? `<div class="muted">skipped last batch — ${esc((SKIP_REASON_LABELS[skipReason] || skipReason).replace(/^skipped — /, ''))}</div>` : ''}</td>
+              <td class="muted q-date">${(q.created_at || '').slice(0, 10)}</td>
               <td>
                 <div class="muted queue-toggle" onclick="toggleQueueResults(${q.id})">results <span id="qarrow-${q.id}">▾</span></div>
                 <div id="qresults-${q.id}" style="display:none">${resultsHtml}</div>
               </td>
-              <td class="queue-actions">
-                <button onclick="triggerFill(${q.id})" ${q.status === 'filling' ? 'disabled' : ''}>Fill now</button>
-                <button onclick="patchQueue(${q.id}, {status: 'reviewed'})">mark reviewed</button>
-                <button id="submit-btn-${q.id}" onclick="markSubmitted(${q.id})">mark submitted</button>
-              </td>
+              <td class="queue-actions">${actions}</td>
             </tr>`;
         }).join('')}
       </tbody>

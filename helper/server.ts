@@ -29,6 +29,21 @@ import {
 } from './seek/runs';
 import { beginSweep, runSweepJob, spawnSidecar, SweepAlreadyRunningError, type JobDeps } from './seek/job';
 import { shouldFireToday } from './seek/scheduler';
+import {
+  createBatchRunsTable,
+  reconcileInterruptedBatchRuns,
+  getFreshRunningBatch,
+  listBatchRuns,
+  getBatchRunById,
+  getRunningBatch,
+  finishBatchRun,
+  touchBatchHeartbeat,
+  getLastBatchRunState,
+  BATCH_STATUSES,
+  InvalidBatchStatusError,
+} from './seek/batch';
+import { shouldFireBatchToday } from './seek/batch-scheduler';
+import { beginBatch, spawnBatchRunner, BatchAlreadyRunningError, SweepInProgressError } from './seek/batch-job';
 
 const PORT = 7877;
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -78,6 +93,7 @@ createFailuresTable(db);
 createQueueTable(db);
 createPostingsTable(db);
 createSweepsTable(db);
+createBatchRunsTable(db);
 
 // Live-DB migrations (idempotent, re-run safe): both createQueueTable and
 // createPostingsTable's CREATE TABLE IF NOT EXISTS strings already include
@@ -152,6 +168,22 @@ db.run('CREATE TABLE IF NOT EXISTS seek_meta (key TEXT PRIMARY KEY, value TEXT)'
 // permanently wedge the single-flight lock (T-11-03-02).
 reconcileInterruptedSweeps(db);
 
+// batch_runs gets its own crash reconciliation (heartbeat-gated, unlike
+// sweeps — the batch process is detached and survives helper restarts,
+// D-06). A 'running' row with a fresh heartbeat is a live detached run and
+// must never be touched here.
+reconcileInterruptedBatchRuns(db);
+
+// D-04: a queue row stranded at 'filling' when the process starts back up
+// can only mean a mid-fill crash — but only reconcile it when no live batch
+// run exists (getFreshRunningBatch heartbeat-gate), so a genuinely live
+// detached batch's in-flight row is never wrongly flipped. A raw query is
+// safe here: HUMAN_STATUSES (reviewed/submitted) can never legally coexist
+// with 'filling' at startup.
+if (getFreshRunningBatch(db) === null) {
+  db.run(`UPDATE queue SET status = 'failed', error = 'run interrupted' WHERE status = 'filling'`);
+}
+
 // Shared secret with the extension (must match HELPER_TOKEN in extension/background.js).
 // No CORS headers are served: cross-origin pages can neither read responses nor pass
 // preflight, so only the extension (token) and the same-origin dashboard get through.
@@ -203,6 +235,23 @@ async function checkSchedule() {
     await runSweepJob(db, cfg, jobDeps, runId);
   } catch (e) {
     console.error('[scheduler] tick:', String((e as Error)?.message ?? e));
+  }
+}
+
+// D-05: batch's own daily fire-check on the same tick, gated on today's sweep
+// having settled (shouldFireBatchToday) rather than a clock hour. Unlike
+// checkSchedule, batch is a spawned detached process (D-06) — beginBatch
+// creates the run row synchronously, then spawnBatchRunner fires-and-forgets;
+// this function must not await the batch itself. Wrapped defensively for the
+// same reason as checkSchedule: a bad tick must never crash the helper.
+async function checkBatchSchedule() {
+  const cfg = await loadSeekConfig();
+  if (!shouldFireBatchToday(new Date(), cfg.batch, getLastBatchRunState(db), getLastRunState(db))) return;
+  try {
+    const { runId } = beginBatch(db, 'scheduled');
+    spawnBatchRunner(runId);
+  } catch (e) {
+    console.error('[scheduler] batch tick:', String((e as Error)?.message ?? e));
   }
 }
 
@@ -592,5 +641,7 @@ console.log(`jobfill helper on http://127.0.0.1:${PORT} (dashboard at /)`);
 // of waiting up to 15 minutes for the first interval fire.
 setInterval(() => {
   checkSchedule().catch(e => console.error('[scheduler]', e));
+  checkBatchSchedule().catch(e => console.error('[scheduler]', e));
 }, 15 * 60 * 1000);
 checkSchedule().catch(e => console.error('[scheduler]', e));
+checkBatchSchedule().catch(e => console.error('[scheduler]', e));

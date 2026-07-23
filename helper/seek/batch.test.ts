@@ -41,7 +41,9 @@ test('startBatchRun inserts a running row with a synchronous numeric id', () => 
   expect(row.status).toBe('running');
   expect(row.trigger).toBe('manual');
   expect(row.run_date).toBe(localDateKey(new Date()));
-  expect(row.heartbeat_at).toBeNull();
+  // Seeded at birth (lease semantics) so reconciliation running before a
+  // lock check never flips a just-created row before its first heartbeat.
+  expect(row.heartbeat_at).not.toBeNull();
 });
 
 test('finishBatchRun sets status/finished_at/detail on success', () => {
@@ -63,13 +65,14 @@ test('finishBatchRun with an invalid status throws InvalidBatchStatusError and l
   expect(row?.finished_at).toBeNull();
 });
 
-test('touchBatchHeartbeat sets heartbeat_at to a non-null timestamp', () => {
+test('touchBatchHeartbeat refreshes a stale heartbeat_at', () => {
   const db = makeDb();
   const started = startBatchRun(db, 'manual');
-  expect(started.heartbeat_at).toBeNull();
+  db.query(`UPDATE batch_runs SET heartbeat_at = datetime('now', '-10 minutes') WHERE id = ?`).run(started.id);
   touchBatchHeartbeat(db, started.id);
   const row = getBatchRunById(db, started.id);
   expect(row?.heartbeat_at).not.toBeNull();
+  expect(getFreshRunningBatch(db)?.id).toBe(started.id);
 });
 
 test('isBatchRunning / getRunningBatch reflect the single-flight lock regardless of heartbeat freshness', () => {
@@ -84,9 +87,10 @@ test('isBatchRunning / getRunningBatch reflect the single-flight lock regardless
   expect(getRunningBatch(db)).toBeNull();
 });
 
-test('getFreshRunningBatch returns null when heartbeat_at is null', () => {
+test('getFreshRunningBatch returns null when heartbeat_at is null (legacy/manual rows)', () => {
   const db = makeDb();
-  startBatchRun(db, 'manual');
+  const started = startBatchRun(db, 'manual');
+  db.query(`UPDATE batch_runs SET heartbeat_at = NULL WHERE id = ?`).run(started.id);
   expect(getFreshRunningBatch(db)).toBeNull();
 });
 
@@ -108,6 +112,7 @@ test('getFreshRunningBatch returns null when heartbeat_at is older than the stal
 test('reconcileInterruptedBatchRuns flips a NULL-heartbeat running row to failed with stop_reason interrupted', () => {
   const db = makeDb();
   const started = startBatchRun(db, 'manual');
+  db.query(`UPDATE batch_runs SET heartbeat_at = NULL WHERE id = ?`).run(started.id);
   const flipped = reconcileInterruptedBatchRuns(db);
   expect(flipped).toBe(1);
   const row = getBatchRunById(db, started.id);
@@ -138,7 +143,8 @@ test('reconcileInterruptedBatchRuns leaves a fresh-heartbeat running row untouch
 
 test('reconcileInterruptedBatchRuns is idempotent', () => {
   const db = makeDb();
-  startBatchRun(db, 'manual');
+  const started = startBatchRun(db, 'manual');
+  db.query(`UPDATE batch_runs SET heartbeat_at = datetime('now', '-10 minutes') WHERE id = ?`).run(started.id);
   const first = reconcileInterruptedBatchRuns(db);
   expect(first).toBe(1);
   const second = reconcileInterruptedBatchRuns(db);

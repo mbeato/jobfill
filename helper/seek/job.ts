@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { runSweep, type SweepDeps } from './sweep';
 import { runFilterPromote, type DecideDeps, type FilterCounts } from './decide';
 import { startSweepRun, finishSweepRun, isSweepRunning, getRunningSweep, type SweepTrigger } from './runs';
-import { isBatchRunning, getRunningBatch } from './batch';
+import { isBatchRunning, getRunningBatch, reconcileInterruptedBatchRuns } from './batch';
 import type { SeekConfig } from './types';
 
 // The single sweep entrypoint (D-09/SCHED-02): scheduler tick and POST /sweep
@@ -51,6 +51,11 @@ export interface JobDeps extends SweepDeps, DecideDeps {
 // so a caller (e.g. a fire-and-poll HTTP route) can read the id back
 // immediately.
 export function beginSweep(db: Database, trigger: SweepTrigger): { runId: number } {
+  // A detached batch-runner can die without ever PATCHing its row (SIGKILL,
+  // crash) — clear heartbeat-stale 'running' rows before consulting the raw
+  // lock, or a dead run wedges sweep scheduling until a helper restart.
+  // Idempotent and heartbeat-gated: a live run is never touched.
+  reconcileInterruptedBatchRuns(db);
   if (isBatchRunning(db)) {
     const running = getRunningBatch(db)!;
     throw new BatchInProgressError(running.id);

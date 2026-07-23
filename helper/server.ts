@@ -245,6 +245,11 @@ async function checkSchedule() {
 // this function must not await the batch itself. Wrapped defensively for the
 // same reason as checkSchedule: a bad tick must never crash the helper.
 async function checkBatchSchedule() {
+  // Clear heartbeat-stale 'running' batch rows before the lock inside
+  // beginBatch is consulted — reconciliation otherwise only ran at helper
+  // startup, so a batch-runner that died without PATCHing would wedge batch
+  // scheduling indefinitely. Idempotent; a fresh-heartbeat run is untouched.
+  reconcileInterruptedBatchRuns(db);
   const cfg = await loadSeekConfig();
   if (!shouldFireBatchToday(new Date(), cfg.batch, getLastBatchRunState(db), getLastRunState(db))) return;
   try {
@@ -570,6 +575,9 @@ Bun.serve({
       if (pathname === '/batch' && req.method === 'POST') {
         const runningSweep = getRunningSweep(db);
         if (runningSweep) return json({ error: 'sweep running', runId: runningSweep.id }, 409);
+        // Same stale-lock clearing as checkBatchSchedule: a dead detached
+        // run must not 409 every manual trigger until a helper restart.
+        reconcileInterruptedBatchRuns(db);
         const runningBatch = getRunningBatch(db);
         if (runningBatch) return json({ error: 'batch already running', runId: runningBatch.id }, 409);
         let runId: number;

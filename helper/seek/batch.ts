@@ -58,8 +58,13 @@ export function createBatchRunsTable(db: Database) {
 }
 
 export function startBatchRun(db: Database, trigger: BatchTrigger): BatchRow {
+  // heartbeat_at is seeded at birth (lease semantics): reconciliation now
+  // runs before every lock check, not just at helper startup, so a
+  // just-created 'running' row must not present a NULL heartbeat during the
+  // spawn window before the detached runner's own first heartbeat. A NULL
+  // heartbeat on a 'running' row therefore always means a dead run.
   return db
-    .query(`INSERT INTO batch_runs (trigger, run_date) VALUES (?, ?) RETURNING *`)
+    .query(`INSERT INTO batch_runs (trigger, run_date, heartbeat_at) VALUES (?, ?, datetime('now')) RETURNING *`)
     .get(trigger, localDateKey(new Date())) as BatchRow;
 }
 
@@ -99,10 +104,12 @@ export function getRunningBatch(db: Database): BatchRow | null {
   return db.query(`SELECT * FROM batch_runs WHERE status = 'running' ORDER BY id DESC LIMIT 1`).get() as BatchRow | null;
 }
 
-// Only reports a running row whose heartbeat is fresh — used by the
-// single-flight lock so a genuinely dead run doesn't wedge it, while a live
-// detached run (which keeps calling touchBatchHeartbeat) is reported as
-// legitimately in-progress.
+// Only reports a running row whose heartbeat is fresh — used by the startup
+// stranded-'filling' reconcile gate (helper/server.ts), so a live detached
+// batch's in-flight queue row is never wrongly flipped. The single-flight
+// locks themselves stay raw-status checks; they are kept safe by calling
+// reconcileInterruptedBatchRuns before every lock consult, which clears
+// genuinely dead 'running' rows first.
 export function getFreshRunningBatch(db: Database, staleMs: number = STALE_HEARTBEAT_MS): BatchRow | null {
   const offset = `-${Math.floor(staleMs / 1000)} seconds`;
   return db

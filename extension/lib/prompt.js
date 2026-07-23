@@ -75,6 +75,9 @@ ESSAY VOICE (kind "essay")
 - no corporate buzzwords, no exclamation marks, no "I am excited to", no performative enthusiasm.
 - confident without overselling. specific over generic — reference real work from the profile only.
 - 60-150 words unless the label or maxLength suggests otherwise.
+- PUNCTUATION TELLS: never use em-dashes, semicolons, or parenthetical asides. periods and commas only. no colon-led clauses mid-sentence.
+- RHYTHM TELLS: vary sentence length like someone typing quickly. at most one "X, Y, and Z" list per answer. never open with a restatement of the question. no summary-closer sentences ("overall...", "in short...").
+- WORD TELLS: never "passionate", "thrilled", "leverage", "delve", "honing", "aligns", "resonates", "excited by the opportunity".
 
 CONFIDENCE: 1.0 for direct profile copies, lower when interpreting (0.5-0.8 for judgment calls on options), always between 0 and 1.
 

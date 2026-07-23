@@ -161,14 +161,20 @@ async function runFill(tabId, force = false, opts = {}) {
     const { tailorEnabled = true } = await chrome.storage.local.get('tailorEnabled');
     let attachedResume = resume;
     const jd = perFrame[0].pageContext.jd || '';
+    // Same predicate the mapping rules use for attach_resume: if no field could
+    // ever receive the PDF (e.g. Work at a Startup reachout boxes), tailoring is
+    // minutes of CLI spend for an unattachable artifact — skip it visibly.
+    const hasResumeField = fields.some(f => f.type === 'file' && /resume|c\.?v\.?|curriculum/i.test(f.label || ''));
     let tailorState = 'skipped';
     let tailorMessage = !tailorEnabled
       ? 'tailoring disabled in options'
-      : jd.length < 200
-        ? `no usable job description found (${jd.length} chars, need 200+)`
-        : null;
+      : !hasResumeField
+        ? 'no resume upload field on this page'
+        : jd.length < 200
+          ? `no usable job description found (${jd.length} chars, need 200+)`
+          : null;
     let summary = null;
-    if (tailorEnabled && jd.length >= 200) {
+    if (tailorEnabled && hasResumeField && jd.length >= 200) {
       try {
         await helperFetch('/health');
         await setStatus({ state: 'tailoring', company: pageContext.heading || pageContext.title || '' });

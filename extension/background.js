@@ -183,10 +183,12 @@ async function runFill(tabId, force = false, opts = {}) {
     const { tailorEnabled = true } = await chrome.storage.local.get('tailorEnabled');
     let attachedResume = resume;
     const jd = perFrame[0].pageContext.jd || '';
-    // Same predicate the mapping rules use for attach_resume: if no field could
-    // ever receive the PDF (e.g. Work at a Startup reachout boxes), tailoring is
-    // minutes of CLI spend for an unattachable artifact — skip it visibly.
-    const hasResumeField = fields.some(f => f.type === 'file' && /resume|c\.?v\.?|curriculum/i.test(f.label || ''));
+    // Skip tailoring only when the page has NO file inputs at all (Work at a
+    // Startup reachout boxes) — minutes of CLI spend for an unattachable PDF.
+    // Deliberately NOT label-matched: ATS resume inputs hide behind custom
+    // drop-zones and their scraped labels are unreliable ("Attach", "files[]");
+    // the mapper makes the resume-vs-other judgment with full page context.
+    const hasResumeField = fields.some(f => f.type === 'file');
     let tailorState = 'skipped';
     let tailorMessage = !tailorEnabled
       ? 'tailoring disabled in options'

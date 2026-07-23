@@ -4,10 +4,10 @@ import { callClaude as callClaudeReal, costUSD as costUSDReal } from './anthropi
 const HELPER = 'http://127.0.0.1:7877';
 
 // Must OUTLIVE the server's own CLI budget (mapViaCLI kills the claude spawn at
-// 60s and returns a definitive success/error) — a shorter client window abandons
+// 240s and returns a definitive success/error) — a shorter client window abandons
 // helper mappings that were about to succeed and prematurely burns the direct-API
-// fallback. 90s = server's 60s cap + spawn/transfer headroom.
-export const MAP_TIMEOUT_MS = 90000;
+// fallback. 270s = server's 240s cap + spawn/transfer headroom.
+export const MAP_TIMEOUT_MS = 270000;
 
 // Helper-first mapping call, fail-open to the direct Haiku API within MAP_TIMEOUT_MS.
 // Builds ONE request via buildRequest and reuses it for both paths — prompt.js stays the

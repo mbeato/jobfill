@@ -9,8 +9,9 @@ const CLAUDE_BIN = join(homedir(), '.local/bin/claude');
  * Runs the mapping prompt through the headless claude CLI with a JSON schema,
  * returning the schema-conformant structured_output. Subscription-billed
  * (bare/API-key mode is never used, so no ANTHROPIC_API_KEY dependency).
- * Bounded to ~60s so a slow or hung CLI spawn surfaces as an error instead
- * of hanging the request forever.
+ * Bounded to 240s: large forms (30+ fields with several essay drafts) routinely
+ * need past 60s, and the per-fill budget (10 min) comfortably absorbs 4. A hung
+ * spawn still surfaces as an error instead of hanging the request forever.
  */
 export async function mapViaCLI(prompt: string, schema: object): Promise<unknown> {
   const proc = Bun.spawn(
@@ -34,7 +35,7 @@ export async function mapViaCLI(prompt: string, schema: object): Promise<unknown
     ],
     { cwd: tmpdir(), stdout: 'pipe', stderr: 'pipe' },
   );
-  const timeout = setTimeout(() => proc.kill(), 60 * 1000);
+  const timeout = setTimeout(() => proc.kill(), 240 * 1000);
   const [stdout, stderr] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),

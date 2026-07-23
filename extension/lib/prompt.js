@@ -67,6 +67,8 @@ RULES
 - File fields whose label mentions resume or CV: value "attach_resume". Any other file field: skip.
 - Fields with a non-empty current value: skip with reason "already filled" (unless the value is clearly a placeholder like "Select…").
 - Free-text questions about motivation, experience, projects, or "anything else": draft an answer, kind "essay". All other mappings are kind "profile".
+- Cover-letter TEXT fields (label mentions cover letter): kind "essay", 150-250 words unless maxLength says otherwise. Structure: why this company specifically (one concrete detail from the jd), then the 1-2 most relevant things the operator has built, then availability. Same essay voice rules apply — it should read like a short direct note, not a formal letter. No "Dear", no "Sincerely", no addresses.
+- Cover-letter FILE upload fields: skip with reason "cover letter upload — generate from tracker" (never attach the resume there).
 - Respect maxLength when present.
 - Field ids are prefixed with a frame number ("2:jf-5"), and pageContext.frames lists each frame's URL. Only fill fields belonging to the job application itself. If a frame's URL indicates an unrelated embed (chat/support widget, ads, analytics, surveys, cookie consent), skip ALL of its fields with reason "unrelated frame", and NEVER return "attach_resume" for file fields in such frames.
 

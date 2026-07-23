@@ -85,6 +85,9 @@
   .queue-actions button.primary:hover { background: #1565c0; color: #fff; }
   .queue-actions button.q-remove { color: #d32f2f; border-color: #eee; }
   .queue-actions button.q-remove:hover { border-color: #d32f2f; }
+  /* armed = second click commits; color signals state, width is pinned in JS */
+  .queue-actions button.armed { background: #1565c0; color: #fff; border-color: #1565c0; font-weight: 600; }
+  .queue-actions button.q-remove.armed { background: #d32f2f; border-color: #d32f2f; }
   .q-empty { padding: 16px 0; }
 </style>
 <body>
@@ -394,47 +397,48 @@ async function triggerFill(id) {
   }
 }
 
+// Two-click arm/confirm for destructive actions (native confirm() dialogs die in
+// the runner's Playwright browser — auto-dismissed when no handler is registered).
+// Zero layout shift: the armed label is always SHORTER than the resting label and
+// the button's width is pinned before the text swap, so nothing on the row moves.
+// The armed state signals with color (CSS .armed), not length. 4s revert.
+const armState = new Map();
+function armOrConfirm(key, btnId, armedText, restingText) {
+  if (armState.has(key)) {
+    clearTimeout(armState.get(key));
+    armState.delete(key);
+    return true;
+  }
+  const btn = document.getElementById(btnId);
+  if (btn) {
+    btn.style.minWidth = `${btn.offsetWidth}px`;
+    btn.textContent = armedText;
+    btn.classList.add('armed');
+  }
+  armState.set(key, setTimeout(() => {
+    armState.delete(key);
+    const b = document.getElementById(btnId);
+    if (b) {
+      b.textContent = restingText;
+      b.classList.remove('armed');
+      b.style.minWidth = '';
+    }
+  }, 4000));
+  return false;
+}
+
 // D-02: the ONLY code path in the whole system that constructs a 'submitted' status —
-// no background/helper code sets it. The human gate is a deliberate two-click flow
-// (arm, then confirm within 4s) instead of a native confirm() dialog: morning review
-// happens in the batch-runner's Playwright-controlled browser (D-01), and Playwright
-// auto-dismisses native dialogs when no handler is registered, which made the old
-// confirm() flash and return false before the operator could click it.
-const submitArm = new Map();
+// no background/helper code sets it. Gated behind the deliberate two-click arm.
 function markSubmitted(id) {
   const q = queueRows.find(r => r.id === id);
   if (!q) return;
-  if (!submitArm.has(id)) {
-    const btn = document.getElementById(`submit-btn-${id}`);
-    if (btn) btn.textContent = 'click again to confirm';
-    submitArm.set(id, setTimeout(() => {
-      submitArm.delete(id);
-      const b = document.getElementById(`submit-btn-${id}`);
-      if (b) b.textContent = 'mark submitted';
-    }, 4000));
-    return;
-  }
-  clearTimeout(submitArm.get(id));
-  submitArm.delete(id);
+  if (!armOrConfirm(`submit-${id}`, `submit-btn-${id}`, 'confirm?', 'mark submitted')) return;
   patchQueue(id, { status: 'submitted' });
 }
 
-// Same two-click arm/confirm pattern as markSubmitted (no native dialogs — they
-// die in the runner browser). Removal is a hard delete for rows the operator won't pursue.
-const removeArm = new Map();
+// Hard delete for rows the operator won't pursue — same arm pattern.
 async function removeFromQueue(id) {
-  if (!removeArm.has(id)) {
-    const btn = document.getElementById(`remove-btn-${id}`);
-    if (btn) btn.textContent = 'click again to remove';
-    removeArm.set(id, setTimeout(() => {
-      removeArm.delete(id);
-      const b = document.getElementById(`remove-btn-${id}`);
-      if (b) b.textContent = 'remove';
-    }, 4000));
-    return;
-  }
-  clearTimeout(removeArm.get(id));
-  removeArm.delete(id);
+  if (!armOrConfirm(`remove-${id}`, `remove-btn-${id}`, 'sure?', 'remove')) return;
   const res = await fetch(`/queue/${id}`, { method: 'DELETE' });
   await loadQueue();
   if (!res.ok) {

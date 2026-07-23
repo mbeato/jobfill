@@ -3,9 +3,11 @@ import { callClaude as callClaudeReal, costUSD as costUSDReal } from './anthropi
 
 const HELPER = 'http://127.0.0.1:7877';
 
-// Larger than helperFetch's default 10s (background.js) — the helper spawns a CLI for /map,
-// which needs a real chance to finish before falling open to the direct Haiku API (Pitfall 4).
-export const MAP_TIMEOUT_MS = 25000;
+// Must OUTLIVE the server's own CLI budget (mapViaCLI kills the claude spawn at
+// 60s and returns a definitive success/error) — a shorter client window abandons
+// helper mappings that were about to succeed and prematurely burns the direct-API
+// fallback. 90s = server's 60s cap + spawn/transfer headroom.
+export const MAP_TIMEOUT_MS = 90000;
 
 // Helper-first mapping call, fail-open to the direct Haiku API within MAP_TIMEOUT_MS.
 // Builds ONE request via buildRequest and reuses it for both paths — prompt.js stays the
@@ -27,10 +29,20 @@ export async function mapFields(
   try {
     const mapping = await helperMap(doFetch, prompt, schema, helperToken);
     return { mapping, cost: 0, source: 'helper' };
-  } catch {
-    const response = await doCallClaude(apiKey, body);
-    const mapping = doParseMapping(response);
-    return { mapping, cost: doCostUSD(response.usage), source: 'haiku' };
+  } catch (helperErr) {
+    // Direct-API fallback only makes sense with a key. Without one, surface the
+    // helper failure itself — "invalid x-api-key" on a keyless setup buries the
+    // real cause (helper down/slow/errored).
+    if (!apiKey) {
+      throw new Error(`helper mapping failed (${String(helperErr?.message || helperErr)}) and no API key is set for direct fallback`);
+    }
+    try {
+      const response = await doCallClaude(apiKey, body);
+      const mapping = doParseMapping(response);
+      return { mapping, cost: doCostUSD(response.usage), source: 'haiku' };
+    } catch (apiErr) {
+      throw new Error(`mapping failed on both paths — helper: ${String(helperErr?.message || helperErr)}; direct API: ${String(apiErr?.message || apiErr)}`);
+    }
   }
 }
 

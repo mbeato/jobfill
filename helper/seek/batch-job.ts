@@ -68,11 +68,16 @@ export type SpawnFn = typeof Bun.spawn;
 // not via this process's exit.
 export function spawnBatchRunner(runId: number, spawnFn: SpawnFn = Bun.spawn): SpawnBatchRunnerResult {
   try {
+    // stdio is 'ignore', not 'pipe': nothing ever drains a pipe from a
+    // detached, unref()'d child, so once the ~64KB kernel buffer filled the
+    // child's console.log would block and stall the run mid-fill (which in
+    // turn stops its heartbeat). The helper learns outcomes over PATCH
+    // /batch-runs/:id, never over stdio.
     const proc = spawnFn([process.execPath, join(REPO_ROOT, 'scripts', 'batch-runner.mjs'), String(runId)], {
       cwd: REPO_ROOT,
       env: process.env,
-      stdout: 'pipe',
-      stderr: 'pipe',
+      stdout: 'ignore',
+      stderr: 'ignore',
     });
     proc.unref();
     return { spawned: true };

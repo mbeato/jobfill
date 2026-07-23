@@ -29,6 +29,21 @@ import {
 } from './seek/runs';
 import { beginSweep, runSweepJob, spawnSidecar, SweepAlreadyRunningError, type JobDeps } from './seek/job';
 import { shouldFireToday } from './seek/scheduler';
+import {
+  createBatchRunsTable,
+  reconcileInterruptedBatchRuns,
+  getFreshRunningBatch,
+  listBatchRuns,
+  getBatchRunById,
+  getRunningBatch,
+  finishBatchRun,
+  touchBatchHeartbeat,
+  getLastBatchRunState,
+  BATCH_STATUSES,
+  InvalidBatchStatusError,
+} from './seek/batch';
+import { shouldFireBatchToday } from './seek/batch-scheduler';
+import { beginBatch, spawnBatchRunner, BatchAlreadyRunningError, SweepInProgressError } from './seek/batch-job';
 
 const PORT = 7877;
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -78,6 +93,7 @@ createFailuresTable(db);
 createQueueTable(db);
 createPostingsTable(db);
 createSweepsTable(db);
+createBatchRunsTable(db);
 
 // Live-DB migrations (idempotent, re-run safe): both createQueueTable and
 // createPostingsTable's CREATE TABLE IF NOT EXISTS strings already include
@@ -152,6 +168,22 @@ db.run('CREATE TABLE IF NOT EXISTS seek_meta (key TEXT PRIMARY KEY, value TEXT)'
 // permanently wedge the single-flight lock (T-11-03-02).
 reconcileInterruptedSweeps(db);
 
+// batch_runs gets its own crash reconciliation (heartbeat-gated, unlike
+// sweeps — the batch process is detached and survives helper restarts,
+// D-06). A 'running' row with a fresh heartbeat is a live detached run and
+// must never be touched here.
+reconcileInterruptedBatchRuns(db);
+
+// D-04: a queue row stranded at 'filling' when the process starts back up
+// can only mean a mid-fill crash — but only reconcile it when no live batch
+// run exists (getFreshRunningBatch heartbeat-gate), so a genuinely live
+// detached batch's in-flight row is never wrongly flipped. A raw query is
+// safe here: HUMAN_STATUSES (reviewed/submitted) can never legally coexist
+// with 'filling' at startup.
+if (getFreshRunningBatch(db) === null) {
+  db.run(`UPDATE queue SET status = 'failed', error = 'run interrupted' WHERE status = 'filling'`);
+}
+
 // Shared secret with the extension (must match HELPER_TOKEN in extension/background.js).
 // No CORS headers are served: cross-origin pages can neither read responses nor pass
 // preflight, so only the extension (token) and the same-origin dashboard get through.
@@ -203,6 +235,23 @@ async function checkSchedule() {
     await runSweepJob(db, cfg, jobDeps, runId);
   } catch (e) {
     console.error('[scheduler] tick:', String((e as Error)?.message ?? e));
+  }
+}
+
+// D-05: batch's own daily fire-check on the same tick, gated on today's sweep
+// having settled (shouldFireBatchToday) rather than a clock hour. Unlike
+// checkSchedule, batch is a spawned detached process (D-06) — beginBatch
+// creates the run row synchronously, then spawnBatchRunner fires-and-forgets;
+// this function must not await the batch itself. Wrapped defensively for the
+// same reason as checkSchedule: a bad tick must never crash the helper.
+async function checkBatchSchedule() {
+  const cfg = await loadSeekConfig();
+  if (!shouldFireBatchToday(new Date(), cfg.batch, getLastBatchRunState(db), getLastRunState(db))) return;
+  try {
+    const { runId } = beginBatch(db, 'scheduled');
+    spawnBatchRunner(runId);
+  } catch (e) {
+    console.error('[scheduler] batch tick:', String((e as Error)?.message ?? e));
   }
 }
 
@@ -518,6 +567,55 @@ Bun.serve({
         if (!row) return json({ error: 'not found' }, 404);
         return json({ ...row, detail: row.detail ? JSON.parse(row.detail) : null });
       }
+      if (pathname === '/batch' && req.method === 'POST') {
+        const runningSweep = getRunningSweep(db);
+        if (runningSweep) return json({ error: 'sweep running', runId: runningSweep.id }, 409);
+        const runningBatch = getRunningBatch(db);
+        if (runningBatch) return json({ error: 'batch already running', runId: runningBatch.id }, 409);
+        let runId: number;
+        try {
+          ({ runId } = beginBatch(db, 'manual'));
+        } catch (e) {
+          if (e instanceof SweepInProgressError) return json({ error: 'sweep running', runId: e.runId }, 409);
+          if (e instanceof BatchAlreadyRunningError) return json({ error: 'batch already running', runId: e.runId }, 409);
+          throw e;
+        }
+        // Fire-and-forget (D-06): the detached batch-runner process owns the
+        // rest of the run and reports back over PATCH /batch-runs/:id — this
+        // route returns immediately with the run id, same shape as POST /sweep.
+        spawnBatchRunner(runId);
+        return json({ id: runId }, 202);
+      }
+      if (pathname === '/batch-runs' && req.method === 'GET') {
+        const limitParam = Number(new URL(req.url).searchParams.get('limit'));
+        const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, 100) : 20;
+        const rows = listBatchRuns(db, limit).map(r => ({ ...r, detail: r.detail ? JSON.parse(r.detail) : null }));
+        return json(rows);
+      }
+      const batchRunById = pathname.match(/^\/batch-runs\/(\d+)$/);
+      if (batchRunById && req.method === 'GET') {
+        const row = getBatchRunById(db, Number(batchRunById[1]));
+        if (!row) return json({ error: 'not found' }, 404);
+        return json({ ...row, detail: row.detail ? JSON.parse(row.detail) : null });
+      }
+      if (batchRunById && req.method === 'PATCH') {
+        const id = Number(batchRunById[1]);
+        const b = await req.json();
+        if (b.heartbeat === true) {
+          touchBatchHeartbeat(db, id);
+          const row = getBatchRunById(db, id);
+          if (!row) return json({ error: 'not found' }, 404);
+          return json({ ...row, detail: row.detail ? JSON.parse(row.detail) : null });
+        }
+        try {
+          const row = finishBatchRun(db, id, b.status, b.detail);
+          if (!row) return json({ error: 'not found' }, 404);
+          return json({ ...row, detail: row.detail ? JSON.parse(row.detail) : null });
+        } catch (e) {
+          if (e instanceof InvalidBatchStatusError) return json({ error: e.message }, 400);
+          throw e;
+        }
+      }
       if (pathname === '/seek/last' && req.method === 'GET') {
         const row = db.query('SELECT value FROM seek_meta WHERE key = ?').get('last_sweep') as { value: string } | null;
         return json(row ? JSON.parse(row.value) : null);
@@ -592,5 +690,7 @@ console.log(`jobfill helper on http://127.0.0.1:${PORT} (dashboard at /)`);
 // of waiting up to 15 minutes for the first interval fire.
 setInterval(() => {
   checkSchedule().catch(e => console.error('[scheduler]', e));
+  checkBatchSchedule().catch(e => console.error('[scheduler]', e));
 }, 15 * 60 * 1000);
 checkSchedule().catch(e => console.error('[scheduler]', e));
+checkBatchSchedule().catch(e => console.error('[scheduler]', e));

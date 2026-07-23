@@ -3,8 +3,8 @@
   "name": "jobfill",
   "version": "0.1.0",
   "description": "Fill job applications from your own profile using your Anthropic API key.",
-  "permissions": ["storage", "webNavigation", "tabs"],
-  "host_permissions": ["https://api.anthropic.com/*", "http://127.0.0.1:7877/*"],
+  "permissions": ["storage", "webNavigation", "tabs", "scripting"],
+  "host_permissions": ["https://api.anthropic.com/*", "http://127.0.0.1:7877/*", "http://*/*", "https://*/*"],
   "externally_connectable": { "matches": ["http://127.0.0.1:7877/*"] },
   "background": { "service_worker": "background.js", "type": "module" },
   "content_scripts": [

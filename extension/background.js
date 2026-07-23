@@ -104,18 +104,40 @@ async function runFill(tabId, force = false, opts = {}) {
     }
 
     // Scrape every frame that has our content script
-    const frames = (await chrome.webNavigation.getAllFrames({ tabId })) || [];
-    const perFrame = [];
-    for (const f of frames) {
+    const scrapeAll = async () => {
+      const frames = (await chrome.webNavigation.getAllFrames({ tabId })) || [];
+      const perFrame = [];
+      let responded = 0;
+      for (const f of frames) {
+        try {
+          const resp = await chrome.tabs.sendMessage(tabId, { type: 'jobfill.scrape' }, { frameId: f.frameId });
+          responded++;
+          if (resp?.fields?.length) perFrame.push({ frameId: f.frameId, ...resp });
+        } catch {
+          // frame without content script (chrome://, cross-origin about:blank) — ignore
+        }
+      }
+      return { perFrame, responded };
+    };
+    let { perFrame, responded } = await scrapeAll();
+    // Self-heal orphaned content scripts: reloading the extension disconnects the
+    // script in every already-open tab, which reads as "no fillable fields" on
+    // pages that obviously have them. If NO frame answered, re-inject and retry.
+    if (responded === 0) {
       try {
-        const resp = await chrome.tabs.sendMessage(tabId, { type: 'jobfill.scrape' }, { frameId: f.frameId });
-        if (resp?.fields?.length) perFrame.push({ frameId: f.frameId, ...resp });
-      } catch {
-        // frame without content script (chrome://, cross-origin about:blank) — ignore
+        await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, files: ['content.bundle.js'] });
+        await new Promise((r) => setTimeout(r, 300));
+        ({ perFrame, responded } = await scrapeAll());
+      } catch (e) {
+        console.info('jobfill content-script reinject failed', e);
       }
     }
     const fields = perFrame.flatMap(f => f.fields.map(x => ({ ...x, id: `${f.frameId}:${x.id}` })));
-    if (!fields.length) throw new Error('No fillable fields found on this page.');
+    if (!fields.length) {
+      throw new Error(responded === 0
+        ? 'Content script not reachable in this tab — refresh the page and try again.'
+        : 'No fillable fields found on this page.');
+    }
 
     const pageContext = {
       ...perFrame[0].pageContext,

@@ -135,9 +135,9 @@ if (toFill.length === 0) {
 const HEARTBEAT_MS = 60_000;
 const heartbeatTimer = setInterval(() => patchRun({ heartbeat: true }), HEARTBEAT_MS);
 
-let ctx, extId, dashPage;
+let ctx, extId, getDashPage;
 try {
-  ({ ctx, extId, dashPage } = await setupRunner({
+  ({ ctx, extId, getDashPage } = await setupRunner({
     profileDir: PROFILE_DIR,
     extDir: EXT_DIR,
     root: ROOT,
@@ -189,7 +189,7 @@ try {
     try {
       // BATCH-02: one bad posting never stops the run — a thrown fillOne is
       // caught, counted as a failure, and the loop continues.
-      outcome = await fillOne(ctx, extId, dashPage, { id: item.queueId, url: item.url }, { pollMs: POLL_MS, budgetMs: BUDGET_MS });
+      outcome = await fillOne(ctx, extId, getDashPage, { id: item.queueId, url: item.url }, { pollMs: POLL_MS, budgetMs: BUDGET_MS });
     } catch (e) {
       console.log(`[batch-runner] ${item.company} / ${item.role}: fillOne threw (${e.message}) — isolated, continuing`);
       outcome = { state: 'failed', tab: null };

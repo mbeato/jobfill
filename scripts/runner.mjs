@@ -13,7 +13,9 @@
 // Mechanics live in ./lib/runner-core.mjs (shared with the batch loop,
 // scripts/batch-runner.mjs); this script drives a single queue row through
 // setupRunner + fillOne, unchanged from its pre-extraction observable
-// behavior.
+// behavior — with one deliberate deviation: a locked .runner-profile now
+// prints a clean 'browser busy' message instead of a raw Playwright crash
+// (same exit code 1).
 
 import { existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -38,9 +40,9 @@ if (!row) { console.error(`queue row ${queueId} not found`); process.exit(1); }
 if (row.status !== 'queued') { console.error(`row ${queueId} is '${row.status}', not 'queued' — refusing (no re-touch)`); process.exit(1); }
 console.log(`[runner] row ${queueId}: ${row.url}`);
 
-let ctx, extId, dashPage;
+let ctx, extId, getDashPage;
 try {
-  ({ ctx, extId, dashPage } = await setupRunner({ profileDir: PROFILE_DIR, extDir: EXT_DIR, root: ROOT, resumePath, explicitResume }));
+  ({ ctx, extId, getDashPage } = await setupRunner({ profileDir: PROFILE_DIR, extDir: EXT_DIR, root: ROOT, resumePath, explicitResume }));
 } catch (e) {
   if (e.code === 'PROFILE_LOCKED') {
     console.error(`[runner] browser busy — .runner-profile is already locked: ${e.message}`);
@@ -49,7 +51,7 @@ try {
   throw e;
 }
 
-await fillOne(ctx, extId, dashPage, row);
+await fillOne(ctx, extId, getDashPage, row);
 
 // exiting would kill the browser and lose the filled form — idle instead
 setInterval(() => {}, 1 << 30);

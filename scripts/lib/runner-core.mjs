@@ -2,7 +2,13 @@
 // Extracted from scripts/runner.mjs so the batch loop (scripts/batch-runner.mjs,
 // Plan 04) can reuse the same launch + per-posting fire-and-poll primitives
 // without relaxing any protocol invariant. scripts/runner.mjs imports this
-// module and stays behaviorally byte-identical to its pre-extraction form.
+// module and matches its pre-extraction observable behavior — tab ordering
+// included: the posting tab opens first and the dashboard tab only after the
+// form sanity-check passes (lazily, via getDashPage below); the no-form path
+// never opens a dashboard tab. One deliberate deviation: a locked
+// .runner-profile now surfaces as a tagged PROFILE_LOCKED error so callers
+// print a clean 'browser busy' message instead of a raw Playwright crash
+// (same exit code).
 //
 // Invariants (docs/runner-protocol.md): never submits, never types into ATS
 // fields, one fill in flight, no auto-retry. Orchestration only — no code
@@ -28,10 +34,12 @@ export async function q(queueId) {
   return (await r.json()).find((row) => row.id === queueId);
 }
 
-// Launch the persistent Chromium context with the extension loaded, seed
-// profile/resume + wait for the API key on first run, and open the one
-// dashboard-origin tab (externally_connectable trigger origin) for reuse
-// across fillOne calls.
+// Launch the persistent Chromium context with the extension loaded, and seed
+// profile/resume + wait for the API key on first run. The dashboard-origin
+// tab (externally_connectable trigger origin) is NOT opened here — fillOne
+// opens it lazily via the returned getDashPage, only after a posting's form
+// sanity-check has passed (pre-extraction ordering), then reuses it across
+// calls.
 export async function setupRunner({ profileDir, extDir, root, resumePath, explicitResume }) {
   let ctx;
   try {
@@ -81,11 +89,18 @@ export async function setupRunner({ profileDir, extDir, root, resumePath, explic
   }
   await opts.close();
 
-  // One dashboard-origin tab, opened once, reused by every fillOne call.
-  const dashPage = await ctx.newPage();
-  await dashPage.goto(`${HELPER}/`, { waitUntil: 'domcontentloaded' });
+  // One dashboard-origin tab, opened lazily on first use, reused by every
+  // fillOne call after that.
+  let dashPage = null;
+  const getDashPage = async () => {
+    if (!dashPage || dashPage.isClosed()) {
+      dashPage = await ctx.newPage();
+      await dashPage.goto(`${HELPER}/`, { waitUntil: 'domcontentloaded' });
+    }
+    return dashPage;
+  };
 
-  return { ctx, extId, dashPage, q };
+  return { ctx, extId, getDashPage, q };
 }
 
 // Drive one posting through the fill sequence: navigate, sanity-check for a
@@ -93,7 +108,7 @@ export async function setupRunner({ profileDir, extDir, root, resumePath, explic
 // fire-and-poll the queue row until it leaves 'filling' (or the budget
 // expires). Returns a structured outcome instead of idling — the caller
 // decides what to do next (idle for review, or move to the next posting).
-export async function fillOne(ctx, extId, dashPage, row, { pollMs = POLL_MS, budgetMs = BUDGET_MS } = {}) {
+export async function fillOne(ctx, extId, getDashPage, row, { pollMs = POLL_MS, budgetMs = BUDGET_MS } = {}) {
   // Step 2: navigate to the posting in its own tab
   const postingPage = await ctx.newPage();
   await postingPage.goto(row.url, { waitUntil: 'domcontentloaded' });
@@ -113,6 +128,11 @@ export async function fillOne(ctx, extId, dashPage, row, { pollMs = POLL_MS, bud
     return { state: 'no-form', tab: postingPage };
   }
   console.log('[runner] posting form rendered');
+
+  // Step 4: dashboard tab (the externally_connectable origin) — opened only
+  // now that the form check passed, matching pre-extraction ordering; the
+  // getter caches the tab so later fillOne calls reuse it.
+  const dashPage = await getDashPage();
 
   // Step 5: fire the trigger from the dashboard page context. Non-blocking — the
   // evaluate returns immediately ('fired'); the sendMessage callback reports back

@@ -69,15 +69,19 @@ export async function setupRunner({ profileDir, extDir, root, resumePath, explic
   const opts = await ctx.newPage();
   await opts.goto(`chrome-extension://${extId}/options/options.html`, { waitUntil: 'domcontentloaded' });
   const state = await opts.evaluate(() => chrome.storage.local.get(['apiKey', 'profile', 'resume']));
-  // An explicit --resume is authoritative: reseed even if storage already holds a
-  // resume from a previous run (otherwise the flag is silently a no-op forever).
-  if (!state.profile || !state.resume || explicitResume) {
-    const profile = JSON.parse(readFileSync(join(root, 'profile.local.json'), 'utf8'));
-    const resume = { name: basename(resumePath), b64: readFileSync(resumePath).toString('base64') };
-    await opts.evaluate((seed) => chrome.storage.local.set(seed), { profile, resume });
-    console.log(`[runner] seeded profile + resume (${basename(resumePath)}) into extension storage`);
-    await opts.reload();
+  // Profile always reseeds fresh from disk: profile.local.json is the source of
+  // truth (edit-config-not-code), so contact/EEO edits apply on the next start
+  // instead of being shadowed forever by a stale copy in extension storage.
+  // An explicit --resume stays authoritative for the resume: reseed even if storage
+  // already holds one from a previous run (otherwise the flag is silently a no-op).
+  const profile = JSON.parse(readFileSync(join(root, 'profile.local.json'), 'utf8'));
+  const seed = { profile };
+  if (!state.resume || explicitResume) {
+    seed.resume = { name: basename(resumePath), b64: readFileSync(resumePath).toString('base64') };
   }
+  await opts.evaluate((s) => chrome.storage.local.set(s), seed);
+  console.log(`[runner] seeded profile${seed.resume ? ` + resume (${basename(resumePath)})` : ''} into extension storage`);
+  await opts.reload();
   if (!state.apiKey) {
     console.log('[runner] NO API KEY — paste your Anthropic API key in the options window that just opened, click Save. Waiting...');
     for (;;) {

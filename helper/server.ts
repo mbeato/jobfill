@@ -319,7 +319,9 @@ async function tailor(body: { company: string; role: string; jd: string; url?: s
 
 Read these files:
 - Base resume (LaTeX): ${BASE_TEX}
-- Bullet pool (approved alternate bullets): ${BULLET_POOL}
+- Bullet pool (approved alternate bullets + tailoring cheat sheet): ${BULLET_POOL}
+- the operator's profile/context (all experiences incl. ones not on the base resume): ${join(homedir(), '.claude/projects/-Users-you-resume/memory/user_profile.md')}
+- Resume rules (MUST honor): ${join(homedir(), '.claude/projects/-Users-you-resume/memory/feedback_no_inflated_metrics.md')} and ${join(homedir(), '.claude/projects/-Users-you-resume/memory/feedback_drop_concentrations.md')}
 - Job description: ${jdPath}
 
 Write the tailored resume to exactly this path: ${texPath}
@@ -332,6 +334,7 @@ Its shape must be exactly: { "company": string, "role": string, "summary": strin
 Hard rules:
 - Facts come ONLY from the base resume and the bullet pool. Never invent or inflate metrics, titles, dates, or technologies. Every number must be interview-defensible.
 - Tailor by SELECTING and REORDERING: swap in bullet-pool variants that better match the job description, reorder bullets and the skills lists to lead with what the JD emphasizes. Do not rewrite facts.
+- Use the bullet pool's "Tailoring cheat sheet" to route JD keywords to the right experiences/projects. You MAY swap the second experience entry or a project entry for a pool-documented alternative (e.g. DocReserve founding-engineer for startup/early-stage/healthcare JDs, Vibecode for AI-agent JDs) when the cheat sheet clearly favors it — using only pool-approved bullets and the dates/titles from the profile file. Never swap out the VertikalX entry.
 - Keep the base resume's LaTeX preamble, commands, and structure exactly. The result must compile with pdflatex and stay one page.
 - Bullets marked with warning symbols in the pool need re-verification — do not use them.
 - Write exactly two files: the .tex and the summary_<stamp>.json. No commentary, no other files.`;

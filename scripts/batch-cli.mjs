@@ -47,14 +47,28 @@ const POLL_INTERVAL_MS = 3 * 1000;
 const MAX_POLL_MS = 4 * 60 * 60 * 1000;
 const deadline = Date.now() + MAX_POLL_MS;
 
+// Fail-open polling (mirrors the runner side): the detached run survives
+// helper restarts by design (D-06), so one refused connection or bad
+// response must not kill the monitor with a false failure exit. Only give
+// up after several consecutive failed polls.
+const MAX_CONSECUTIVE_POLL_FAILURES = 5;
 let row = null;
+let pollFailures = 0;
 while (Date.now() < deadline) {
-  const res = await fetch(`${HELPER}/batch-runs/${id}`, { headers: { 'x-jobfill-token': TOKEN } });
-  if (!res.ok) {
-    console.error(`[batch] GET /batch-runs/${id} failed: HTTP ${res.status}`);
-    process.exit(1);
+  try {
+    const res = await fetch(`${HELPER}/batch-runs/${id}`, { headers: { 'x-jobfill-token': TOKEN } });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    row = await res.json();
+    pollFailures = 0;
+  } catch (e) {
+    pollFailures += 1;
+    if (pollFailures >= MAX_CONSECUTIVE_POLL_FAILURES) {
+      console.error(`[batch] polling failed ${pollFailures} times in a row (${e.message}) — giving up; the run itself may still be going, check the dashboard`);
+      process.exit(1);
+    }
+    await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
+    continue;
   }
-  row = await res.json();
   if (row.status !== 'running') break;
   await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
 }

@@ -254,7 +254,21 @@ async function checkBatchSchedule() {
   if (!shouldFireBatchToday(new Date(), cfg.batch, getLastBatchRunState(db), getLastRunState(db))) return;
   try {
     const { runId } = beginBatch(db, 'scheduled');
-    spawnBatchRunner(runId);
+    const spawn = spawnBatchRunner(runId);
+    if (!spawn.spawned) {
+      // Nothing will ever heartbeat or finish this row — record the failure
+      // now, or the dead 'running' row wedges the single-flight lock until
+      // heartbeat-stale reconciliation catches it.
+      finishBatchRun(db, runId, 'failed', {
+        headline: { filled: 0, skipped: 0, failed: 0 },
+        stop_reason: 'interrupted',
+        skipped: [],
+        failed: [],
+        filled: [],
+        error: spawn.error,
+      });
+      console.error('[scheduler] batch spawn failed:', spawn.error);
+    }
   } catch (e) {
     console.error('[scheduler] batch tick:', String((e as Error)?.message ?? e));
   }
@@ -591,7 +605,21 @@ Bun.serve({
         // Fire-and-forget (D-06): the detached batch-runner process owns the
         // rest of the run and reports back over PATCH /batch-runs/:id — this
         // route returns immediately with the run id, same shape as POST /sweep.
-        spawnBatchRunner(runId);
+        const spawn = spawnBatchRunner(runId);
+        if (!spawn.spawned) {
+          // Same as checkBatchSchedule: an unrecorded spawn failure would
+          // orphan the 'running' row. Still return the run id — the caller's
+          // poll sees the 'failed' row immediately.
+          finishBatchRun(db, runId, 'failed', {
+            headline: { filled: 0, skipped: 0, failed: 0 },
+            stop_reason: 'interrupted',
+            skipped: [],
+            failed: [],
+            filled: [],
+            error: spawn.error,
+          });
+          console.error('[batch] spawn failed:', spawn.error);
+        }
         return json({ id: runId }, 202);
       }
       if (pathname === '/batch-runs' && req.method === 'GET') {

@@ -76,8 +76,28 @@ async function getQueue() {
   return res.json();
 }
 
-const config = await loadSeekConfig();
-const queueRows = await getQueue();
+// These are the only awaits before a browser exists — dying here without
+// recording the run would orphan a 'running' row that nothing will ever
+// heartbeat or PATCH (until heartbeat-stale reconciliation catches it).
+let config, queueRows;
+try {
+  config = await loadSeekConfig();
+  queueRows = await getQueue();
+} catch (e) {
+  console.error(`[batch-runner] startup failed before browser launch: ${e.message}`);
+  await patchRun({
+    status: 'failed',
+    detail: {
+      headline: { filled: 0, skipped: 0, failed: 0 },
+      stop_reason: 'interrupted',
+      skipped: [],
+      failed: [],
+      filled: [],
+      error: e.message,
+    },
+  });
+  process.exit(1);
+}
 const { toFill, skipped, capReached } = selectEligible(queueRows, config.batch);
 console.log(
   `[batch-runner] run ${runId}: ${toFill.length} eligible to fill, ${skipped.length} skipped, capReached=${capReached}`,

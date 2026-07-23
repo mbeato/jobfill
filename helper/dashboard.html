@@ -351,21 +351,41 @@ function triggerFill(id) {
 }
 
 // D-02: the ONLY code path in the whole system that constructs a 'submitted' status —
-// no background/helper code sets it. Gated behind a human confirm() click.
+// no background/helper code sets it. The human gate is a deliberate two-click flow
+// (arm, then confirm within 4s) instead of a native confirm() dialog: morning review
+// happens in the batch-runner's Playwright-controlled browser (D-01), and Playwright
+// auto-dismisses native dialogs when no handler is registered, which made the old
+// confirm() flash and return false before the operator could click it.
+const submitArm = new Map();
 function markSubmitted(id) {
   const q = queueRows.find(r => r.id === id);
   if (!q) return;
-  if (!confirm(`mark ${q.company} submitted? this records that you already submitted it manually — jobfill never submits for you.`)) return;
+  if (!submitArm.has(id)) {
+    const btn = document.getElementById(`submit-btn-${id}`);
+    if (btn) btn.textContent = 'click again to confirm';
+    submitArm.set(id, setTimeout(() => {
+      submitArm.delete(id);
+      const b = document.getElementById(`submit-btn-${id}`);
+      if (b) b.textContent = 'mark submitted';
+    }, 4000));
+    return;
+  }
+  clearTimeout(submitArm.get(id));
+  submitArm.delete(id);
   patchQueue(id, { status: 'submitted' });
 }
 
 async function patchQueue(id, body) {
-  await fetch(`/queue/${id}`, {
+  const res = await fetch(`/queue/${id}`, {
     method: 'PATCH',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   });
-  loadQueue();
+  // reload first: renderQueue replaces queueBody's innerHTML and would wipe the notice
+  await loadQueue();
+  if (!res.ok) {
+    document.getElementById('queueBody').insertAdjacentHTML('afterbegin', `<div class="muted">update failed — HTTP ${Number(res.status) || 0}</div>`);
+  }
 }
 
 // D-03: reviewed/filled split summary — reinforces the existing s-filled (green,
@@ -432,7 +452,7 @@ function renderQueue(rows) {
               <td class="queue-actions">
                 <button onclick="triggerFill(${q.id})" ${q.status === 'filling' ? 'disabled' : ''}>Fill now</button>
                 <button onclick="patchQueue(${q.id}, {status: 'reviewed'})">mark reviewed</button>
-                <button onclick="markSubmitted(${q.id})">mark submitted</button>
+                <button id="submit-btn-${q.id}" onclick="markSubmitted(${q.id})">mark submitted</button>
               </td>
             </tr>`;
         }).join('')}

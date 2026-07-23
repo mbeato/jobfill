@@ -83,6 +83,19 @@ console.log(
   `[batch-runner] run ${runId}: ${toFill.length} eligible to fill, ${skipped.length} skipped, capReached=${capReached}`,
 );
 
+// The heartbeat must outlive any single fill: a fill legally runs up to
+// BUDGET_MS (10 min) — far past the 3-min stale window
+// reconcileInterruptedBatchRuns checks (helper/seek/batch.ts) — so a
+// per-posting heartbeat would go stale mid-fill and a helper restart would
+// wrongly reconcile a live run to 'failed'. A 60s timer is a genuine
+// liveness signal: it only fires while this process's event loop is alive,
+// and patchRun is fail-open on helper hiccups. Started before the browser
+// launch so a slow startup (or the first-run API-key wait) stays fresh too;
+// cleared before every terminal patchRun — a finished run no longer claims
+// liveness.
+const HEARTBEAT_MS = 60_000;
+const heartbeatTimer = setInterval(() => patchRun({ heartbeat: true }), HEARTBEAT_MS);
+
 let ctx, extId, dashPage;
 try {
   ({ ctx, extId, dashPage } = await setupRunner({
@@ -96,6 +109,7 @@ try {
   if (e.code === 'PROFILE_LOCKED') {
     // D-02: a live runner already owns .runner-profile — clean 'browser
     // busy' outcome, not a crash. No browser was opened, so no idle either.
+    clearInterval(heartbeatTimer);
     console.error(`[batch-runner] browser busy — .runner-profile is already locked: ${e.message}`);
     await patchRun({
       status: 'failed',
@@ -125,11 +139,6 @@ const failedDetail = [];
 // run and still idles rather than letting the process die.
 try {
   for (const item of toFill) {
-    // Refreshed at least every posting; fillOne itself is bounded by
-    // BUDGET_MS but the ~25s poll keeps gaps well inside the 3min stale
-    // window reconcileInterruptedBatchRuns checks (helper/seek/batch.ts).
-    await patchRun({ heartbeat: true });
-
     let outcome;
     try {
       // BATCH-02: one bad posting never stops the run — a thrown fillOne is
@@ -200,6 +209,7 @@ const detail = {
 // status is 'ok' even for a circuit-breaker/interrupted abort — the browser
 // did start and holds filled tabs; only a browser-busy start (above) is
 // recorded 'failed'.
+clearInterval(heartbeatTimer);
 await patchRun({ status: 'ok', detail });
 console.log(`[batch-runner] done: ${JSON.stringify(detail.headline)} stop_reason=${stopReason}`);
 

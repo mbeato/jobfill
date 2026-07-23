@@ -334,6 +334,8 @@ Its shape must be exactly: { "company": string, "role": string, "summary": strin
 Hard rules:
 - Facts come ONLY from the base resume and the bullet pool. Never invent or inflate metrics, titles, dates, or technologies. Every number must be interview-defensible.
 - Tailor by SELECTING and REORDERING: swap in bullet-pool variants that better match the job description, reorder bullets and the skills lists to lead with what the JD emphasizes. Do not rewrite facts.
+- ATS KEYWORD MIRRORING: where a bullet or skills entry truthfully describes the same technology or practice the JD names, use the JD's EXACT vocabulary ("Kubernetes" not "k8s", their phrasing of "CI/CD", their term for the role's domain). Reorder the skills lists so the JD's named technologies appear earliest. NEVER add a skill or term the base resume and bullet pool don't already substantiate — mirroring adjusts spelling and order of true things, it never imports new claims.
+- Job titles are facts: never alter the operator's actual titles to match the target role.
 - Use the bullet pool's "Tailoring cheat sheet" to route JD keywords to the right experiences/projects. You MAY swap the second experience entry or a project entry for a pool-documented alternative (e.g. DocReserve founding-engineer for startup/early-stage/healthcare JDs, Vibecode for AI-agent JDs) when the cheat sheet clearly favors it — using only pool-approved bullets and the dates/titles from the profile file. Never swap out the VertikalX entry.
 - Keep the base resume's LaTeX preamble, commands, and structure exactly. The result must compile with pdflatex and stay one page.
 - Bullets marked with warning symbols in the pool need re-verification — do not use them.

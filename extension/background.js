@@ -76,9 +76,28 @@ async function runFill(tabId, force = false, opts = {}) {
       jobfillStatus: { state: 'scraping', tabId, startedAt: Date.now() },
     });
 
-    const { apiKey, profile, resume } = await chrome.storage.local.get(['apiKey', 'profile', 'resume']);
-    if (!apiKey) throw new Error('No API key set — open jobfill options.');
-    if (!profile) throw new Error('No profile imported — open jobfill options.');
+    let { apiKey, profile, resume } = await chrome.storage.local.get(['apiKey', 'profile', 'resume']);
+    // Self-seed the profile from the helper (profile.local.json is the source of
+    // truth on disk) so the extension works in any browser the helper can reach.
+    if (!profile) {
+      try {
+        profile = await helperFetch('/profile');
+        await chrome.storage.local.set({ profile });
+      } catch {
+        // helper down — fall through to the hard error below
+      }
+    }
+    if (!profile) throw new Error('No profile imported — open jobfill options (or start the helper).');
+    // The API key is only needed for the direct-API FALLBACK — mapping is
+    // helper-first via the subscription-billed claude CLI (/map). Gate hard only
+    // when both the key is missing AND the helper is unreachable.
+    if (!apiKey) {
+      try {
+        await helperFetch('/health');
+      } catch {
+        throw new Error('No API key set and local helper unreachable — open jobfill options, or start the helper (bun run helper).');
+      }
+    }
 
     // Scrape every frame that has our content script
     const frames = (await chrome.webNavigation.getAllFrames({ tabId })) || [];

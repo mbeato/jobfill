@@ -555,6 +555,14 @@ Bun.serve({
         if (!/^https?:\/\//i.test(String(b.url))) return json({ error: 'url must be http(s)' }, 400);
         return json(insertQueueEntry(db, b.url), 201);
       }
+      // GET /profile — serve profile.local.json (source of truth on disk) so any
+      // browser's copy of the extension can self-seed instead of requiring a
+      // manual options-page import per browser.
+      if (pathname === '/profile' && req.method === 'GET') {
+        const profilePath = join(HERE, '..', 'profile.local.json');
+        if (!existsSync(profilePath)) return json({ error: 'profile.local.json not found' }, 404);
+        return json(JSON.parse(await Bun.file(profilePath).text()));
+      }
       // GET /queue/:id/resume — stream the PDF that was attached to this row's fill
       // so the operator can review the actual content before submitting. Resolution mirrors
       // the resume_name backfill: latest tailored application for the row's url,

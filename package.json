@@ -8,6 +8,7 @@
     "test": "vitest run",
     "helper": "bun helper/server.ts",
     "seek": "bun scripts/seek.mjs",
+    "batch": "bun scripts/batch-cli.mjs",
     "agent:install": "bun scripts/agent-install.mjs",
     "agent:uninstall": "bun scripts/agent-uninstall.mjs",
     "agent:restart": "launchctl kickstart -k gui/$(id -u)/com.jobfill.helper",

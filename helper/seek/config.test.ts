@@ -93,3 +93,44 @@ test('a missing/malformed config file still returns the default schedule section
   const config = await loadSeekConfig('/nonexistent/path/seek.config.json');
   expect(config.schedule).toEqual({ enabled: false, targetHour: 7 });
 });
+
+test('a well-formed batch section round-trips enabled/cap/hostAllowlist', async () => {
+  const path = fixturePath('batch-wellformed');
+  await Bun.write(
+    path,
+    JSON.stringify({ batch: { enabled: true, cap: 25, hostAllowlist: ['greenhouse.io'] } }),
+  );
+  const config = await loadSeekConfig(path);
+  expect(config.batch).toEqual({ enabled: true, cap: 25, hostAllowlist: ['greenhouse.io'] });
+});
+
+test('a missing batch key defaults to disabled/cap 10/empty hostAllowlist', async () => {
+  const path = fixturePath('batch-missing');
+  await Bun.write(path, JSON.stringify({ greenhouse: { enabled: true, tokens: [] } }));
+  const config = await loadSeekConfig(path);
+  expect(config.batch).toEqual({ enabled: false, cap: 10, hostAllowlist: [] });
+});
+
+test('a negative or non-numeric batch cap falls back to 10 (fail-closed)', async () => {
+  const pathNeg = fixturePath('batch-cap-negative');
+  await Bun.write(pathNeg, JSON.stringify({ batch: { cap: -3 } }));
+  const configNeg = await loadSeekConfig(pathNeg);
+  expect(configNeg.batch.cap).toBe(10);
+
+  const pathNaN = fixturePath('batch-cap-nan');
+  await Bun.write(pathNaN, JSON.stringify({ batch: { cap: 'x' } }));
+  const configNaN = await loadSeekConfig(pathNaN);
+  expect(configNaN.batch.cap).toBe(10);
+});
+
+test('batch hostAllowlist filters to string-only entries', async () => {
+  const path = fixturePath('batch-hostallowlist');
+  await Bun.write(path, JSON.stringify({ batch: { hostAllowlist: ['a', 5, null, 'b'] } }));
+  const config = await loadSeekConfig(path);
+  expect(config.batch.hostAllowlist).toEqual(['a', 'b']);
+});
+
+test('a missing/malformed config file still returns the default batch section', async () => {
+  const config = await loadSeekConfig('/nonexistent/path/seek.config.json');
+  expect(config.batch).toEqual({ enabled: false, cap: 10, hostAllowlist: [] });
+});

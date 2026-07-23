@@ -60,5 +60,10 @@
   "schedule": {
     "enabled": true,
     "targetHour": 7
+  },
+  "batch": {
+    "enabled": true,
+    "cap": 10,
+    "hostAllowlist": ["greenhouse.io", "lever.co", "ashbyhq.com"]
   }
 }

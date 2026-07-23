@@ -1,6 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import type { ScheduleConfig, SeekConfig, SourceConfig } from './types';
+import type { BatchConfig, ScheduleConfig, SeekConfig, SourceConfig } from './types';
 
 // Fresh-read source config reader (D-02/D-03/D-05 SEEK-05): seek.config.json is
 // committed at the repo root and read FRESH on every call — no caching, no
@@ -37,6 +37,22 @@ function toScheduleConfig(x: unknown): ScheduleConfig {
   return { enabled: Boolean(obj?.enabled), targetHour };
 }
 
+const DEFAULT_BATCH_CAP = 10;
+
+// T-12-01-01: fail-closed numeric coercion (mirrors toScheduleConfig's
+// targetHour guard) — a malformed cap must never wedge the batch run; it
+// falls back to the safe default instead. hostAllowlist mirrors
+// toSourceConfig's string-only array filter.
+function toBatchConfig(x: unknown): BatchConfig {
+  const obj = x as { enabled?: unknown; cap?: unknown; hostAllowlist?: unknown } | undefined;
+  const n = Number(obj?.cap);
+  const cap = Number.isFinite(n) && n >= 0 ? n : DEFAULT_BATCH_CAP;
+  const hostAllowlist = Array.isArray(obj?.hostAllowlist)
+    ? (obj!.hostAllowlist as unknown[]).filter((t): t is string => typeof t === 'string')
+    : [];
+  return { enabled: Boolean(obj?.enabled), cap, hostAllowlist };
+}
+
 function defaultConfig(): SeekConfig {
   return {
     greenhouse: { enabled: false, tokens: [] },
@@ -46,6 +62,7 @@ function defaultConfig(): SeekConfig {
     yc: { enabled: false },
     jobright: { enabled: false },
     schedule: { enabled: false, targetHour: DEFAULT_TARGET_HOUR },
+    batch: { enabled: false, cap: DEFAULT_BATCH_CAP, hostAllowlist: [] },
   };
 }
 
@@ -60,6 +77,7 @@ export async function loadSeekConfig(path?: string): Promise<SeekConfig> {
       yc: toEnabledOnly(parsed?.yc),
       jobright: toEnabledOnly(parsed?.jobright),
       schedule: toScheduleConfig(parsed?.schedule),
+      batch: toBatchConfig(parsed?.batch),
     };
   } catch {
     return defaultConfig();

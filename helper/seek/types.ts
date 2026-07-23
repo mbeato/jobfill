@@ -42,6 +42,15 @@ export interface ScheduleConfig {
   targetHour: number;
 }
 
+// Batch-fill knobs (BATCH-03/04, D-14): the operator-editable, fresh-read like every
+// other seek.config.json section — fail-closed defaults if malformed. No
+// targetHour — D-05 gates batch on sweep settlement, not a clock hour.
+export interface BatchConfig {
+  enabled: boolean;
+  cap: number;
+  hostAllowlist: string[];
+}
+
 export interface SeekConfig {
   greenhouse: SourceConfig;
   lever: SourceConfig;
@@ -50,4 +59,5 @@ export interface SeekConfig {
   yc: { enabled: boolean };
   jobright: { enabled: boolean };
   schedule: ScheduleConfig;
+  batch: BatchConfig;
 }

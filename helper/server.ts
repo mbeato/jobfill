@@ -567,6 +567,55 @@ Bun.serve({
         if (!row) return json({ error: 'not found' }, 404);
         return json({ ...row, detail: row.detail ? JSON.parse(row.detail) : null });
       }
+      if (pathname === '/batch' && req.method === 'POST') {
+        const runningSweep = getRunningSweep(db);
+        if (runningSweep) return json({ error: 'sweep running', runId: runningSweep.id }, 409);
+        const runningBatch = getRunningBatch(db);
+        if (runningBatch) return json({ error: 'batch already running', runId: runningBatch.id }, 409);
+        let runId: number;
+        try {
+          ({ runId } = beginBatch(db, 'manual'));
+        } catch (e) {
+          if (e instanceof SweepInProgressError) return json({ error: 'sweep running', runId: e.runId }, 409);
+          if (e instanceof BatchAlreadyRunningError) return json({ error: 'batch already running', runId: e.runId }, 409);
+          throw e;
+        }
+        // Fire-and-forget (D-06): the detached batch-runner process owns the
+        // rest of the run and reports back over PATCH /batch-runs/:id — this
+        // route returns immediately with the run id, same shape as POST /sweep.
+        spawnBatchRunner(runId);
+        return json({ id: runId }, 202);
+      }
+      if (pathname === '/batch-runs' && req.method === 'GET') {
+        const limitParam = Number(new URL(req.url).searchParams.get('limit'));
+        const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, 100) : 20;
+        const rows = listBatchRuns(db, limit).map(r => ({ ...r, detail: r.detail ? JSON.parse(r.detail) : null }));
+        return json(rows);
+      }
+      const batchRunById = pathname.match(/^\/batch-runs\/(\d+)$/);
+      if (batchRunById && req.method === 'GET') {
+        const row = getBatchRunById(db, Number(batchRunById[1]));
+        if (!row) return json({ error: 'not found' }, 404);
+        return json({ ...row, detail: row.detail ? JSON.parse(row.detail) : null });
+      }
+      if (batchRunById && req.method === 'PATCH') {
+        const id = Number(batchRunById[1]);
+        const b = await req.json();
+        if (b.heartbeat === true) {
+          touchBatchHeartbeat(db, id);
+          const row = getBatchRunById(db, id);
+          if (!row) return json({ error: 'not found' }, 404);
+          return json({ ...row, detail: row.detail ? JSON.parse(row.detail) : null });
+        }
+        try {
+          const row = finishBatchRun(db, id, b.status, b.detail);
+          if (!row) return json({ error: 'not found' }, 404);
+          return json({ ...row, detail: row.detail ? JSON.parse(row.detail) : null });
+        } catch (e) {
+          if (e instanceof InvalidBatchStatusError) return json({ error: e.message }, 400);
+          throw e;
+        }
+      }
       if (pathname === '/seek/last' && req.method === 'GET') {
         const row = db.query('SELECT value FROM seek_meta WHERE key = ?').get('last_sweep') as { value: string } | null;
         return json(row ? JSON.parse(row.value) : null);

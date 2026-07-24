@@ -133,3 +133,34 @@ export function listActiveBoards(db: Database, ats?: string): BoardRow[] {
   const rows = (ats !== undefined ? db.query(sql).all(ats) : db.query(sql).all()) as Record<string, unknown>[];
   return rows.map(toRow);
 }
+
+// D-01: the single effective-token resolution point — config tokens ∪ active boards
+// rows − blocklist. sweep.ts calls this once per ATS immediately before each fetcher
+// (plan 16-08). No cap on the result length: D-05 explicitly refuses a watchlist
+// ceiling. Non-string entries in either input array are filtered out rather than
+// coerced, mirroring config.ts's toSourceConfig.
+export function resolveEffectiveTokens(
+  db: Database,
+  ats: string,
+  configTokens: string[],
+  blocklist: string[] = [],
+): string[] {
+  const blockedLower = new Set(
+    blocklist.filter((b): b is string => typeof b === 'string').map(b => b.trim().toLowerCase()),
+  );
+  const seen = new Set<string>();
+  const result: string[] = [];
+  const add = (t: unknown) => {
+    if (typeof t !== 'string') return;
+    const trimmed = t.trim();
+    if (!trimmed) return;
+    const lower = trimmed.toLowerCase();
+    if (blockedLower.has(lower)) return; // D-06: blocklist enforced again at resolution time
+    if (seen.has(lower)) return;
+    seen.add(lower);
+    result.push(trimmed);
+  };
+  for (const t of configTokens) add(t);
+  for (const row of listActiveBoards(db, ats)) add(row.token);
+  return result;
+}

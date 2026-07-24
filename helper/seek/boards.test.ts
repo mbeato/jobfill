@@ -1,6 +1,14 @@
 import { test, expect } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { createBoardsTable, upsertBoard, recordBoardResult, listActiveBoards, DEAD_AFTER, DEAD_RECHECK_DAYS } from './boards';
+import {
+  createBoardsTable,
+  upsertBoard,
+  recordBoardResult,
+  listActiveBoards,
+  resolveEffectiveTokens,
+  DEAD_AFTER,
+  DEAD_RECHECK_DAYS,
+} from './boards';
 
 function makeDb(): Database {
   const db = new Database(':memory:');
@@ -106,4 +114,25 @@ test('recordBoardResult on an unknown (ats, token) does not throw and inserts no
   expect(() => recordBoardResult(db, 'greenhouse', 'never-inserted', false)).not.toThrow();
   const rows = db.query('SELECT * FROM boards').all();
   expect(rows.length).toBe(0);
+});
+
+test('resolveEffectiveTokens is config tokens union active boards rows, minus blocklist', () => {
+  const db = makeDb();
+  upsertBoard(db, { ats: 'greenhouse', token: 'beta', source_of_discovery: 'simplify' });
+  upsertBoard(db, { ats: 'greenhouse', token: 'gamma', source_of_discovery: 'getro' });
+  expect(resolveEffectiveTokens(db, 'greenhouse', ['acme', 'beta'], [])).toEqual(['acme', 'beta', 'gamma']);
+});
+
+test('resolveEffectiveTokens excludes a dead board token and enforces the blocklist at both insert and resolution time', () => {
+  const db = makeDb();
+  // dead board's token is absent from the resolved list
+  upsertBoard(db, { ats: 'greenhouse', token: 'deadboard', source_of_discovery: 'simplify' });
+  for (let i = 0; i < DEAD_AFTER; i++) recordBoardResult(db, 'greenhouse', 'deadboard', false);
+  expect(resolveEffectiveTokens(db, 'greenhouse', [], [])).not.toContain('deadboard');
+
+  // a blocklisted token is absent even from the config seed AND when it exists as a
+  // boards row (D-06 bites at both insert time and resolution time)
+  const blocklist = ['acme'];
+  expect(upsertBoard(db, { ats: 'greenhouse', token: 'acme', source_of_discovery: 'simplify' }, blocklist)).toBeNull();
+  expect(resolveEffectiveTokens(db, 'greenhouse', ['acme'], blocklist)).toEqual([]);
 });

@@ -338,7 +338,7 @@
     ]
   },
   "ycdir": {
-    "enabled": true
+    "enabled": false
   },
   "blocklist": [],
   "schedule": {

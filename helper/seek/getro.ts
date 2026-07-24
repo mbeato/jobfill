@@ -15,11 +15,11 @@
 // in the phase.
 //
 // D-16: fetching uses plain Bun `fetch()` with no special headers and is
-// never routed through the Playwright sidecar. The "403 to plain fetch"
-// measured during discussion was a `curl` User-Agent artifact — Bun's native
-// fetch() reaches these public boards with zero configuration. A blocked or
-// failing network fails open: record the error, continue the sweep,
-// contribute nothing that day.
+// never routed through a headless-browser sidecar. The "403 to plain fetch"
+// measured during discussion was an artifact of the default identifier sent
+// by the `curl` tool used at the time — Bun's native fetch() reaches these
+// public boards with zero configuration. A blocked or failing network fails
+// open: record the error, continue the sweep, contribute nothing that day.
 
 import type { NormalizedPosting } from './types';
 import { extractAtsToken } from './slug-harvest';

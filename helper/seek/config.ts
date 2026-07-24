@@ -25,6 +25,36 @@ function toEnabledOnly(x: unknown): { enabled: boolean } {
   return { enabled: Boolean(obj?.enabled) };
 }
 
+// D-15: getro.networks is a curated {name, id, host?} list — a malformed
+// entry (wrong type, missing name/id) is dropped rather than coerced into a
+// half-valid network, mirroring toSourceConfig's string-only tokens filter.
+function toGetroConfig(x: unknown): { enabled: boolean; networks: { name: string; id: string; host?: string }[] } {
+  const obj = x as { enabled?: unknown; networks?: unknown } | undefined;
+  const raw = Array.isArray(obj?.networks) ? (obj!.networks as unknown[]) : [];
+  const networks = raw
+    .map((entry) => {
+      if (typeof entry !== 'object' || entry === null) return null;
+      const e = entry as { name?: unknown; id?: unknown; host?: unknown };
+      const name = String(e.name ?? '').trim();
+      const id = String(e.id ?? '').trim();
+      if (!name || !id) return null;
+      const host = typeof e.host === 'string' && e.host.trim() ? e.host.trim() : undefined;
+      return host ? { name, id, host } : { name, id };
+    })
+    .filter((n): n is { name: string; id: string; host?: string } => n !== null);
+  return { enabled: Boolean(obj?.enabled), networks };
+}
+
+// D-06: blocklist is a flat array of slugs — anything not an array coerces
+// to empty; non-string/empty entries are dropped, strings are trimmed.
+function toStringArray(x: unknown): string[] {
+  if (!Array.isArray(x)) return [];
+  return x
+    .filter((t): t is string => typeof t === 'string')
+    .map((t) => t.trim())
+    .filter((t) => t.length > 0);
+}
+
 const DEFAULT_TARGET_HOUR = 7;
 
 // T-11-01-01: fail-closed numeric coercion (mirrors decide.ts's LLM_CAP) — a
@@ -61,6 +91,10 @@ function defaultConfig(): SeekConfig {
     hn: { enabled: false },
     yc: { enabled: false },
     jobright: { enabled: false },
+    simplify: { enabled: false },
+    getro: { enabled: false, networks: [] },
+    ycdir: { enabled: false },
+    blocklist: [],
     schedule: { enabled: false, targetHour: DEFAULT_TARGET_HOUR },
     batch: { enabled: false, cap: DEFAULT_BATCH_CAP, hostAllowlist: [] },
   };
@@ -76,6 +110,10 @@ export async function loadSeekConfig(path?: string): Promise<SeekConfig> {
       hn: toEnabledOnly(parsed?.hn),
       yc: toEnabledOnly(parsed?.yc),
       jobright: toEnabledOnly(parsed?.jobright),
+      simplify: toEnabledOnly(parsed?.simplify),
+      getro: toGetroConfig(parsed?.getro),
+      ycdir: toEnabledOnly(parsed?.ycdir),
+      blocklist: toStringArray(parsed?.blocklist),
       schedule: toScheduleConfig(parsed?.schedule),
       batch: toBatchConfig(parsed?.batch),
     };

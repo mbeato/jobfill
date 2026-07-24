@@ -18,6 +18,7 @@ export interface ApplicationRow {
   summary: string;
   tailor_state: string;
   tailor_message: string;
+  jd: string;
   status_changed_at: string | null;
   created_at: string;
   updated_at: string;
@@ -33,6 +34,7 @@ export interface ApplicationInput {
   summary?: unknown[];
   tailor_state?: string;
   tailor_message?: string;
+  jd?: string;
 }
 
 export interface ApplicationUpdatePatch {
@@ -42,6 +44,10 @@ export interface ApplicationUpdatePatch {
 
 // WR-04-style bound: defend the persistence boundary regardless of caller.
 const MAX_TEXT = 2000;
+
+// D-04/D-06: jd gets its OWN generous bound, separate from MAX_TEXT — real JDs
+// run 3k-10k+ chars and MAX_TEXT would silently truncate them.
+export const MAX_JD = 50000;
 
 // Status ladder: unsubmitted -> applied -> replied -> interviewing -> offer -> rejected.
 // The pre-submit token is Claude's discretion (D-05); the UI label "awaiting submit"
@@ -97,6 +103,7 @@ export function createApplicationsTable(db: Database) {
     summary TEXT DEFAULT '',
     tailor_state TEXT DEFAULT '',
     tailor_message TEXT DEFAULT '',
+    jd TEXT DEFAULT '',
     status_changed_at TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
@@ -122,8 +129,8 @@ export function insertApplication(
       // WR-02: seed status_changed_at at insert (same instant the row is created) so a
       // direct status:'applied' POST starts an honest ghost clock instead of NULL —
       // consistent with the D-20 boot seed. Pre-submit rows never ghost regardless.
-      `INSERT INTO applications (company, role, url, status, resume_path, cost_usd, summary, tailor_state, tailor_message, status_changed_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now')) RETURNING *`,
+      `INSERT INTO applications (company, role, url, status, resume_path, cost_usd, summary, tailor_state, tailor_message, jd, status_changed_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now')) RETURNING *`,
     )
     .get(
       String(input.company ?? 'unknown').slice(0, MAX_TEXT),
@@ -135,6 +142,7 @@ export function insertApplication(
       Array.isArray(input.summary) && input.summary.length ? JSON.stringify(input.summary) : '',
       String(input.tailor_state ?? '').slice(0, MAX_TEXT),
       String(input.tailor_message ?? '').slice(0, MAX_TEXT),
+      String(input.jd ?? '').slice(0, MAX_JD),
     ) as ApplicationRow;
 }
 

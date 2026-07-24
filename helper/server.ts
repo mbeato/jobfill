@@ -672,15 +672,23 @@ Bun.serve({
       if (queuePatch && req.method === 'PATCH') {
         const b = await req.json();
         try {
+          // WR-03: capture the pre-patch status so the cascade gates on the submit
+          // TRANSITION, not merely the resulting state — otherwise a later non-status
+          // patch (e.g. a runner writing results_summary/error) that leaves the row at
+          // 'submitted' would re-fire and clobber a human-regressed application.
+          const before = db.query('SELECT status FROM queue WHERE id = ?').get(Number(queuePatch[1])) as
+            | { status: string }
+            | null;
           const row = updateQueueStatus(db, Number(queuePatch[1]), b);
           // D-07: react to the human markSubmitted() click — when THIS patch actually
-          // persisted 'submitted' (gated on the RETURNED row, never b.status, so a
-          // WR-05-refused regression triggers nothing) and the row links an application,
-          // promote that application off its pre-submit status in the same round trip.
-          // The cascade constructs NO 'submitted' status (D-02) — markSubmitted() stays
-          // the sole producer; promoteUnsubmittedToApplied only ever writes 'applied'
-          // onto an already-'unsubmitted' row and is idempotent for a re-submitted row.
-          if (row && row.status === 'submitted' && row.application_id) {
+          // MOVED the row into 'submitted' (gated on the RETURNED row, never b.status, so a
+          // WR-05-refused regression triggers nothing; and on before?.status !== 'submitted'
+          // so only the transition fires) and the row links an application, promote that
+          // application off its pre-submit status in the same round trip. The cascade
+          // constructs NO 'submitted' status (D-02) — markSubmitted() stays the sole
+          // producer; promoteUnsubmittedToApplied only ever writes 'applied' onto an
+          // already-'unsubmitted' row and is idempotent for a re-submitted row.
+          if (row && row.status === 'submitted' && before?.status !== 'submitted' && row.application_id) {
             promoteUnsubmittedToApplied(db, row.application_id);
           }
           return json(row);

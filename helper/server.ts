@@ -797,6 +797,23 @@ Bun.serve({
         });
       }
 
+      // GET /applications/:id/email — D-07: the follow-up email draft served
+      // back inline as JSON for the read-back box, reusing the JD toggle
+      // pattern verbatim. T-15-04: safeDocPath runs BEFORE the file read, so
+      // an out-of-ROUNDS_DIR path is never opened.
+      const emailMatch = pathname.match(/^\/applications\/(\d+)\/email$/);
+      if (emailMatch && req.method === 'GET') {
+        const row = db.query('SELECT email_path FROM applications WHERE id = ?').get(Number(emailMatch[1])) as
+          | { email_path: string }
+          | null;
+        if (!row) return json({ error: 'not found' }, 404);
+        if (!row.email_path) return json({ email: '' });
+        const full = safeDocPath(row.email_path, ROUNDS_DIR, '.md');
+        if (!full) return json({ error: 'document file not found on disk' }, 404);
+        const text = await Bun.file(full).text();
+        return json({ email: text });
+      }
+
       if (pathname === '/answers' && req.method === 'GET') {
         const rows = db.query('SELECT * FROM answers ORDER BY created_at DESC, id DESC').all() as AnswerRow[];
         return json(groupByQuestion(rows));

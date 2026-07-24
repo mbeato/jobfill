@@ -509,6 +509,12 @@ async function generateCoverLetter(app: GenAppRow): Promise<string> {
   const slug = outDir.split('/').pop() || 'unknown';
   const stamp = new Date().toISOString().slice(0, 10);
   const tailoredTexPath = app.resume_path.replace(/\.pdf$/, '.tex');
+  // WR-02: tailor_state/resume_path only prove the tailored PDF exists — the
+  // prompt below tells the CLI the .tex sibling is "the facts to draw on" for
+  // the letter, so that file must actually be there before we make that promise.
+  if (!existsSync(tailoredTexPath)) {
+    throw new Error('tailored resume .tex file is missing — re-tailor the resume first');
+  }
   const jdPath = join(outDir, `jd_${stamp}.md`);
   const texPath = join(outDir, `CoverLetter_${slug}_${stamp}.tex`);
   await Bun.write(jdPath, `# ${app.role} @ ${app.company}\n${app.url ?? ''}\n\n${app.jd}`);

@@ -7,6 +7,11 @@ import { normalizeQuestion, matchLibrary, selectFewShot, groupByQuestion, type A
 import { createFailuresTable, insertFailures, listFailures, type FailureRecordInput } from './failures';
 import { createQueueTable, insertQueueEntry, updateQueueStatus, deleteQueueEntry, listQueue, InvalidQueueStatusError } from './queue';
 import { createApplicationsTable, insertApplication, updateApplicationStatus, deriveGhost, promoteUnsubmittedToApplied, InvalidApplicationStatusError } from './applications';
+// safeDocPath lives in its own module (not inline here) so it stays importable
+// by a test without triggering this file's Bun.serve() side effect on import.
+// Re-exported so it reads as "exported from server.ts" per the phase 15 plan.
+import { safeDocPath } from './docpath';
+export { safeDocPath };
 import { mapViaCLI } from './mapping';
 import { normalizeUrl } from './seek/normalize';
 import { createPostingsTable, upsertPosting, listPostings, recordDecision, listPostingsToDecide } from './seek/postings';
@@ -54,6 +59,12 @@ const BULLET_POOL = join(homedir(), '.claude/projects/-Users-you-resume/memory/r
 const ROUNDS_DIR = join(RESUME_DIR, 'rounds');
 const CLAUDE_BIN = join(homedir(), '.local/bin/claude');
 const PDFLATEX = '/Library/TeX/texbin/pdflatex';
+// Phase 15: memory-file inputs for the on-demand doc generators (cover letter,
+// interview-prep brief, follow-up email). Same construction as BULLET_POOL.
+const VOICE_PROFILE = join(homedir(), '.claude/projects/-Users-you-resume/memory/voice_profile.md');
+const USER_PROFILE = join(homedir(), '.claude/projects/-Users-you-resume/memory/user_profile.md');
+const INTERVIEW_GAPS = join(homedir(), '.claude/projects/-Users-you-resume/memory/interview_gaps.md');
+const NO_INFLATED_METRICS = join(homedir(), '.claude/projects/-Users-you-resume/memory/feedback_no_inflated_metrics.md');
 
 const db = new Database(join(HERE, 'jobfill.db'));
 // Fresh-create DDL lives in applications.ts so the module and its :memory: tests
@@ -75,6 +86,15 @@ try {
 } catch {}
 try {
   db.run(`ALTER TABLE applications ADD COLUMN jd TEXT DEFAULT ''`);
+} catch {}
+try {
+  db.run(`ALTER TABLE applications ADD COLUMN cover_letter_path TEXT DEFAULT ''`);
+} catch {}
+try {
+  db.run(`ALTER TABLE applications ADD COLUMN brief_path TEXT DEFAULT ''`);
+} catch {}
+try {
+  db.run(`ALTER TABLE applications ADD COLUMN email_path TEXT DEFAULT ''`);
 } catch {}
 
 db.run(`CREATE TABLE IF NOT EXISTS answers (
@@ -453,7 +473,11 @@ Bun.serve({
         const rows = db
           .query(
             `SELECT id, company, role, url, status, notes, resume_path, cost_usd, summary,
-                    tailor_state, tailor_message, status_changed_at, created_at, updated_at
+                    tailor_state, tailor_message,
+                    cover_letter_path,
+                    brief_path,
+                    email_path,
+                    status_changed_at, created_at, updated_at
              FROM applications ORDER BY created_at DESC`
           )
           .all() as {

@@ -1,5 +1,14 @@
 import { test, expect, describe } from 'bun:test';
-import { parseNextData, normalizeGetroJob, fetchGetroPage, fetchGetro, MAX_GETRO_PAGES, type GetroNetwork } from './getro';
+import {
+  parseNextData,
+  normalizeGetroJob,
+  fetchGetroPage,
+  fetchGetro,
+  harvestGetroBoards,
+  MAX_GETRO_PAGES,
+  type GetroNetwork,
+} from './getro';
+import type { NormalizedPosting } from './types';
 
 // Captured live shape (jobs.uncorkcapital.com/jobs, 2026-07-24) — see
 // 16-RESEARCH.md Pattern 1. id=87473113, Tailscale.
@@ -137,5 +146,38 @@ describe('fetchGetro', () => {
     await fetchGetro([{ name: 'x', id: '1', host: 'x.getro.com' }], stub);
     expect(calls.length).toBe(MAX_GETRO_PAGES);
     expect(calls.some((u) => u.includes('page=11'))).toBe(false);
+  });
+});
+
+describe('harvestGetroBoards', () => {
+  function posting(url: string): NormalizedPosting {
+    return {
+      company: 'x',
+      title: 'x',
+      location: '',
+      url,
+      source: 'getro',
+      posted_at: null,
+      posted_at_trusted: false,
+      login_gated: false,
+    };
+  }
+
+  test('harvest yields only real ATS entries, deduped, with no embed token', () => {
+    const postings = [
+      posting('https://boards.greenhouse.io/tailscale/jobs/4717966005'),
+      posting('https://boards.greenhouse.io/tailscale/jobs/9999999999'), // duplicate token
+      posting('https://jobs.lever.co/commercearchitects/ec4bd3b5-apply'),
+      posting('https://jobs.ashbyhq.com/magical/2c4734af'),
+      posting('https://jobs.smartrecruiters.com/acme/12345'), // non-ATS careers page
+      posting('https://boards.greenhouse.io/embed/job_app?token=6099883'), // embed trap
+    ];
+    const harvested = harvestGetroBoards(postings);
+    expect(harvested).toEqual([
+      { ats: 'greenhouse', token: 'tailscale' },
+      { ats: 'lever', token: 'commercearchitects' },
+      { ats: 'ashby', token: 'magical' },
+    ]);
+    expect(harvested.some((h) => h.token === 'embed')).toBe(false);
   });
 });

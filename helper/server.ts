@@ -6,7 +6,7 @@ import { homedir } from 'node:os';
 import { normalizeQuestion, matchLibrary, selectFewShot, groupByQuestion, type AnswerRow } from './answers';
 import { createFailuresTable, insertFailures, listFailures, type FailureRecordInput } from './failures';
 import { createQueueTable, insertQueueEntry, updateQueueStatus, deleteQueueEntry, listQueue, InvalidQueueStatusError } from './queue';
-import { createApplicationsTable } from './applications';
+import { createApplicationsTable, insertApplication, updateApplicationStatus, deriveGhost, InvalidApplicationStatusError } from './applications';
 import { mapViaCLI } from './mapping';
 import { normalizeUrl } from './seek/normalize';
 import { createPostingsTable, upsertPosting, listPostings, recordDecision, listPostingsToDecide } from './seek/postings';
@@ -445,8 +445,14 @@ Bun.serve({
         return new Response(Bun.file(join(HERE, 'dashboard.html')), { headers: { 'content-type': 'text/html' } });
       }
       if (pathname === '/applications' && req.method === 'GET') {
-        const rows = db.query('SELECT * FROM applications ORDER BY created_at DESC').all() as { url: string; summary: string }[];
-        const mapped = rows.map(row => ({ ...row, summary: parseSummary(row.summary) }));
+        const rows = db.query('SELECT * FROM applications ORDER BY created_at DESC').all() as {
+          url: string;
+          summary: string;
+          status: string;
+          status_changed_at: string | null;
+        }[];
+        // D-14: attach derived ghosted + days_silent per row (nothing stored).
+        const mapped = rows.map(row => ({ ...row, summary: parseSummary(row.summary), ...deriveGhost(row) }));
         const urlParam = new URL(req.url).searchParams.get('url');
         if (urlParam === null) return json(mapped);
         const target = normalizeUrl(urlParam);
@@ -454,40 +460,46 @@ Bun.serve({
       }
       if (pathname === '/applications' && req.method === 'POST') {
         const b = await req.json();
-        const row = db
-          .query(
-            `INSERT INTO applications (company, role, url, resume_path, cost_usd, summary, tailor_state, tailor_message)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-          )
-          .get(
-            b.company ?? 'unknown',
-            b.role ?? '',
-            b.url ?? '',
-            b.resume_path ?? '',
-            b.cost_usd ?? 0,
-            Array.isArray(b.summary) && b.summary.length ? JSON.stringify(b.summary) : '',
-            b.tailor_state ?? '',
-            b.tailor_message ?? '',
-          );
-        return json(row, 201);
+        // D-02: prefer the explicit queue_id from the extension; else fall back to a
+        // normalizeUrl match against queue.url_key (already normalized + UNIQUE-indexed,
+        // cheaper than re-normalizing every queue.url) — same resolution shape as
+        // /answers (:496-501) and /failures (:539-546).
+        const resolveQueueId = (url: string): number | null => {
+          const target = normalizeUrl(url);
+          if (!target) return null;
+          const rows = db.query('SELECT id, url_key FROM queue ORDER BY created_at DESC, id DESC').all() as {
+            id: number;
+            url_key: string | null;
+          }[];
+          return rows.find(r => r.url_key === target)?.id ?? null;
+        };
+        const explicit = Number(b.queue_id);
+        const queueId = Number.isInteger(explicit) && explicit > 0 ? explicit : resolveQueueId(b.url ?? '');
+        try {
+          // insertApplication defaults the new row to PRE_SUBMIT_STATUS (D-06).
+          const row = insertApplication(db, b, resolveQueueId);
+          // D-02/D-03: write the queue<->application link (latest fill wins; the
+          // orphaned earlier application row is left untouched as history).
+          if (queueId !== null) updateQueueStatus(db, queueId, { application_id: row.id });
+          return json(row, 201);
+        } catch (e) {
+          if (e instanceof InvalidApplicationStatusError) return json({ error: e.message }, 400);
+          throw e;
+        }
       }
       const patch = pathname.match(/^\/applications\/(\d+)$/);
       if (patch && req.method === 'PATCH') {
         const b = await req.json();
-        const fields: string[] = [];
-        const vals: unknown[] = [];
-        for (const k of ['status', 'notes'] as const) {
-          if (k in b) {
-            fields.push(`${k} = ?`);
-            vals.push(b[k]);
-          }
+        try {
+          // Delegates the ['status','notes'] whitelist, enum allowlist, D-11
+          // conditional status_changed_at bump, and D-12 unconditional updated_at.
+          const row = updateApplicationStatus(db, Number(patch[1]), b);
+          if (!row) return json({ error: 'not found' }, 404);
+          return json(row);
+        } catch (e) {
+          if (e instanceof InvalidApplicationStatusError) return json({ error: e.message }, 400);
+          throw e;
         }
-        if (!fields.length) return json({ error: 'nothing to update' }, 400);
-        db.query(`UPDATE applications SET ${fields.join(', ')}, updated_at = datetime('now') WHERE id = ?`).run(
-          ...vals,
-          Number(patch[1]),
-        );
-        return json(db.query('SELECT * FROM applications WHERE id = ?').get(Number(patch[1])));
       }
       if (pathname === '/answers' && req.method === 'GET') {
         const rows = db.query('SELECT * FROM answers ORDER BY created_at DESC, id DESC').all() as AnswerRow[];

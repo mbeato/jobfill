@@ -1,9 +1,10 @@
-// Lever public-board adapter. Mirrors mapViaCLI's throw-on-failure contract
-// (helper/mapping.ts): fetchLever throws a descriptive Error on non-2xx or
-// parse failure — the /seek route (Plan 04) catches per-source so one bad board
-// never taints the sweep (D-13).
+// Lever public-board adapter. Per-token failures are collected, never thrown
+// (D-03/D-05): fetchLever runs a bounded worker pool over the token list and
+// returns { postings, errors } — one bad board can no longer abort the rest
+// of the sweep.
 
 import type { NormalizedPosting } from './types';
+import { runTokenPool, ATS_CONCURRENCY, type AtsFetchResult } from './ats-fetch';
 
 /**
  * Pure mapper: raw Lever posting -> NormalizedPosting. Never throws — a missing
@@ -29,23 +30,24 @@ export function normalizeLeverPosting(raw: unknown, company: string): Normalized
 export async function fetchLever(
   tokens: string[],
   fetchImpl: typeof fetch = fetch,
-): Promise<NormalizedPosting[]> {
-  const postings: NormalizedPosting[] = [];
-  for (const company of tokens) {
-    const res = await fetchImpl(`https://api.lever.co/v0/postings/${company}?mode=json`);
-    if (!res.ok) {
-      throw new Error(`fetchLever: ${company} returned HTTP ${res.status}`);
-    }
-    let body: unknown[];
-    try {
-      const parsed = await res.json();
-      body = Array.isArray(parsed) ? parsed : [];
-    } catch (err) {
-      throw new Error(`fetchLever: ${company} returned unparseable JSON (${err})`);
-    }
-    for (const raw of body) {
-      postings.push(normalizeLeverPosting(raw, company));
-    }
-  }
-  return postings;
+  concurrency: number = ATS_CONCURRENCY,
+): Promise<AtsFetchResult> {
+  return runTokenPool(
+    tokens,
+    async (company) => {
+      const res = await fetchImpl(`https://api.lever.co/v0/postings/${company}?mode=json`);
+      if (!res.ok) {
+        throw new Error(`fetchLever: ${company} returned HTTP ${res.status}`);
+      }
+      let body: unknown[];
+      try {
+        const parsed = await res.json();
+        body = Array.isArray(parsed) ? parsed : [];
+      } catch (err) {
+        throw new Error(`fetchLever: ${company} returned unparseable JSON (${err})`);
+      }
+      return body.map((raw) => normalizeLeverPosting(raw, company));
+    },
+    concurrency,
+  );
 }

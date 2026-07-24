@@ -1,9 +1,10 @@
-// Ashby public-board adapter. Mirrors mapViaCLI's throw-on-failure contract
-// (helper/mapping.ts): fetchAshby throws a descriptive Error on non-2xx or
-// parse failure — the /seek route (Plan 04) catches per-source so one bad board
-// never taints the sweep (D-13).
+// Ashby public-board adapter. Per-token failures are collected, never thrown
+// (D-03/D-05): fetchAshby runs a bounded worker pool over the token list and
+// returns { postings, errors } — one bad board can no longer abort the rest
+// of the sweep.
 
 import type { NormalizedPosting } from './types';
+import { runTokenPool, ATS_CONCURRENCY, type AtsFetchResult } from './ats-fetch';
 
 /**
  * Pure mapper: raw Ashby job -> NormalizedPosting. Never throws — a missing
@@ -28,22 +29,23 @@ export function normalizeAshbyJob(raw: unknown, token: string): NormalizedPostin
 export async function fetchAshby(
   tokens: string[],
   fetchImpl: typeof fetch = fetch,
-): Promise<NormalizedPosting[]> {
-  const postings: NormalizedPosting[] = [];
-  for (const token of tokens) {
-    const res = await fetchImpl(`https://api.ashbyhq.com/posting-api/job-board/${token}`);
-    if (!res.ok) {
-      throw new Error(`fetchAshby: ${token} returned HTTP ${res.status}`);
-    }
-    let body: { jobs?: unknown[] };
-    try {
-      body = (await res.json()) as { jobs?: unknown[] };
-    } catch (err) {
-      throw new Error(`fetchAshby: ${token} returned unparseable JSON (${err})`);
-    }
-    for (const job of body.jobs ?? []) {
-      postings.push(normalizeAshbyJob(job, token));
-    }
-  }
-  return postings;
+  concurrency: number = ATS_CONCURRENCY,
+): Promise<AtsFetchResult> {
+  return runTokenPool(
+    tokens,
+    async (token) => {
+      const res = await fetchImpl(`https://api.ashbyhq.com/posting-api/job-board/${token}`);
+      if (!res.ok) {
+        throw new Error(`fetchAshby: ${token} returned HTTP ${res.status}`);
+      }
+      let body: { jobs?: unknown[] };
+      try {
+        body = (await res.json()) as { jobs?: unknown[] };
+      } catch (err) {
+        throw new Error(`fetchAshby: ${token} returned unparseable JSON (${err})`);
+      }
+      return (body.jobs ?? []).map((job) => normalizeAshbyJob(job, token));
+    },
+    concurrency,
+  );
 }

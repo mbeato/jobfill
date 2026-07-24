@@ -1,9 +1,10 @@
-// Greenhouse public-board adapter. Mirrors mapViaCLI's throw-on-failure contract
-// (helper/mapping.ts): fetchGreenhouse throws a descriptive Error on non-2xx or
-// parse failure — the /seek route (Plan 04) catches per-source so one bad board
-// never taints the sweep (D-13).
+// Greenhouse public-board adapter. Per-token failures are collected, never
+// thrown (D-03/D-05): fetchGreenhouse runs a bounded worker pool over the
+// token list and returns { postings, errors } — one bad board can no longer
+// abort the rest of the sweep.
 
 import type { NormalizedPosting } from './types';
+import { runTokenPool, ATS_CONCURRENCY, type AtsFetchResult } from './ats-fetch';
 
 /**
  * Pure mapper: raw Greenhouse job -> NormalizedPosting. Never throws — a missing
@@ -29,24 +30,25 @@ export function normalizeGreenhouseJob(raw: unknown, token: string): NormalizedP
 export async function fetchGreenhouse(
   tokens: string[],
   fetchImpl: typeof fetch = fetch,
-): Promise<NormalizedPosting[]> {
-  const postings: NormalizedPosting[] = [];
-  for (const token of tokens) {
-    const res = await fetchImpl(
-      `https://boards-api.greenhouse.io/v1/boards/${token}/jobs?content=true`,
-    );
-    if (!res.ok) {
-      throw new Error(`fetchGreenhouse: ${token} returned HTTP ${res.status}`);
-    }
-    let body: { jobs?: unknown[] };
-    try {
-      body = (await res.json()) as { jobs?: unknown[] };
-    } catch (err) {
-      throw new Error(`fetchGreenhouse: ${token} returned unparseable JSON (${err})`);
-    }
-    for (const job of body.jobs ?? []) {
-      postings.push(normalizeGreenhouseJob(job, token));
-    }
-  }
-  return postings;
+  concurrency: number = ATS_CONCURRENCY,
+): Promise<AtsFetchResult> {
+  return runTokenPool(
+    tokens,
+    async (token) => {
+      const res = await fetchImpl(
+        `https://boards-api.greenhouse.io/v1/boards/${token}/jobs?content=true`,
+      );
+      if (!res.ok) {
+        throw new Error(`fetchGreenhouse: ${token} returned HTTP ${res.status}`);
+      }
+      let body: { jobs?: unknown[] };
+      try {
+        body = (await res.json()) as { jobs?: unknown[] };
+      } catch (err) {
+        throw new Error(`fetchGreenhouse: ${token} returned unparseable JSON (${err})`);
+      }
+      return (body.jobs ?? []).map((job) => normalizeGreenhouseJob(job, token));
+    },
+    concurrency,
+  );
 }

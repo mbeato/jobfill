@@ -40,6 +40,35 @@ function fakeFetch(body: unknown, ok = true, status = 200) {
     }) as Response;
 }
 
+// Per-token-aware stub: keyed by token, the fetchImpl inspects the requested
+// URL to decide which entry to serve, defaulting to a 404 for unknown tokens.
+// Entries with body === 'UNPARSEABLE' simulate a JSON parse failure.
+type TokenStubEntry = { ok: boolean; status?: number; body?: unknown };
+
+function fakeFetchByToken(entries: Record<string, TokenStubEntry>) {
+  return async (url: string) => {
+    const token = Object.keys(entries).find((t) => url.includes(`/${t}`) || url.includes(`/${t}?`));
+    const entry = token ? entries[token] : undefined;
+    if (!entry) {
+      return { ok: false, status: 404, json: async () => ({}) } as unknown as Response;
+    }
+    if (entry.body === 'UNPARSEABLE') {
+      return {
+        ok: entry.ok,
+        status: entry.status ?? 200,
+        json: async () => {
+          throw new Error('unexpected token in JSON at position 0');
+        },
+      } as unknown as Response;
+    }
+    return {
+      ok: entry.ok,
+      status: entry.status ?? (entry.ok ? 200 : 404),
+      json: async () => entry.body ?? {},
+    } as unknown as Response;
+  };
+}
+
 test('normalizeGreenhouseJob maps a raw Greenhouse job to the shared shape with posted_at_trusted false', () => {
   const posting = normalizeGreenhouseJob(rawGreenhouseJob, 'stripe');
   expect(posting.source).toBe('greenhouse');
@@ -60,15 +89,50 @@ test('normalizeGreenhouseJob tolerates a missing location without throwing', () 
 
 test('fetchGreenhouse maps a stubbed response body through normalizeGreenhouseJob', async () => {
   const stub = fakeFetch({ jobs: [rawGreenhouseJob] });
-  const postings = await fetchGreenhouse(['stripe'], stub);
-  expect(postings).toHaveLength(1);
-  expect(postings[0].source).toBe('greenhouse');
-  expect(postings[0].posted_at_trusted).toBe(false);
+  const result = await fetchGreenhouse(['stripe'], stub);
+  expect(result.postings).toHaveLength(1);
+  expect(result.postings[0].source).toBe('greenhouse');
+  expect(result.postings[0].posted_at_trusted).toBe(false);
+  expect(result.errors).toHaveLength(0);
 });
 
-test('fetchGreenhouse throws when the stub response is non-2xx', async () => {
-  const stub = fakeFetch({}, false, 404);
-  await expect(fetchGreenhouse(['nonexistent'], stub)).rejects.toThrow();
+test('fetchGreenhouse isolates a bad token among many (D-03): good token still resolves, bad tokens are recorded, never thrown', async () => {
+  const stub = fakeFetchByToken({
+    good: { ok: true, body: { jobs: [rawGreenhouseJob] } },
+    notfound: { ok: false, status: 404 },
+    badjson: { ok: true, body: 'UNPARSEABLE' },
+  });
+  const result = await fetchGreenhouse(['good', 'notfound', 'badjson'], stub);
+  expect(result.postings).toHaveLength(1);
+  expect(result.errors).toHaveLength(2);
+  expect(result.errors.map((e) => e.token).sort()).toEqual(['badjson', 'notfound']);
+  const notfoundErr = result.errors.find((e) => e.token === 'notfound')!;
+  const badjsonErr = result.errors.find((e) => e.token === 'badjson')!;
+  expect(notfoundErr.error).toMatch(/fetchGreenhouse/);
+  expect(notfoundErr.error).toMatch(/404/);
+  expect(badjsonErr.error).toMatch(/fetchGreenhouse/);
+  expect(badjsonErr.error).toMatch(/unparseable JSON/);
+});
+
+test('fetchGreenhouse respects a bounded concurrency argument (D-05): max in-flight never exceeds the cap over 20 tokens', async () => {
+  let inFlight = 0;
+  let maxInFlight = 0;
+  const tokens = Array.from({ length: 20 }, (_, i) => `t${i}`);
+  const stub = async () => {
+    inFlight++;
+    maxInFlight = Math.max(maxInFlight, inFlight);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    inFlight--;
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ jobs: [rawGreenhouseJob] }),
+    } as unknown as Response;
+  };
+  const result = await fetchGreenhouse(tokens, stub, 3);
+  expect(result.postings).toHaveLength(20);
+  expect(result.errors).toHaveLength(0);
+  expect(maxInFlight).toBeLessThanOrEqual(3);
 });
 
 test('normalizeLeverPosting maps a raw Lever posting to the shared shape with posted_at_trusted true', () => {
@@ -91,15 +155,29 @@ test('normalizeLeverPosting tolerates a missing categories.location without thro
 
 test('fetchLever maps a stubbed bare-array response through normalizeLeverPosting', async () => {
   const stub = fakeFetch([rawLeverPosting]);
-  const postings = await fetchLever(['palantir'], stub);
-  expect(postings).toHaveLength(1);
-  expect(postings[0].source).toBe('lever');
-  expect(postings[0].posted_at_trusted).toBe(true);
+  const result = await fetchLever(['palantir'], stub);
+  expect(result.postings).toHaveLength(1);
+  expect(result.postings[0].source).toBe('lever');
+  expect(result.postings[0].posted_at_trusted).toBe(true);
+  expect(result.errors).toHaveLength(0);
 });
 
-test('fetchLever throws when the stub response is non-2xx', async () => {
-  const stub = fakeFetch({}, false, 404);
-  await expect(fetchLever(['nonexistent'], stub)).rejects.toThrow();
+test('fetchLever isolates a bad token among many (D-03): good token still resolves, bad tokens are recorded, never thrown', async () => {
+  const stub = fakeFetchByToken({
+    good: { ok: true, body: [rawLeverPosting] },
+    notfound: { ok: false, status: 404 },
+    badjson: { ok: true, body: 'UNPARSEABLE' },
+  });
+  const result = await fetchLever(['good', 'notfound', 'badjson'], stub);
+  expect(result.postings).toHaveLength(1);
+  expect(result.errors).toHaveLength(2);
+  expect(result.errors.map((e) => e.token).sort()).toEqual(['badjson', 'notfound']);
+  const notfoundErr = result.errors.find((e) => e.token === 'notfound')!;
+  const badjsonErr = result.errors.find((e) => e.token === 'badjson')!;
+  expect(notfoundErr.error).toMatch(/fetchLever/);
+  expect(notfoundErr.error).toMatch(/404/);
+  expect(badjsonErr.error).toMatch(/fetchLever/);
+  expect(badjsonErr.error).toMatch(/unparseable JSON/);
 });
 
 test('normalizeAshbyJob maps a raw Ashby job to the shared shape with posted_at_trusted true', () => {
@@ -122,13 +200,27 @@ test('normalizeAshbyJob tolerates a missing location without throwing', () => {
 
 test('fetchAshby maps a stubbed response body through normalizeAshbyJob', async () => {
   const stub = fakeFetch({ jobs: [rawAshbyJob] });
-  const postings = await fetchAshby(['ramp'], stub);
-  expect(postings).toHaveLength(1);
-  expect(postings[0].source).toBe('ashby');
-  expect(postings[0].posted_at_trusted).toBe(true);
+  const result = await fetchAshby(['ramp'], stub);
+  expect(result.postings).toHaveLength(1);
+  expect(result.postings[0].source).toBe('ashby');
+  expect(result.postings[0].posted_at_trusted).toBe(true);
+  expect(result.errors).toHaveLength(0);
 });
 
-test('fetchAshby throws when the stub response is non-2xx', async () => {
-  const stub = fakeFetch({}, false, 404);
-  await expect(fetchAshby(['nonexistent'], stub)).rejects.toThrow();
+test('fetchAshby isolates a bad token among many (D-03): good token still resolves, bad tokens are recorded, never thrown', async () => {
+  const stub = fakeFetchByToken({
+    good: { ok: true, body: { jobs: [rawAshbyJob] } },
+    notfound: { ok: false, status: 404 },
+    badjson: { ok: true, body: 'UNPARSEABLE' },
+  });
+  const result = await fetchAshby(['good', 'notfound', 'badjson'], stub);
+  expect(result.postings).toHaveLength(1);
+  expect(result.errors).toHaveLength(2);
+  expect(result.errors.map((e) => e.token).sort()).toEqual(['badjson', 'notfound']);
+  const notfoundErr = result.errors.find((e) => e.token === 'notfound')!;
+  const badjsonErr = result.errors.find((e) => e.token === 'badjson')!;
+  expect(notfoundErr.error).toMatch(/fetchAshby/);
+  expect(notfoundErr.error).toMatch(/404/);
+  expect(badjsonErr.error).toMatch(/fetchAshby/);
+  expect(badjsonErr.error).toMatch(/unparseable JSON/);
 });

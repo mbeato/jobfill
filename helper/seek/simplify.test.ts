@@ -119,8 +119,13 @@ test('fetchSimplify yields an empty array rather than throwing on a non-array bo
   expect(postings).toEqual([]);
 });
 
-test('SIMPLIFY_URL points at the New-Grad-Positions main branch, not Summer2026-Internships', () => {
-  expect(SIMPLIFY_URL).toContain('New-Grad-Positions/main');
+test('SIMPLIFY_URL points at the New-Grad-Positions dev branch, not Summer2026-Internships', () => {
+  // D-07: New-Grad only. The branch is `dev` (the repo's default); the `main`
+  // path 404s, which is what the 16-09 smoke run caught. This assertion is the
+  // offline tripwire for that specific regression — it cannot prove the feed is
+  // reachable, only that we did not silently revert to the dead `main` path.
+  expect(SIMPLIFY_URL).toContain('New-Grad-Positions/dev');
+  expect(SIMPLIFY_URL).not.toContain('New-Grad-Positions/main');
   expect(SIMPLIFY_URL).not.toContain('Summer2026');
 });
 

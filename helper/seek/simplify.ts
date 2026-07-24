@@ -18,9 +18,15 @@ import type { NormalizedPosting } from './types';
 import { extractAtsToken, type HarvestedBoard } from './slug-harvest';
 
 // Verified live 2026-07-24: HTTP 200, ~12 MB, 17,646-entry JSON array (NOT
-// wrapped in an object). The `dev` branch path 404s — `main` is the live file.
+// wrapped in an object). The branch is `dev`, not `main` — the repo's default
+// branch is `dev` and the `main` path 404s. Confirmed against the GitHub API
+// (`default_branch: dev`) after the 16-09 smoke run caught the 404. If this
+// 404s again, the upstream default branch moved: re-check with
+// `curl -s https://api.github.com/repos/SimplifyJobs/New-Grad-Positions | grep default_branch`.
+// `scripts/seek-smoke.ts` is what surfaces this — the stub-fetch unit tests
+// prove the mapper, never the feed's reachability.
 export const SIMPLIFY_URL =
-  'https://raw.githubusercontent.com/SimplifyJobs/New-Grad-Positions/main/.github/scripts/listings.json';
+  'https://raw.githubusercontent.com/SimplifyJobs/New-Grad-Positions/dev/.github/scripts/listings.json';
 
 // Verified field names/types against a 2,000-entry sample, 2026-07-24 — no
 // field was ever missing across the sample. No `terms` field exists in this

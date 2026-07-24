@@ -204,8 +204,52 @@ function render() {
         ` : ''}
         <div class="muted jd-toggle" onclick="toggleJd(${a.id})">job description <span id="jd-arrow-${a.id}">▾</span></div>
         <div class="jd-slot" id="jd-slot-${a.id}" style="display:none"></div>
+        <div class="gen-menu">
+          <select id="gen-select-${a.id}" onchange="if(this.value) triggerGenerate(${a.id}, this.value)">
+            <option value="">generate ▾</option>
+            <option value="cover-letter" ${a.tailor_state !== 'ran' ? 'disabled' : ''}>cover letter</option>
+            <option value="email">follow-up email</option>
+            <option value="brief">interview-prep brief</option>
+          </select>
+        </div>
+        <div class="muted" id="gen-status-${a.id}"></div>
+        ${a.cover_letter_path ? `<div class="muted">cover letter: <a href="/applications/${a.id}/doc/cover-letter" target="_blank">open PDF</a></div>` : ''}
+        ${a.brief_path ? `<div class="muted">interview-prep brief: <a href="/applications/${a.id}/doc/brief" target="_blank">open PDF</a></div>` : ''}
+        ${a.email_path ? `
+          <div class="muted jd-toggle" onclick="toggleEmail(${a.id})">follow-up email <span id="email-arrow-${a.id}">▾</span></div>
+          <div class="jd-slot" id="email-slot-${a.id}" style="display:none"></div>
+        ` : ''}
       </td>
     </tr>`).join('');
+}
+
+// D-05: the generate menu blocks on the request — the control is disabled and
+// shows "generating…" before the fetch, reset in a finally so the row is never
+// left stuck disabled on a thrown/rejected fetch. No existing dashboard.html
+// button blocks for a true multi-minute server op (triggerFill fires-and-forgets
+// a detached runner job); this is new UI, not a copy.
+async function triggerGenerate(id, doctype) {
+  const select = document.getElementById(`gen-select-${id}`);
+  const status = document.getElementById(`gen-status-${id}`);
+  const placeholder = select.options[0];
+  const placeholderLabel = placeholder.textContent;
+  placeholder.textContent = 'generating…';
+  select.value = '';
+  select.disabled = true;
+  status.textContent = '';
+  try {
+    const resp = await fetch(`/applications/${id}/generate/${doctype}`, { method: 'POST' });
+    const body = await resp.json();
+    if (!resp.ok) {
+      status.textContent = esc(body.error || `HTTP ${resp.status}`);
+    }
+  } catch (e) {
+    status.textContent = `helper unreachable — ${esc(String(e?.message || e))}`;
+  } finally {
+    placeholder.textContent = placeholderLabel;
+    select.disabled = false;
+  }
+  await load();
 }
 
 async function patch(id, body) {
@@ -262,6 +306,48 @@ async function toggleJd(id) {
     slot.innerHTML = html;
   } catch (e) {
     slot.innerHTML = `<div class="muted">couldn't load job description — click to retry</div>`;
+  }
+}
+
+// D-07: the generated follow-up email surfaces in an inline expandable
+// read-back box, reusing toggleJd's structure verbatim — cache success/empty,
+// never cache the error branch so re-expand re-attempts (mirrors T-14-06).
+// The fetched email text is inserted via esc() before innerHTML — mitigates
+// stored-XSS from generated prose (T-15-06, mirrors T-14-05).
+const emailCache = new Map();
+
+async function toggleEmail(id) {
+  const slot = document.getElementById(`email-slot-${id}`);
+  const arrow = document.getElementById(`email-arrow-${id}`);
+  const expanded = slot.style.display !== 'none';
+  if (expanded) {
+    slot.style.display = 'none';
+    arrow.textContent = '▾';
+    return;
+  }
+  slot.style.display = 'block';
+  arrow.textContent = '▴';
+
+  if (emailCache.has(id)) {
+    slot.innerHTML = emailCache.get(id);
+    return;
+  }
+
+  slot.innerHTML = `<div class="muted">loading follow-up email…</div>`;
+  try {
+    const resp = await fetch(`/applications/${id}/email`);
+    if (!resp.ok) {
+      slot.innerHTML = `<div class="muted">couldn't load follow-up email — click to retry</div>`;
+      return;
+    }
+    const { email } = await resp.json();
+    const html = email && email.trim()
+      ? `<div class="jd-body">${esc(email)}</div>`
+      : `<div class="muted">no email generated</div>`;
+    emailCache.set(id, html);
+    slot.innerHTML = html;
+  } catch (e) {
+    slot.innerHTML = `<div class="muted">couldn't load follow-up email — click to retry</div>`;
   }
 }
 

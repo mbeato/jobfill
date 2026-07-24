@@ -73,6 +73,9 @@ try {
 try {
   db.run(`ALTER TABLE applications ADD COLUMN status_changed_at TEXT`);
 } catch {}
+try {
+  db.run(`ALTER TABLE applications ADD COLUMN jd TEXT DEFAULT ''`);
+} catch {}
 
 db.run(`CREATE TABLE IF NOT EXISTS answers (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -445,7 +448,15 @@ Bun.serve({
         return new Response(Bun.file(join(HERE, 'dashboard.html')), { headers: { 'content-type': 'text/html' } });
       }
       if (pathname === '/applications' && req.method === 'GET') {
-        const rows = db.query('SELECT * FROM applications ORDER BY created_at DESC').all() as {
+        // D-08: explicit jd-free column list — SELECT * would silently ship the
+        // multi-KB jd column into the list payload refetched on every load/patch.
+        const rows = db
+          .query(
+            `SELECT id, company, role, url, status, notes, resume_path, cost_usd, summary,
+                    tailor_state, tailor_message, status_changed_at, created_at, updated_at
+             FROM applications ORDER BY created_at DESC`
+          )
+          .all() as {
           url: string;
           summary: string;
           status: string;

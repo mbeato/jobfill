@@ -31,6 +31,15 @@ export interface SweepDeps {
   fetchAshby: (tokens: string[]) => Promise<AtsFetchResult>;
   fetchHNPostings: (opts?: { maxAgeDays?: number }) => Promise<NormalizedPosting[]>;
   upsertPosting: (db: Database, p: NormalizedPosting) => unknown;
+  // D-01/D-04 board lifecycle, injected so runSweep stays unit-testable
+  // against a stub boards implementation (mirrors upsertPosting above).
+  upsertBoard: (
+    db: Database,
+    input: { ats: string; token: string; source_of_discovery: string },
+    blocklist?: string[],
+  ) => unknown;
+  recordBoardResult: (db: Database, ats: string, token: string, ok: boolean) => void;
+  resolveEffectiveTokens: (db: Database, ats: string, configTokens: string[], blocklist?: string[]) => string[];
 }
 
 export async function runSweep(db: Database, config: SeekConfig, deps: SweepDeps): Promise<SourceResult[]> {
@@ -40,6 +49,12 @@ export async function runSweep(db: Database, config: SeekConfig, deps: SweepDeps
     source: SourceName,
     enabled: boolean,
     fetcher: () => Promise<NormalizedPosting[] | AtsFetchResult>,
+    // D-04: when set, every token in this list gets its outcome recorded
+    // against the boards lifecycle once the fetch succeeds. Recording lives
+    // inside this same try/catch so a recording failure can't abort the
+    // sweep, and a whole-source throw (caught below) skips recording
+    // entirely rather than marking every board dead over one outage.
+    tokens?: string[],
   ) => {
     if (!enabled) return;
     try {
@@ -48,6 +63,12 @@ export async function runSweep(db: Database, config: SeekConfig, deps: SweepDeps
       let upserted = 0;
       for (const p of postings) {
         if (deps.upsertPosting(db, p)) upserted++;
+      }
+      if (tokens) {
+        const failed = new Set(errors.map(e => e.token));
+        for (const token of tokens) {
+          deps.recordBoardResult(db, source, token, !failed.has(token));
+        }
       }
       const result: SourceResult = { source, fetched: postings.length, upserted };
       if (errors.length > 0) {
@@ -60,9 +81,18 @@ export async function runSweep(db: Database, config: SeekConfig, deps: SweepDeps
     }
   };
 
-  await runOne('greenhouse', config.greenhouse.enabled, () => deps.fetchGreenhouse(config.greenhouse.tokens));
-  await runOne('lever', config.lever.enabled, () => deps.fetchLever(config.lever.tokens));
-  await runOne('ashby', config.ashby.enabled, () => deps.fetchAshby(config.ashby.tokens));
+  // D-01: effective token list = config tokens ∪ active boards − blocklist,
+  // resolved fresh immediately before each fetcher call so a slug harvested
+  // this morning is polled tonight with no restart.
+  const ghTokens = deps.resolveEffectiveTokens(db, 'greenhouse', config.greenhouse.tokens, config.blocklist);
+  await runOne('greenhouse', config.greenhouse.enabled, () => deps.fetchGreenhouse(ghTokens), ghTokens);
+
+  const leverTokens = deps.resolveEffectiveTokens(db, 'lever', config.lever.tokens, config.blocklist);
+  await runOne('lever', config.lever.enabled, () => deps.fetchLever(leverTokens), leverTokens);
+
+  const ashbyTokens = deps.resolveEffectiveTokens(db, 'ashby', config.ashby.tokens, config.blocklist);
+  await runOne('ashby', config.ashby.enabled, () => deps.fetchAshby(ashbyTokens), ashbyTokens);
+
   await runOne('hn', config.hn.enabled, () => deps.fetchHNPostings());
 
   return results;

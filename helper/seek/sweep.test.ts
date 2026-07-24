@@ -2,7 +2,7 @@ import { test, expect } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { createPostingsTable, upsertPosting, listPostings } from './postings';
 import { createBoardsTable, upsertBoard, recordBoardResult, resolveEffectiveTokens } from './boards';
-import { createSeekMetaTable } from './meta';
+import { createSeekMetaTable, readSeekMeta, writeSeekMeta } from './meta';
 import { runSweep } from './sweep';
 import type { NormalizedPosting, SeekConfig } from './types';
 import type { SweepDeps } from './sweep';
@@ -56,6 +56,7 @@ function baseDeps(overrides: Partial<SweepDeps> = {}): SweepDeps {
     fetchHNPostings: async () => [],
     fetchSimplify: async () => [],
     fetchGetro: async () => ({ postings: [], errors: [] }),
+    harvestYcDirectory: async () => ({ companies: 0, probed: 0, added: 0, errors: [] }),
     upsertPosting,
     upsertBoard,
     recordBoardResult,
@@ -358,4 +359,81 @@ test('a throwing fetchSimplify produces an error result and does not affect othe
   expect(bySource.simplify.fetched).toBe(0);
   expect(bySource.hn.fetched).toBe(1);
   expect(bySource.hn.error).toBeUndefined();
+});
+
+// --- D-17/D-19 weekly-gated ycdir slug harvest ---
+
+test('with no prior ycdir_last_run, the harvest stub runs once and writes an ISO timestamp', async () => {
+  const db = makeDb();
+  const config = disabledSourcesConfig({ ycdir: { enabled: true } });
+  let calls = 0;
+  const results = await runSweep(db, config, baseDeps({
+    harvestYcDirectory: async () => {
+      calls++;
+      return { companies: 3, probed: 3, added: 2, errors: [] };
+    },
+  }));
+
+  expect(calls).toBe(1);
+  const written = readSeekMeta(db, 'ycdir_last_run');
+  expect(written).not.toBeNull();
+  expect(Number.isNaN(new Date(written!).getTime())).toBe(false);
+
+  const ycdirResult = results.find(r => r.source === 'ycdir')!;
+  expect(ycdirResult.fetched).toBe(0);
+  expect(ycdirResult.boardsAdded).toBe(2);
+  expect(listPostings(db)).toHaveLength(0);
+});
+
+test('with ycdir_last_run 2 days ago, the harvest stub is not invoked', async () => {
+  const db = makeDb();
+  const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+  writeSeekMeta(db, 'ycdir_last_run', twoDaysAgo.toISOString());
+  const config = disabledSourcesConfig({ ycdir: { enabled: true } });
+  let calls = 0;
+  const results = await runSweep(db, config, baseDeps({
+    harvestYcDirectory: async () => {
+      calls++;
+      return { companies: 0, probed: 0, added: 0, errors: [] };
+    },
+  }));
+
+  expect(calls).toBe(0);
+  expect(results.some(r => r.source === 'ycdir')).toBe(false);
+});
+
+test('with ycdir_last_run 8 days ago, the harvest stub is invoked', async () => {
+  const db = makeDb();
+  const eightDaysAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
+  writeSeekMeta(db, 'ycdir_last_run', eightDaysAgo.toISOString());
+  const config = disabledSourcesConfig({ ycdir: { enabled: true } });
+  let calls = 0;
+  const results = await runSweep(db, config, baseDeps({
+    harvestYcDirectory: async () => {
+      calls++;
+      return { companies: 0, probed: 0, added: 0, errors: [] };
+    },
+  }));
+
+  expect(calls).toBe(1);
+  expect(results.some(r => r.source === 'ycdir')).toBe(true);
+});
+
+test('a throwing harvest leaves ycdir_last_run unchanged and pushes an error result while other sources complete', async () => {
+  const db = makeDb();
+  const twoWeeksAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+  writeSeekMeta(db, 'ycdir_last_run', twoWeeksAgo.toISOString());
+  const config = disabledSourcesConfig({ ycdir: { enabled: true }, hn: { enabled: true } });
+  const results = await runSweep(db, config, baseDeps({
+    harvestYcDirectory: async () => {
+      throw new Error('ycdir probe down');
+    },
+    fetchHNPostings: async () => [makePosting({ source: 'hn', url: 'https://news.ycombinator.com/item?id=1' })],
+  }));
+
+  expect(readSeekMeta(db, 'ycdir_last_run')).toBe(twoWeeksAgo.toISOString());
+  const bySource = Object.fromEntries(results.map(r => [r.source, r]));
+  expect(bySource.ycdir.error).toBe('ycdir probe down');
+  expect(bySource.hn.fetched).toBe(1);
+  expect(listPostings(db)).toHaveLength(1);
 });

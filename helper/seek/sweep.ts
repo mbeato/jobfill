@@ -3,6 +3,8 @@ import type { NormalizedPosting, SeekConfig, SourceName } from './types';
 import type { AtsFetchResult, TokenFetchError } from './ats-fetch';
 import { harvestSimplifyBoards } from './simplify';
 import { harvestGetroBoards } from './getro';
+import { shouldRunYcDir } from './ycdir';
+import { readSeekMeta, writeSeekMeta } from './meta';
 
 // Testable fetch-sweep orchestrator behind POST /seek (D-11). Per-source
 // isolation (D-13): each of the four fetch sources runs in its OWN try/catch,
@@ -50,9 +52,22 @@ export interface SweepDeps {
   ) => unknown;
   recordBoardResult: (db: Database, ats: string, token: string, ok: boolean) => void;
   resolveEffectiveTokens: (db: Database, ats: string, configTokens: string[], blocklist?: string[]) => string[];
+  // D-17/D-19: slug-only harvest, no postings. `args.db`/`args.blocklist` are
+  // the only pieces ycdir.ts's real harvestYcDirectory needs beyond its own
+  // fetch/upsertBoard wiring, which the caller building the real deps object
+  // (plan 16-09) closes over.
+  harvestYcDirectory: (args: {
+    db: Database;
+    blocklist: string[];
+  }) => Promise<{ companies: number; probed: number; added: number; errors: unknown[] }>;
 }
 
-export async function runSweep(db: Database, config: SeekConfig, deps: SweepDeps): Promise<SourceResult[]> {
+export async function runSweep(
+  db: Database,
+  config: SeekConfig,
+  deps: SweepDeps,
+  now: Date = new Date(),
+): Promise<SourceResult[]> {
   const results: SourceResult[] = [];
 
   const runOne = async (
@@ -146,6 +161,27 @@ export async function runSweep(db: Database, config: SeekConfig, deps: SweepDeps
     undefined,
     postings => harvestGetroBoards(postings),
   );
+
+  // D-17/D-19: ycdir produces board slugs only, never postings, so it does
+  // NOT go through runOne's upsertPosting loop. The weekly gate is ticked
+  // inside this existing sweep — no new scheduler, no new launchd job.
+  if (config.ycdir.enabled) {
+    const lastRun = readSeekMeta(db, 'ycdir_last_run');
+    if (shouldRunYcDir(now, lastRun)) {
+      try {
+        const harvest = await deps.harvestYcDirectory({ db, blocklist: config.blocklist });
+        // Written only on success — a failed run retries next sweep instead
+        // of burning the week.
+        writeSeekMeta(db, 'ycdir_last_run', now.toISOString());
+        const result: SourceResult = { source: 'ycdir', fetched: 0 };
+        if (harvest.added > 0) result.boardsAdded = harvest.added;
+        if (harvest.errors.length > 0) result.tokenErrors = harvest.errors.length;
+        results.push(result);
+      } catch (err) {
+        results.push({ source: 'ycdir', fetched: 0, error: String((err as Error)?.message ?? err) });
+      }
+    }
+  }
 
   return results;
 }

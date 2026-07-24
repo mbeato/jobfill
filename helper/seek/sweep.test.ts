@@ -54,6 +54,8 @@ function baseDeps(overrides: Partial<SweepDeps> = {}): SweepDeps {
     fetchLever: async () => ({ postings: [], errors: [] }),
     fetchAshby: async () => ({ postings: [], errors: [] }),
     fetchHNPostings: async () => [],
+    fetchSimplify: async () => [],
+    fetchGetro: async () => ({ postings: [], errors: [] }),
     upsertPosting,
     upsertBoard,
     recordBoardResult,
@@ -246,4 +248,114 @@ test('a whole-source throw leaves every board consecutive_failures at 0', async 
     consecutive_failures: number;
   };
   expect(beta.consecutive_failures).toBe(0);
+});
+
+// --- D-11/D-14 simplify + getro posting sources and slug harvesters ---
+
+function disabledSourcesConfig(overrides: Partial<SeekConfig> = {}): SeekConfig {
+  return baseConfig({
+    greenhouse: { enabled: false, tokens: [] },
+    lever: { enabled: false, tokens: [] },
+    ashby: { enabled: false, tokens: [] },
+    hn: { enabled: false },
+    ...overrides,
+  });
+}
+
+test('a sweep with simplify enabled upserts postings and creates boards rows tagged simplify', async () => {
+  const db = makeDb();
+  const config = disabledSourcesConfig({ simplify: { enabled: true } });
+  const results = await runSweep(db, config, baseDeps({
+    fetchSimplify: async () => [
+      makePosting({ source: 'simplify', company: 'Acme', url: 'https://boards.greenhouse.io/acme/jobs/1' }),
+      makePosting({ source: 'simplify', company: 'Beta', url: 'https://jobs.lever.co/beta/1' }),
+    ],
+  }));
+
+  expect(listPostings(db)).toHaveLength(2);
+  const boards = db.query('SELECT ats, token, source_of_discovery FROM boards').all() as {
+    ats: string;
+    token: string;
+    source_of_discovery: string;
+  }[];
+  expect(boards).toHaveLength(2);
+  for (const b of boards) expect(b.source_of_discovery).toBe('simplify');
+  expect(boards.map(b => `${b.ats}:${b.token}`).sort()).toEqual(['greenhouse:acme', 'lever:beta']);
+
+  const simplifyResult = results.find(r => r.source === 'simplify')!;
+  expect(simplifyResult.boardsAdded).toBe(2);
+});
+
+test('a sweep with getro enabled upserts postings and creates boards rows tagged getro', async () => {
+  const db = makeDb();
+  const config = disabledSourcesConfig({ getro: { enabled: true, networks: [{ name: 'craftventures', id: '1' }] } });
+  const results = await runSweep(db, config, baseDeps({
+    fetchGetro: async () => ({
+      postings: [makePosting({ source: 'getro', company: 'Gamma', url: 'https://jobs.ashbyhq.com/gamma/1' })],
+      errors: [],
+    }),
+  }));
+
+  expect(listPostings(db)).toHaveLength(1);
+  const boards = db.query('SELECT ats, token, source_of_discovery FROM boards').all() as {
+    ats: string;
+    token: string;
+    source_of_discovery: string;
+  }[];
+  expect(boards).toHaveLength(1);
+  expect(boards[0].source_of_discovery).toBe('getro');
+  expect(boards[0].ats).toBe('ashby');
+  expect(boards[0].token).toBe('gamma');
+
+  const getroResult = results.find(r => r.source === 'getro')!;
+  expect(getroResult.boardsAdded).toBe(1);
+});
+
+test('a blocklisted slug yields a posting but zero board rows', async () => {
+  const db = makeDb();
+  const config = disabledSourcesConfig({ simplify: { enabled: true }, blocklist: ['acme'] });
+  await runSweep(db, config, baseDeps({
+    fetchSimplify: async () => [
+      makePosting({ source: 'simplify', company: 'Acme', url: 'https://boards.greenhouse.io/acme/jobs/1' }),
+    ],
+  }));
+
+  expect(listPostings(db)).toHaveLength(1);
+  const boards = db.query('SELECT * FROM boards').all();
+  expect(boards).toHaveLength(0);
+});
+
+test('a getro stub with one failing network yields a getro result carrying tokenErrors while the healthy network postings are stored', async () => {
+  const db = makeDb();
+  const config = disabledSourcesConfig({
+    getro: { enabled: true, networks: [{ name: 'healthy', id: '1' }, { name: 'dead', id: '2' }] },
+  });
+  const results = await runSweep(db, config, baseDeps({
+    fetchGetro: async () => ({
+      postings: [makePosting({ source: 'getro', company: 'Healthy Co', url: 'https://jobs.ashbyhq.com/healthy/1' })],
+      errors: [{ network: 'dead', error: 'HTTP 500' }],
+    }),
+  }));
+
+  const getroResult = results.find(r => r.source === 'getro')!;
+  expect(getroResult.tokenErrors).toBe(1);
+  expect(getroResult.sampleTokenErrors).toEqual([{ token: 'dead', error: 'HTTP 500' }]);
+  expect(listPostings(db)).toHaveLength(1);
+});
+
+test('a throwing fetchSimplify produces an error result and does not affect other sources', async () => {
+  const db = makeDb();
+  const config = disabledSourcesConfig({ simplify: { enabled: true }, hn: { enabled: true } });
+  const results = await runSweep(db, config, baseDeps({
+    fetchSimplify: async () => {
+      throw new Error('simplify feed down');
+    },
+    fetchHNPostings: async () => [makePosting({ source: 'hn', url: 'https://news.ycombinator.com/item?id=1' })],
+  }));
+
+  const bySource = Object.fromEntries(results.map(r => [r.source, r]));
+  expect(bySource.simplify.error).toBe('simplify feed down');
+  expect(bySource.simplify.fetched).toBe(0);
+  expect(bySource.hn.fetched).toBe(1);
+  expect(bySource.hn.error).toBeUndefined();
 });

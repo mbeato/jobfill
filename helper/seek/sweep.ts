@@ -1,6 +1,8 @@
 import type { Database } from 'bun:sqlite';
 import type { NormalizedPosting, SeekConfig, SourceName } from './types';
 import type { AtsFetchResult, TokenFetchError } from './ats-fetch';
+import { harvestSimplifyBoards } from './simplify';
+import { harvestGetroBoards } from './getro';
 
 // Testable fetch-sweep orchestrator behind POST /seek (D-11). Per-source
 // isolation (D-13): each of the four fetch sources runs in its OWN try/catch,
@@ -23,6 +25,10 @@ export interface SourceResult {
   // detail JSON and a 1000-board watchlist would otherwise write a
   // multi-megabyte blob.
   sampleTokenErrors?: TokenFetchError[];
+  // D-11/D-14: count of board rows this source's slug harvest added this
+  // sweep. Only set when > 0, mirroring tokenErrors, so a source with no
+  // harvest step (or nothing new to add) keeps the pre-phase result shape.
+  boardsAdded?: number;
 }
 
 export interface SweepDeps {
@@ -30,6 +36,10 @@ export interface SweepDeps {
   fetchLever: (tokens: string[]) => Promise<AtsFetchResult>;
   fetchAshby: (tokens: string[]) => Promise<AtsFetchResult>;
   fetchHNPostings: (opts?: { maxAgeDays?: number }) => Promise<NormalizedPosting[]>;
+  fetchSimplify: () => Promise<NormalizedPosting[]>;
+  fetchGetro: (
+    networks: { name: string; id: string; host?: string }[],
+  ) => Promise<{ postings: NormalizedPosting[]; errors: { network: string; error: string }[] }>;
   upsertPosting: (db: Database, p: NormalizedPosting) => unknown;
   // D-01/D-04 board lifecycle, injected so runSweep stays unit-testable
   // against a stub boards implementation (mirrors upsertPosting above).
@@ -55,6 +65,11 @@ export async function runSweep(db: Database, config: SeekConfig, deps: SweepDeps
     // sweep, and a whole-source throw (caught below) skips recording
     // entirely rather than marking every board dead over one outage.
     tokens?: string[],
+    // D-11/D-14: when set, run over the fetched postings to derive
+    // {ats, token} slug candidates and write each into `boards`. Its own
+    // inner try/catch means a harvest failure degrades to "postings still
+    // upserted, no slugs added," never to a failed source.
+    harvest?: (postings: NormalizedPosting[]) => { ats: string; token: string }[],
   ) => {
     if (!enabled) return;
     try {
@@ -75,6 +90,20 @@ export async function runSweep(db: Database, config: SeekConfig, deps: SweepDeps
         result.tokenErrors = errors.length;
         result.sampleTokenErrors = errors.slice(0, 5);
       }
+      if (harvest) {
+        try {
+          let boardsAdded = 0;
+          for (const b of harvest(postings)) {
+            if (deps.upsertBoard(db, { ats: b.ats, token: b.token, source_of_discovery: source }, config.blocklist) != null) {
+              boardsAdded++;
+            }
+          }
+          if (boardsAdded > 0) result.boardsAdded = boardsAdded;
+        } catch {
+          // Harvest failure degrades silently — the postings above are
+          // already upserted; no slugs added this sweep.
+        }
+      }
       results.push(result);
     } catch (err) {
       results.push({ source, fetched: 0, error: String((err as Error)?.message ?? err) });
@@ -94,6 +123,29 @@ export async function runSweep(db: Database, config: SeekConfig, deps: SweepDeps
   await runOne('ashby', config.ashby.enabled, () => deps.fetchAshby(ashbyTokens), ashbyTokens);
 
   await runOne('hn', config.hn.enabled, () => deps.fetchHNPostings());
+
+  // D-11: SimplifyJobs is both a posting source and a slug harvester.
+  await runOne(
+    'simplify',
+    config.simplify.enabled,
+    () => deps.fetchSimplify(),
+    undefined,
+    postings => harvestSimplifyBoards(postings),
+  );
+
+  // D-14: Getro networks are both a posting source and a slug harvester.
+  // fetchGetro's errors are keyed by `network`, not `token` — remapped at
+  // this boundary so runOne's tokenErrors/sampleTokenErrors stay one shape.
+  await runOne(
+    'getro',
+    config.getro.enabled,
+    async () => {
+      const { postings, errors } = await deps.fetchGetro(config.getro.networks);
+      return { postings, errors: errors.map(e => ({ token: e.network, error: e.error })) };
+    },
+    undefined,
+    postings => harvestGetroBoards(postings),
+  );
 
   return results;
 }

@@ -19,6 +19,9 @@ export interface ApplicationRow {
   tailor_state: string;
   tailor_message: string;
   jd: string;
+  cover_letter_path: string;
+  brief_path: string;
+  email_path: string;
   status_changed_at: string | null;
   created_at: string;
   updated_at: string;
@@ -104,6 +107,9 @@ export function createApplicationsTable(db: Database) {
     tailor_state TEXT DEFAULT '',
     tailor_message TEXT DEFAULT '',
     jd TEXT DEFAULT '',
+    cover_letter_path TEXT DEFAULT '',
+    brief_path TEXT DEFAULT '',
+    email_path TEXT DEFAULT '',
     status_changed_at TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))

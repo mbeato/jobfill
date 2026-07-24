@@ -793,6 +793,10 @@ Bun.serve({
           headers: {
             'content-type': 'application/pdf',
             'content-disposition': `inline; filename="${full.split('/').pop()}"`,
+            // WR-01: doctype/date-stamped filenames collide on same-day regeneration
+            // (same URL serves the overwritten PDF) — no-store so a browser never
+            // reuses a cached response from before the regeneration.
+            'cache-control': 'no-store',
           },
         });
       }
@@ -811,7 +815,12 @@ Bun.serve({
         const full = safeDocPath(row.email_path, ROUNDS_DIR, '.md');
         if (!full) return json({ error: 'document file not found on disk' }, 404);
         const text = await Bun.file(full).text();
-        return json({ email: text });
+        // WR-01: same same-day-regeneration staleness risk as the PDF route above —
+        // no-store so a re-fetch after regenerating always gets the fresh draft.
+        return new Response(JSON.stringify({ email: text }), {
+          status: 200,
+          headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
+        });
       }
 
       if (pathname === '/answers' && req.method === 'GET') {

@@ -283,6 +283,7 @@ async function runFill(tabId, force = false, opts = {}) {
           role: mapping.role || '',
           url: pageContext.url,
           queue_id: queueId, // D-01: link the application to its queue row (server falls back to url_key match when absent)
+          jd, // D-01: already-captured JD text, persisted unconditionally so the row survives a dead posting URL
           resume_path: tailorState === 'ran' ? attachedResume.path : '',
           cost_usd: cost,
           summary: tailorState === 'ran' ? summary : null,

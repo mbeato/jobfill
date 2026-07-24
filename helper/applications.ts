@@ -177,7 +177,16 @@ export function updateApplicationStatus(
   if (fields.length) {
     db.query(`UPDATE applications SET ${fields.join(', ')}, updated_at = datetime('now') WHERE id = ?`).run(...vals, id);
   }
-  return db.query('SELECT * FROM applications WHERE id = ?').get(id) as ApplicationRow | null;
+  // D-08: explicit jd-free column list — this row backs PATCH /applications/:id,
+  // whose response is refetched into the dashboard on every status/notes edit.
+  // SELECT * would ship the multi-KB jd blob back on each edit (CR-01).
+  return db
+    .query(
+      `SELECT id, company, role, url, status, notes, resume_path, cost_usd, summary,
+              tailor_state, tailor_message, status_changed_at, created_at, updated_at
+       FROM applications WHERE id = ?`,
+    )
+    .get(id) as ApplicationRow | null;
 }
 
 // D-13/D-14/D-16/D-17: the ghost rule, pure and db-free so `bun test` covers it and

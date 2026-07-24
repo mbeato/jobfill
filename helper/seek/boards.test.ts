@@ -1,6 +1,6 @@
 import { test, expect } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { createBoardsTable, upsertBoard } from './boards';
+import { createBoardsTable, upsertBoard, recordBoardResult, listActiveBoards, DEAD_AFTER, DEAD_RECHECK_DAYS } from './boards';
 
 function makeDb(): Database {
   const db = new Database(':memory:');
@@ -58,6 +58,52 @@ test('upsertBoard refuses a blocklisted token, exact and differing case', () => 
   const db = makeDb();
   expect(upsertBoard(db, { ats: 'greenhouse', token: 'acme', source_of_discovery: 'simplify' }, ['acme'])).toBeNull();
   expect(upsertBoard(db, { ats: 'greenhouse', token: 'ACME', source_of_discovery: 'simplify' }, ['acme'])).toBeNull();
+  const rows = db.query('SELECT * FROM boards').all();
+  expect(rows.length).toBe(0);
+});
+
+test('four failures leave dead_since NULL and the board in listActiveBoards', () => {
+  const db = makeDb();
+  upsertBoard(db, { ats: 'greenhouse', token: 'dead', source_of_discovery: 'simplify' });
+  for (let i = 0; i < DEAD_AFTER - 1; i++) recordBoardResult(db, 'greenhouse', 'dead', false);
+  const tokens = listActiveBoards(db, 'greenhouse').map(r => r.token);
+  expect(tokens).toContain('dead');
+});
+
+test('the fifth failure sets dead_since and drops the board out of listActiveBoards', () => {
+  const db = makeDb();
+  upsertBoard(db, { ats: 'greenhouse', token: 'dead', source_of_discovery: 'simplify' });
+  for (let i = 0; i < DEAD_AFTER; i++) recordBoardResult(db, 'greenhouse', 'dead', false);
+  const tokens = listActiveBoards(db, 'greenhouse').map(r => r.token);
+  expect(tokens).not.toContain('dead');
+});
+
+test('a subsequent success clears dead_since, zeroes consecutive_failures and sets last_ok_at', () => {
+  const db = makeDb();
+  upsertBoard(db, { ats: 'greenhouse', token: 'dead', source_of_discovery: 'simplify' });
+  for (let i = 0; i < DEAD_AFTER; i++) recordBoardResult(db, 'greenhouse', 'dead', false);
+  recordBoardResult(db, 'greenhouse', 'dead', true);
+  const row = db.query('SELECT * FROM boards WHERE ats = ? AND token = ?').get('greenhouse', 'dead') as any;
+  expect(row.dead_since).toBeNull();
+  expect(row.consecutive_failures).toBe(0);
+  expect(row.last_ok_at).not.toBeNull();
+});
+
+test('a dead board reappears in listActiveBoards once dead_since is old enough (re-check), and a further failure pushes it forward again', () => {
+  const db = makeDb();
+  upsertBoard(db, { ats: 'greenhouse', token: 'dead', source_of_discovery: 'simplify' });
+  for (let i = 0; i < DEAD_AFTER; i++) recordBoardResult(db, 'greenhouse', 'dead', false);
+  db.query(
+    `UPDATE boards SET dead_since = datetime('now', '-${DEAD_RECHECK_DAYS + 1} days') WHERE ats = ? AND token = ?`,
+  ).run('greenhouse', 'dead');
+  expect(listActiveBoards(db, 'greenhouse').map(r => r.token)).toContain('dead');
+  recordBoardResult(db, 'greenhouse', 'dead', false);
+  expect(listActiveBoards(db, 'greenhouse').map(r => r.token)).not.toContain('dead');
+});
+
+test('recordBoardResult on an unknown (ats, token) does not throw and inserts nothing', () => {
+  const db = makeDb();
+  expect(() => recordBoardResult(db, 'greenhouse', 'never-inserted', false)).not.toThrow();
   const rows = db.query('SELECT * FROM boards').all();
   expect(rows.length).toBe(0);
 });

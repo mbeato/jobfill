@@ -29,6 +29,12 @@ export const BOARDS_SOURCES = new Set(['simplify', 'getro', 'consider', 'ycdir',
 // percent-escape in a harvested slug must never reach a fetch URL.
 const TOKEN_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 
+// D-04 discretionary threshold/interval: 5 consecutive nightly failures is ~5 days
+// of evidence, and a 14-day rest means a dead board costs at most ~2 wasted requests
+// a month. Exported so tests assert against the constant, not a magic number.
+export const DEAD_AFTER = 5;
+export const DEAD_RECHECK_DAYS = 14;
+
 export function createBoardsTable(db: Database) {
   db.run(`CREATE TABLE IF NOT EXISTS boards (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -88,4 +94,42 @@ export function upsertBoard(
     )
     .get(input.ats, token, input.source_of_discovery) as Record<string, unknown>;
   return toRow(raw);
+}
+
+// D-04: a single parameterized UPDATE, no-op when the row doesn't exist (config-seed
+// tokens are not in `boards`; this must not throw for them). ok=true clears the failure
+// streak — a board that answers is alive again. ok=false increments the streak and
+// refreshes dead_since on EVERY failure past the threshold (not only the first), which
+// is what rolls the DEAD_RECHECK_DAYS window forward so a permanently-dead board is
+// retried once per DEAD_RECHECK_DAYS instead of every sweep.
+export function recordBoardResult(db: Database, ats: string, token: string, ok: boolean): void {
+  if (ok) {
+    db.query(
+      `UPDATE boards SET
+         consecutive_failures = 0,
+         last_ok_at = datetime('now'),
+         dead_since = NULL,
+         updated_at = datetime('now')
+       WHERE ats = ? AND token = ?`,
+    ).run(ats, token);
+  } else {
+    db.query(
+      `UPDATE boards SET
+         consecutive_failures = consecutive_failures + 1,
+         dead_since = CASE WHEN consecutive_failures + 1 >= ${DEAD_AFTER} THEN datetime('now') ELSE dead_since END,
+         updated_at = datetime('now')
+       WHERE ats = ? AND token = ?`,
+    ).run(ats, token);
+  }
+}
+
+// D-04's "stops being polled, with a periodic re-check" in one predicate: a board is
+// active when it has never gone dead, or its dead_since is old enough for one retry.
+export function listActiveBoards(db: Database, ats?: string): BoardRow[] {
+  const sql =
+    `SELECT * FROM boards WHERE (dead_since IS NULL OR dead_since <= datetime('now', '-${DEAD_RECHECK_DAYS} days'))` +
+    (ats !== undefined ? ' AND ats = ?' : '') +
+    ' ORDER BY token';
+  const rows = (ats !== undefined ? db.query(sql).all(ats) : db.query(sql).all()) as Record<string, unknown>[];
+  return rows.map(toRow);
 }

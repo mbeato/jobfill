@@ -184,3 +184,49 @@ test('classifyMetadata rejects "Staff Software Engineer" as rules:title (staff +
   const result = classifyMetadata(mkPosting({ title: 'Staff Software Engineer, Government' }));
   expect(result).toEqual({ reject: true, reason: 'rules:title' });
 });
+
+// --- Index-date freshness cap (aggregator sources) --------------------------
+// simplify/getro carry an INDEX date (when the aggregator first saw the
+// listing). Untrusted as an employer post date, but a valid lower bound on
+// public visibility, so it gets a 7-day cap rather than bypassing freshness
+// entirely. Sized to the ~9-day tech application window / 7-day median posting
+// duration (Davis & Samaniego de la Parra, NBER w32320).
+
+test('classifyMetadata survives a simplify posting inside the 7-day index-date cap', () => {
+  const result = classifyMetadata(mkPosting({ source: 'simplify', posted_at: daysAgo(5), posted_at_trusted: false }));
+  expect(result.reject).toBe(false);
+});
+
+test('classifyMetadata rejects a simplify posting past the 7-day index-date cap', () => {
+  const result = classifyMetadata(mkPosting({ source: 'simplify', posted_at: daysAgo(10), posted_at_trusted: false }));
+  expect(result).toEqual({ reject: true, reason: 'rules:stale' });
+});
+
+test('classifyMetadata rejects a very old simplify posting (the 240-day evergreen case)', () => {
+  const result = classifyMetadata(mkPosting({ source: 'simplify', posted_at: daysAgo(240), posted_at_trusted: false }));
+  expect(result).toEqual({ reject: true, reason: 'rules:stale' });
+});
+
+test('classifyMetadata applies the index-date cap to getro as well', () => {
+  const result = classifyMetadata(mkPosting({ source: 'getro', posted_at: daysAgo(10), posted_at_trusted: false }));
+  expect(result).toEqual({ reject: true, reason: 'rules:stale' });
+});
+
+test('greenhouse is NOT index-dated: a very old untrusted modification date must not be rejected', () => {
+  // D-07: greenhouse's posted_at is job.updated_at, a MODIFICATION time that
+  // moves forward on every edit. It carries no age information, so capping on
+  // it would reject postings for not having been edited recently. Guards
+  // against the tempting-but-wrong `posted_at_trusted === false` keying, which
+  // would sweep in ~14k greenhouse rows.
+  const result = classifyMetadata(mkPosting({ source: 'greenhouse', posted_at: daysAgo(400), posted_at_trusted: false }));
+  expect(result.reject).toBe(false);
+});
+
+test('the trusted 2-day cap is unchanged and still stricter than the index-date cap', () => {
+  // A 5-day-old trusted posting is rejected while a 5-day-old simplify posting
+  // survives — the two caps must not collapse into one.
+  const trusted = classifyMetadata(mkPosting({ source: 'lever', posted_at: daysAgo(5), posted_at_trusted: true }));
+  const indexed = classifyMetadata(mkPosting({ source: 'simplify', posted_at: daysAgo(5), posted_at_trusted: false }));
+  expect(trusted).toEqual({ reject: true, reason: 'rules:stale' });
+  expect(indexed.reject).toBe(false);
+});

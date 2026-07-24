@@ -39,6 +39,31 @@ const WORK_MODE_ONLY_RE = /^(hybrid|in[- ]?office|on[- ]?site|full[- ]?time|part
 
 const MAX_STALE_DAYS = 2;
 
+// Aggregator sources whose posted_at is an INDEX time — when the aggregator
+// first observed the listing, not when the employer posted it. D-09 rightly
+// refuses to trust that as an employer post date, but it is still a valid
+// LOWER BOUND on how long the listing has been publicly visible, which is the
+// crowding signal that matters. So these get their own, far more generous cap
+// rather than bypassing the freshness filter entirely.
+//
+// Deliberately keyed on source, NOT on `posted_at_trusted === false`, because
+// that flag covers two incompatible semantics:
+//   - index date (simplify/getro): a lower bound on age — cappable.
+//   - modification date (greenhouse's job.updated_at, per D-07): carries NO
+//     age information, since an edit pushes it forward and makes an old
+//     listing look new. Capping on it would reject ~14k greenhouse postings
+//     for not having been edited recently, which is stability, not staleness.
+// Greenhouse's real freshness clock is phase 17's first_seen_at.
+const INDEX_DATE_SOURCES = new Set(['simplify', 'getro']);
+
+// Sized to the ~9-day average application window in tech-sector postings
+// (Davis & Samaniego de la Parra, "Application Flows", NBER w32320 — 66M
+// applications across ~8M Dice postings: 39% of applications arrive within
+// 48h of posting, 54% within 96h, median posting duration 7 days). 7 days
+// tracks that median: past it, the applicant pool has overwhelmingly formed
+// and the window is typically closing.
+const MAX_STALE_DAYS_INDEXED = 7;
+
 // Captures a leading integer immediately before "year(s)"/"yr(s)" (optionally with a
 // trailing "+"), which covers plain ("3 years"), plus ("5+ years"), and
 // minimum/at-least phrasing ("minimum 3 years") without a separate pattern.
@@ -67,11 +92,14 @@ export function classifyMetadata(posting: PostingRow): { reject: boolean; reason
     }
 
     const postedAt = posting?.posted_at;
-    if (posting?.posted_at_trusted === true && postedAt) {
+    const trusted = posting?.posted_at_trusted === true;
+    const indexed = !trusted && INDEX_DATE_SOURCES.has(String(posting?.source ?? ''));
+    if ((trusted || indexed) && postedAt) {
       const ts = Date.parse(postedAt);
       if (!Number.isNaN(ts)) {
         const ageDays = (Date.now() - ts) / (1000 * 60 * 60 * 24);
-        if (ageDays > MAX_STALE_DAYS) {
+        const cap = trusted ? MAX_STALE_DAYS : MAX_STALE_DAYS_INDEXED;
+        if (ageDays > cap) {
           return { reject: true, reason: REASON_STALE };
         }
       }

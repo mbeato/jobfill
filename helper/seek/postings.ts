@@ -101,14 +101,30 @@ export function upsertPosting(db: Database, p: NormalizedPosting): PostingRow | 
        -- D-14: decision/decision_reason/decided_at are deliberately absent from
        -- this SET list — a re-discovery upsert refreshes staging metadata but
        -- must never clobber a prior verdict.
+       -- D-10: source/posted_at/posted_at_trusted keep the existing row instead
+       -- of last-writer-wins whenever EITHER (a) the existing row is a
+       -- trusted-date source and the incoming one is not — a trusted Ashby/Lever
+       -- publishedAt must never be clobbered by an untrusted aggregator's index
+       -- time — OR (b) the incoming row is an aggregator (simplify/getro/
+       -- jobright) re-discovering a posting already attributed to a directly-
+       -- polled board — a direct Greenhouse/Lever/Ashby poll keeps its own
+       -- attribution rather than being relabeled as aggregator-sourced. One
+       -- identical predicate drives all three columns so provenance never
+       -- splits across them.
        ON CONFLICT(url_key) DO UPDATE SET
          fetched_at = datetime('now'),
          company = excluded.company,
          title = excluded.title,
          location = excluded.location,
-         source = excluded.source,
-         posted_at = excluded.posted_at,
-         posted_at_trusted = excluded.posted_at_trusted,
+         source = CASE WHEN (postings.posted_at_trusted = 1 AND excluded.posted_at_trusted = 0)
+                          OR (excluded.source IN ('simplify','getro','jobright') AND postings.source NOT IN ('simplify','getro','jobright'))
+                        THEN postings.source ELSE excluded.source END,
+         posted_at = CASE WHEN (postings.posted_at_trusted = 1 AND excluded.posted_at_trusted = 0)
+                             OR (excluded.source IN ('simplify','getro','jobright') AND postings.source NOT IN ('simplify','getro','jobright'))
+                           THEN postings.posted_at ELSE excluded.posted_at END,
+         posted_at_trusted = CASE WHEN (postings.posted_at_trusted = 1 AND excluded.posted_at_trusted = 0)
+                                     OR (excluded.source IN ('simplify','getro','jobright') AND postings.source NOT IN ('simplify','getro','jobright'))
+                                   THEN postings.posted_at_trusted ELSE excluded.posted_at_trusted END,
          login_gated = MAX(postings.login_gated, excluded.login_gated),
          not_fillable = excluded.not_fillable,
          low_confidence = excluded.low_confidence

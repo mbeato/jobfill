@@ -63,6 +63,19 @@ export interface SeekConfig {
   hn: { enabled: boolean };
   yc: { enabled: boolean };
   jobright: { enabled: boolean };
+  simplify: { enabled: boolean };
+  // D-15: curated {name, id} pairs resolved once at execution time and
+  // committed to seek.config.json, mirroring how the 286 ATS tokens already
+  // work — never resolved at runtime, which would mean scraping a
+  // Cloudflare-protected HTML page every sweep.
+  getro: { enabled: boolean; networks: { name: string; id: string; host?: string }[] };
+  ycdir: { enabled: boolean };
+  // D-06: slugs the operator never wants polled again. Enforced at two independent
+  // points — upsertBoard (insert time, never enters `boards`) and
+  // resolveEffectiveTokens (load time, never reaches the effective token
+  // list) — so a harvest cannot silently re-add a deliberately removed
+  // company.
+  blocklist: string[];
   schedule: ScheduleConfig;
   batch: BatchConfig;
 }

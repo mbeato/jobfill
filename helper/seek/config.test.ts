@@ -18,6 +18,16 @@ test('a well-formed config round-trips enabled flags and token arrays', async ()
       hn: { enabled: true },
       yc: { enabled: false },
       jobright: { enabled: true },
+      simplify: { enabled: true },
+      getro: {
+        enabled: true,
+        networks: [
+          { name: 'craftventures', id: '340', host: 'jobs.craftventures.com' },
+          { name: 'mercuryfund', id: '1258' },
+        ],
+      },
+      ycdir: { enabled: true },
+      blocklist: ['badcompany'],
     }),
   );
   const config = await loadSeekConfig(path);
@@ -25,6 +35,16 @@ test('a well-formed config round-trips enabled flags and token arrays', async ()
   expect(config.ashby).toEqual({ enabled: true, tokens: ['gamma'] });
   expect(config.hn).toEqual({ enabled: true });
   expect(config.jobright).toEqual({ enabled: true });
+  expect(config.simplify).toEqual({ enabled: true });
+  expect(config.getro).toEqual({
+    enabled: true,
+    networks: [
+      { name: 'craftventures', id: '340', host: 'jobs.craftventures.com' },
+      { name: 'mercuryfund', id: '1258' },
+    ],
+  });
+  expect(config.ycdir).toEqual({ enabled: true });
+  expect(config.blocklist).toEqual(['badcompany']);
 });
 
 test('a missing path returns the all-disabled default without throwing', async () => {
@@ -35,6 +55,10 @@ test('a missing path returns the all-disabled default without throwing', async (
   expect(config.hn).toEqual({ enabled: false });
   expect(config.yc).toEqual({ enabled: false });
   expect(config.jobright).toEqual({ enabled: false });
+  expect(config.simplify).toEqual({ enabled: false });
+  expect(config.getro).toEqual({ enabled: false, networks: [] });
+  expect(config.ycdir).toEqual({ enabled: false });
+  expect(config.blocklist).toEqual([]);
 });
 
 test('malformed/garbage-typed config is coerced to safe values, not propagated raw', async () => {
@@ -44,11 +68,46 @@ test('malformed/garbage-typed config is coerced to safe values, not propagated r
     JSON.stringify({
       greenhouse: { enabled: 'yes', tokens: 'not-an-array' },
       lever: { enabled: true, tokens: [1, 2, 'valid-token'] },
+      getro: {
+        enabled: true,
+        networks: 'nope',
+      },
+      simplify: 'yes',
+      blocklist: {},
     }),
   );
   const config = await loadSeekConfig(path);
   expect(config.greenhouse).toEqual({ enabled: true, tokens: [] });
   expect(config.lever).toEqual({ enabled: true, tokens: ['valid-token'] });
+  expect(config.getro).toEqual({ enabled: true, networks: [] });
+  expect(config.simplify).toEqual({ enabled: false });
+  expect(config.blocklist).toEqual([]);
+});
+
+test('a getro.networks entry missing id drops that entry only, keeping valid siblings', async () => {
+  const path = fixturePath('getro-partial');
+  await Bun.write(
+    path,
+    JSON.stringify({
+      getro: {
+        enabled: true,
+        networks: [
+          { name: 'craftventures', id: '340' },
+          { name: 'nomissing' },
+          'a bare string',
+          { name: 'uncorkcapital', id: '247', host: 'jobs.uncorkcapital.com' },
+        ],
+      },
+    }),
+  );
+  const config = await loadSeekConfig(path);
+  expect(config.getro).toEqual({
+    enabled: true,
+    networks: [
+      { name: 'craftventures', id: '340' },
+      { name: 'uncorkcapital', id: '247', host: 'jobs.uncorkcapital.com' },
+    ],
+  });
 });
 
 test('reading is fresh: editing the fixture between two calls returns the updated value', async () => {
@@ -59,6 +118,16 @@ test('reading is fresh: editing the fixture between two calls returns the update
   await Bun.write(path, JSON.stringify({ greenhouse: { enabled: true, tokens: ['acme'] } }));
   const second = await loadSeekConfig(path);
   expect(second.greenhouse).toEqual({ enabled: true, tokens: ['acme'] });
+});
+
+test('reading is fresh: an edited blocklist takes effect on the next call with no restart', async () => {
+  const path = fixturePath('fresh-blocklist');
+  await Bun.write(path, JSON.stringify({ blocklist: [] }));
+  const first = await loadSeekConfig(path);
+  expect(first.blocklist).toEqual([]);
+  await Bun.write(path, JSON.stringify({ blocklist: ['dropped-company'] }));
+  const second = await loadSeekConfig(path);
+  expect(second.blocklist).toEqual(['dropped-company']);
 });
 
 test('a well-formed schedule section round-trips enabled and targetHour', async () => {

@@ -8,6 +8,7 @@ import {
   promoteUnsubmittedToApplied,
   PRE_SUBMIT_STATUS,
   GHOST_DAYS,
+  MAX_JD,
   InvalidApplicationStatusError,
 } from './applications';
 
@@ -99,6 +100,24 @@ test('deriveGhost table: only an applied row silent >= GHOST_DAYS ghosts (D-13/D
   // a pre-submit row never ghosts, even at 40 days
   const unsub40 = deriveGhost({ status: PRE_SUBMIT_STATUS, status_changed_at: stampDaysAgo(40) }, NOW);
   expect(unsub40).toEqual({ ghosted: false, days_silent: 40 });
+});
+
+test('insertApplication persists jd on the row (D-02/D-03)', () => {
+  const db = makeDb();
+  const row = insertApplication(db, { company: 'Acme', jd: 'some description text' }, noQueue);
+  expect(row.jd).toBe('some description text');
+});
+
+test('insertApplication truncates an over-cap jd at MAX_JD instead of storing an unbounded blob (D-04/D-05)', () => {
+  const db = makeDb();
+  const row = insertApplication(db, { company: 'Acme', jd: 'x'.repeat(MAX_JD + 100) }, noQueue);
+  expect(row.jd.length).toBe(MAX_JD);
+});
+
+test('insertApplication defaults a missing jd to an empty string (D-03)', () => {
+  const db = makeDb();
+  const row = insertApplication(db, { company: 'Acme' }, noQueue);
+  expect(row.jd).toBe('');
 });
 
 test('promoteUnsubmittedToApplied promotes a pre-submit row and refuses every other status (T-13-03)', () => {

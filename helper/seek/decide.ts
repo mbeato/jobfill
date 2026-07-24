@@ -1,6 +1,7 @@
 import type { Database } from 'bun:sqlite';
 import type { PostingRow } from './postings';
 import type { QueueRow } from '../queue';
+import { JD_FETCHABLE_SOURCES } from './jd-fetch';
 
 // The filter -> promote orchestrator (D-01 two-stage, D-08 held, D-12 cap,
 // D-14 finality). Walks the to-decide backlog (oldest-fetched-first, per
@@ -102,15 +103,26 @@ export async function runFilterPromote(db: Database, deps: DecideDeps): Promise<
       continue;
     }
 
-    // D-10: login-gated sources (YC/Jobright) have no reachable JD — fetching
-    // would fail every sweep and strand the posting in a permanent held loop.
-    // Score them on metadata alone: an EMPTY jd triggers relevance.ts's
-    // trusted-side metadata-only guidance. (Guidance text must never ride in
-    // the jd slot — the prompt's injection rule makes the model ignore it.)
-    // The YOE rule needs JD text, so it is skipped; seniority stays covered
-    // by the title rule + LLM.
+    // D-10: sources with no reachable JD are scored on metadata alone — an
+    // EMPTY jd triggers relevance.ts's trusted-side metadata-only guidance.
+    // (Guidance text must never ride in the jd slot — the prompt's injection
+    // rule makes the model ignore it.) The YOE rule needs JD text, so it is
+    // skipped; seniority stays covered by the title rule + LLM.
+    //
+    // Two disjoint reasons a JD is unreachable, both structural (never
+    // transient), so neither may be left to the held-for-retry path below:
+    //   1. login_gated (YC/Jobright) — fetching would fail every sweep.
+    //   2. the source has no fetchJD branch at all (simplify/getro): their
+    //      apply URLs point at arbitrary third-party hosts that ALLOWED_HOSTS
+    //      refuses as an SSRF control, so fetchJD throws `unsupported source`
+    //      forever. Observed live: 73 of 81 drained simplify postings were
+    //      stranded in held:jd-fetch-error before this branch existed.
+    //
+    // Deliberately source-structural rather than error-based: a greenhouse
+    // JD fetch that 404s IS transient and must keep its D-08 held-for-retry
+    // semantics, so it must not be swept into metadata-only scoring.
     let jd: string;
-    if (p.login_gated) {
+    if (p.login_gated || !JD_FETCHABLE_SOURCES.has(p.source)) {
       jd = '';
     } else {
       try {

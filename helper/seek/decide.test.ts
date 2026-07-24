@@ -344,3 +344,102 @@ test('login-gated posting: fetchJD and classifyYoe are skipped, LLM judges on me
   const stored = db.query('SELECT decision FROM postings WHERE id = ?').get(row.id) as { decision: string };
   expect(stored.decision).toBe('queued');
 });
+
+// --- Phase 16 follow-up: aggregator sources have no fetchJD branch ----------
+// Observed live after the phase-16 sweep: 73 of 81 drained simplify postings
+// were stranded in held:jd-fetch-error, because fetchJD throws
+// `unsupported source` for every source outside JD_FETCHABLE_SOURCES. Left
+// unfixed, every simplify/getro posting is permanently unscoreable.
+
+test('simplify posting: fetchJD/classifyYoe skipped, scored on metadata-only JD instead of held', async () => {
+  const db = makeDb();
+  const row = upsertPosting(
+    db,
+    posting({
+      source: 'simplify',
+      login_gated: false,
+      posted_at_trusted: false,
+      url: 'https://jobs.smartrecruiters.com/acme/12345',
+    }),
+  )!;
+  let fetchCalls = 0;
+  let yoeCalls = 0;
+  let seenJd = 'unset';
+  const deps = baseDeps({
+    fetchJD: async () => {
+      fetchCalls++;
+      throw new Error('fetchJD: unsupported source simplify');
+    },
+    classifyYoe: () => {
+      yoeCalls++;
+      return { reject: false };
+    },
+    scoreRelevance: async (_profile, jdText) => {
+      seenJd = jdText;
+      return { relevant: true, reason: 'new grad SWE in NYC' };
+    },
+  });
+
+  const counts = await runFilterPromote(db, deps);
+
+  expect(fetchCalls).toBe(0);
+  expect(yoeCalls).toBe(0);
+  expect(seenJd).toBe('');
+  expect(counts.held).toBe(0);
+  expect(counts.queued).toBe(1);
+  const stored = db.query('SELECT decision FROM postings WHERE id = ?').get(row.id) as { decision: string };
+  expect(stored.decision).toBe('queued');
+});
+
+test('getro posting is also routed to metadata-only scoring', async () => {
+  const db = makeDb();
+  upsertPosting(
+    db,
+    posting({ source: 'getro', login_gated: false, posted_at_trusted: false, url: 'https://jobs.craftventures.com/companies/x/jobs/1' }),
+  )!;
+  let seenJd = 'unset';
+  const deps = baseDeps({
+    fetchJD: async () => {
+      throw new Error('fetchJD: unsupported source getro');
+    },
+    scoreRelevance: async (_profile, jdText) => {
+      seenJd = jdText;
+      return { relevant: true, reason: 'seed-stage startup' };
+    },
+  });
+
+  const counts = await runFilterPromote(db, deps);
+  expect(seenJd).toBe('');
+  expect(counts.held).toBe(0);
+  expect(counts.queued).toBe(1);
+});
+
+test('a JD-fetchable source keeps held-for-retry semantics: a transient greenhouse failure is NOT metadata-only', async () => {
+  // Guard against over-broad fixes. The metadata-only branch is source-
+  // structural; an ordinary greenhouse 404 is transient and must still be
+  // held for retry rather than silently scored without its JD.
+  const db = makeDb();
+  const row = upsertPosting(db, posting({ source: 'greenhouse' }))!;
+  let scoreCalls = 0;
+  const deps = baseDeps({
+    fetchJD: async () => {
+      throw new Error('fetchJD: greenhouse acme/1 returned HTTP 404');
+    },
+    scoreRelevance: async () => {
+      scoreCalls++;
+      return { relevant: true, reason: 'should never be reached' };
+    },
+  });
+
+  const counts = await runFilterPromote(db, deps);
+
+  expect(scoreCalls).toBe(0);
+  expect(counts.held).toBe(1);
+  expect(counts.queued).toBe(0);
+  const stored = db.query('SELECT decision, decision_reason FROM postings WHERE id = ?').get(row.id) as {
+    decision: string;
+    decision_reason: string;
+  };
+  expect(stored.decision).toBe('held');
+  expect(stored.decision_reason).toBe('held:jd-fetch-error');
+});

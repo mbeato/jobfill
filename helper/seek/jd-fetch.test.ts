@@ -1,5 +1,5 @@
 import { test, expect } from 'bun:test';
-import { fetchJD, assertAllowedHost } from './jd-fetch';
+import { fetchJD, assertAllowedHost, JD_FETCHABLE_SOURCES } from './jd-fetch';
 import type { PostingRow } from './postings';
 
 function makePosting(overrides: Partial<PostingRow> & Pick<PostingRow, 'url' | 'company' | 'source'>): PostingRow {
@@ -170,4 +170,53 @@ test('fetchJD (hn external apply link): returns the metadata fallback without ca
 test('assertAllowedHost throws for a hostname not in the ALLOWED_HOSTS set (SSRF guard)', () => {
   expect(() => assertAllowedHost('https://evil.example.com/jobs/1')).toThrow();
   expect(() => assertAllowedHost('https://boards-api.greenhouse.io/v1/boards/x/jobs/1')).not.toThrow();
+});
+
+// --- JD_FETCHABLE_SOURCES lockstep guard -----------------------------------
+// This set and fetchJD's switch are two parallel lists. decide.ts reads the
+// set to decide whether a posting can ever have a JD; if they drift, either a
+// scoreable posting gets silently downgraded to metadata-only, or an
+// unscoreable one gets stranded in a permanent held loop. Both directions are
+// asserted so neither list can be edited alone.
+
+test('JD_FETCHABLE_SOURCES: every listed source has a real fetchJD branch', async () => {
+  for (const source of JD_FETCHABLE_SOURCES) {
+    const posting = makePosting({
+      url: 'https://example.com/x',
+      company: 'acme',
+      source: source as PostingRow['source'],
+    });
+    // A listed source must not fall through to the `unsupported source`
+    // default. It may still throw for other reasons (bad url/host) — we only
+    // assert it is dispatched, never that it succeeds.
+    let message = '';
+    try {
+      await fetchJD(posting, (async () => {
+        throw new Error('network disabled in test');
+      }) as unknown as typeof fetch);
+    } catch (err) {
+      message = String((err as Error).message);
+    }
+    expect(message).not.toContain('unsupported source');
+  }
+});
+
+test('JD_FETCHABLE_SOURCES: every source NOT listed throws `unsupported source`', async () => {
+  // The full posting-source vocabulary, mirroring postings.ts VALID_SOURCES.
+  const ALL_SOURCES = ['greenhouse', 'lever', 'ashby', 'hn', 'yc', 'jobright', 'simplify', 'getro', 'ycdir'];
+  const unlisted = ALL_SOURCES.filter(s => !JD_FETCHABLE_SOURCES.has(s));
+
+  // Guard the guard: if this ever empties, the test below silently passes.
+  expect(unlisted.length).toBeGreaterThan(0);
+  expect(unlisted).toContain('simplify');
+  expect(unlisted).toContain('getro');
+
+  for (const source of unlisted) {
+    const posting = makePosting({
+      url: 'https://example.com/x',
+      company: 'acme',
+      source: source as PostingRow['source'],
+    });
+    await expect(fetchJD(posting)).rejects.toThrow(`fetchJD: unsupported source ${source}`);
+  }
 });

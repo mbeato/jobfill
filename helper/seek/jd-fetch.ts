@@ -206,6 +206,23 @@ async function fetchHNJD(posting: PostingRow, fetchImpl: typeof fetch): Promise<
  * converts this to D-08 held state. HN fillable-external-link postings never
  * hit the network; they return a metadata fallback string instead.
  */
+// The sources fetchJD's switch below can actually serve. MUST stay in lockstep
+// with that switch — jd-fetch.test.ts asserts both directions, because this
+// codebase has already been bitten once by two parallel source lists drifting
+// (SourceName vs VALID_SOURCES, phase 16 D-01).
+//
+// Aggregator sources (simplify, getro) are deliberately absent: their apply
+// URLs point at arbitrary third-party hosts (SmartRecruiters, Workday, Apple),
+// which ALLOWED_HOSTS refuses by design as an SSRF control. decide.ts reads
+// this set to route those postings to metadata-only scoring instead of
+// stranding them in a permanent held loop.
+export const JD_FETCHABLE_SOURCES: ReadonlySet<string> = new Set([
+  'greenhouse',
+  'lever',
+  'ashby',
+  'hn',
+]);
+
 export async function fetchJD(posting: PostingRow, fetchImpl: typeof fetch = fetch): Promise<string> {
   switch (posting.source) {
     case 'greenhouse':

@@ -1,0 +1,166 @@
+import type { Database } from 'bun:sqlite';
+
+// Machine-discovered ATS-slug cache (D-01/D-02) that feeds greenhouse/lever/ashby's
+// token lists — a sibling of `postings` (job listings) and `queue` (fill lifecycle),
+// never conflated with either. D-04: every slug is inserted optimistically with no
+// pre-probe; the next sweep is its verification, and repeated failures mark it dead.
+
+export interface BoardRow {
+  id: number;
+  ats: string;
+  token: string;
+  source_of_discovery: string;
+  first_seen_at: string;
+  last_ok_at: string | null;
+  dead_since: string | null;
+  consecutive_failures: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export const BOARDS_ATS = new Set(['greenhouse', 'lever', 'ashby']);
+// 'consider' stays allowlisted even though no Consider.co adapter ships (D-13) so a
+// future adapter needs no schema change; 'seed' is reserved for rows promoted from
+// seek.config.json.
+export const BOARDS_SOURCES = new Set(['simplify', 'getro', 'consider', 'ycdir', 'seed']);
+
+// Outbound-request guard (T-16-03): a harvested token is later interpolated into
+// boards-api.greenhouse.io/v1/boards/<token>/jobs, so a slash, `..`, `?`, `@` or
+// percent-escape in a harvested slug must never reach a fetch URL.
+const TOKEN_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
+
+// D-04 discretionary threshold/interval: 5 consecutive nightly failures is ~5 days
+// of evidence, and a 14-day rest means a dead board costs at most ~2 wasted requests
+// a month. Exported so tests assert against the constant, not a magic number.
+export const DEAD_AFTER = 5;
+export const DEAD_RECHECK_DAYS = 14;
+
+export function createBoardsTable(db: Database) {
+  db.run(`CREATE TABLE IF NOT EXISTS boards (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ats TEXT NOT NULL,
+    token TEXT NOT NULL,
+    source_of_discovery TEXT NOT NULL,
+    first_seen_at TEXT DEFAULT (datetime('now')),
+    last_ok_at TEXT,
+    dead_since TEXT,
+    consecutive_failures INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(ats, token)
+  )`);
+}
+
+function toRow(raw: Record<string, unknown>): BoardRow {
+  return {
+    id: raw.id as number,
+    ats: raw.ats as string,
+    token: raw.token as string,
+    source_of_discovery: raw.source_of_discovery as string,
+    first_seen_at: raw.first_seen_at as string,
+    last_ok_at: (raw.last_ok_at as string | null) ?? null,
+    dead_since: (raw.dead_since as string | null) ?? null,
+    consecutive_failures: Number(raw.consecutive_failures ?? 0),
+    created_at: raw.created_at as string,
+    updated_at: raw.updated_at as string,
+  };
+}
+
+// T-16-04: ats/source_of_discovery are allowlist-checked before any write, mirroring
+// VALID_SOURCES/DECISION_VALUES — out-of-enum input returns null and writes nothing,
+// matching upsertPosting's silent-skip posture (callers feed this bulk third-party data).
+export function upsertBoard(
+  db: Database,
+  input: { ats: string; token: string; source_of_discovery: string },
+  blocklist: string[] = [],
+): BoardRow | null {
+  if (!BOARDS_ATS.has(input.ats)) return null;
+  if (!BOARDS_SOURCES.has(input.source_of_discovery)) return null;
+  const token = String(input.token ?? '').trim();
+  if (!TOKEN_RE.test(token)) return null;
+  // D-06: blocklist enforced at insert time (case-insensitive) so a slug the operator never
+  // wants polled can never enter `boards` in the first place.
+  const lowerToken = token.toLowerCase();
+  if (blocklist.some(b => String(b ?? '').trim().toLowerCase() === lowerToken)) return null;
+  const raw = db
+    .query(
+      `INSERT INTO boards (ats, token, source_of_discovery)
+       VALUES (?, ?, ?)
+       -- D-02: first_seen_at and source_of_discovery are write-once provenance —
+       -- Phase 17's grace window reads first_seen_at, and re-discovery must not
+       -- reset it or re-attribute who found it first.
+       ON CONFLICT(ats, token) DO UPDATE SET updated_at = datetime('now')
+       RETURNING *`,
+    )
+    .get(input.ats, token, input.source_of_discovery) as Record<string, unknown>;
+  return toRow(raw);
+}
+
+// D-04: a single parameterized UPDATE, no-op when the row doesn't exist (config-seed
+// tokens are not in `boards`; this must not throw for them). ok=true clears the failure
+// streak — a board that answers is alive again. ok=false increments the streak and
+// refreshes dead_since on EVERY failure past the threshold (not only the first), which
+// is what rolls the DEAD_RECHECK_DAYS window forward so a permanently-dead board is
+// retried once per DEAD_RECHECK_DAYS instead of every sweep.
+export function recordBoardResult(db: Database, ats: string, token: string, ok: boolean): void {
+  if (ok) {
+    db.query(
+      `UPDATE boards SET
+         consecutive_failures = 0,
+         last_ok_at = datetime('now'),
+         dead_since = NULL,
+         updated_at = datetime('now')
+       WHERE ats = ? AND token = ?`,
+    ).run(ats, token);
+  } else {
+    db.query(
+      `UPDATE boards SET
+         consecutive_failures = consecutive_failures + 1,
+         dead_since = CASE WHEN consecutive_failures + 1 >= ${DEAD_AFTER} THEN datetime('now') ELSE dead_since END,
+         updated_at = datetime('now')
+       WHERE ats = ? AND token = ?`,
+    ).run(ats, token);
+  }
+}
+
+// D-04's "stops being polled, with a periodic re-check" in one predicate: a board is
+// active when it has never gone dead, or its dead_since is old enough for one retry.
+export function listActiveBoards(db: Database, ats?: string): BoardRow[] {
+  const sql =
+    `SELECT * FROM boards WHERE (dead_since IS NULL OR dead_since <= datetime('now', '-${DEAD_RECHECK_DAYS} days'))` +
+    (ats !== undefined ? ' AND ats = ?' : '') +
+    ' ORDER BY token';
+  const rows = (ats !== undefined ? db.query(sql).all(ats) : db.query(sql).all()) as Record<string, unknown>[];
+  return rows.map(toRow);
+}
+
+// D-01: the single effective-token resolution point — config tokens ∪ active boards
+// rows − blocklist. sweep.ts calls this once per ATS immediately before each fetcher
+// (plan 16-08). No cap on the result length: D-05 explicitly refuses a watchlist
+// ceiling. Non-string entries in either input array are filtered out rather than
+// coerced, mirroring config.ts's toSourceConfig.
+export function resolveEffectiveTokens(
+  db: Database,
+  ats: string,
+  configTokens: string[],
+  blocklist: string[] = [],
+): string[] {
+  const blockedLower = new Set(
+    blocklist.filter((b): b is string => typeof b === 'string').map(b => b.trim().toLowerCase()),
+  );
+  const seen = new Set<string>();
+  const result: string[] = [];
+  const add = (t: unknown) => {
+    if (typeof t !== 'string') return;
+    const trimmed = t.trim();
+    if (!trimmed) return;
+    const lower = trimmed.toLowerCase();
+    if (blockedLower.has(lower)) return; // D-06: blocklist enforced again at resolution time
+    if (seen.has(lower)) return;
+    seen.add(lower);
+    result.push(trimmed);
+  };
+  for (const t of configTokens) add(t);
+  for (const row of listActiveBoards(db, ats)) add(row.token);
+  return result;
+}

@@ -309,6 +309,38 @@
   "jobright": {
     "enabled": true
   },
+  "simplify": {
+    "enabled": true
+  },
+  "getro": {
+    "enabled": true,
+    "networks": [
+      {
+        "name": "craftventures",
+        "id": "340",
+        "host": "jobs.craftventures.com"
+      },
+      {
+        "name": "uncorkcapital",
+        "id": "247",
+        "host": "jobs.uncorkcapital.com"
+      },
+      {
+        "name": "mercuryfund",
+        "id": "1258",
+        "host": "mercuryfund.getro.com"
+      },
+      {
+        "name": "hvventures",
+        "id": "234",
+        "host": "hv.getro.com"
+      }
+    ]
+  },
+  "ycdir": {
+    "enabled": true
+  },
+  "blocklist": [],
   "schedule": {
     "enabled": true,
     "targetHour": 7

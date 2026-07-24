@@ -1,5 +1,5 @@
 import { test, expect } from 'bun:test';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { safeDocPath } from './docpath';
@@ -36,4 +36,20 @@ test('safeDocPath rejects a non-existent in-root path', () => {
   const missing = join(root, 'never_written.pdf');
   expect(safeDocPath(missing, root, '.pdf')).toBeNull();
   rmSync(root, { recursive: true, force: true });
+});
+
+// WR-03: a file lexically under root that is ACTUALLY a symlink pointing
+// outside root must be rejected — lexical resolve() containment alone would
+// pass this (the symlink's own path starts with root), letting the real
+// target's contents stream out.
+test('safeDocPath rejects a symlink under root that escapes root', () => {
+  const parent = mkdtempSync(join(tmpdir(), 'docpath-symlink-parent-'));
+  const root = join(parent, 'rounds');
+  mkdirSync(root);
+  const outsideFile = join(parent, 'secret.pdf');
+  writeFileSync(outsideFile, '%PDF-1.4 secret');
+  const linkPath = join(root, 'CoverLetter_acme_2026-07-24.pdf');
+  symlinkSync(outsideFile, linkPath);
+  expect(safeDocPath(linkPath, root, '.pdf')).toBeNull();
+  rmSync(parent, { recursive: true, force: true });
 });

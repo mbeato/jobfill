@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 // Shared lexical containment check: is `full` (an already-resolve()'d path)
@@ -19,6 +19,19 @@ export function safeDocPath(candidate: string, root: string, ext: string): strin
   if (!containedUnder(full, root)) return null;
   if (!full.endsWith(ext)) return null;
   if (!existsSync(full)) return null;
+  // WR-03: resolve() only normalizes the path string — it does not dereference
+  // symlinks. Re-check containment against the REAL (symlink-resolved) path so a
+  // file under root that is itself a symlink pointing outside root can't pass.
+  // realpathSync only throws for a path that doesn't exist, and existsSync just
+  // confirmed `full` exists, so this is not expected to throw in practice —
+  // still guarded defensively (return null, never let it escape as a 500).
+  try {
+    const realFull = realpathSync(full);
+    const realRoot = realpathSync(resolve(root));
+    if (!realFull.startsWith(realRoot + '/')) return null;
+  } catch {
+    return null;
+  }
   return full;
 }
 

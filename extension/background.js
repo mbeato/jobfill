@@ -282,6 +282,7 @@ async function runFill(tabId, force = false, opts = {}) {
           company: mapping.company || pageContext.heading || pageContext.title || 'unknown',
           role: mapping.role || '',
           url: pageContext.url,
+          queue_id: queueId, // D-01: link the application to its queue row (server falls back to url_key match when absent)
           resume_path: tailorState === 'ran' ? attachedResume.path : '',
           cost_usd: cost,
           summary: tailorState === 'ran' ? summary : null,

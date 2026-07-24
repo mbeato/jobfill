@@ -509,6 +509,14 @@ Bun.serve({
           throw e;
         }
       }
+      // D-07: on-demand lazy-load route for a single row's jd, kept out of the
+      // list payload above. Parameterized id lookup — never string-concatenated.
+      const jdMatch = pathname.match(/^\/applications\/(\d+)\/jd$/);
+      if (jdMatch && req.method === 'GET') {
+        const row = db.query('SELECT jd FROM applications WHERE id = ?').get(Number(jdMatch[1])) as { jd: string } | null;
+        if (!row) return json({ error: 'not found' }, 404);
+        return json({ jd: row.jd ?? '' });
+      }
       const patch = pathname.match(/^\/applications\/(\d+)$/);
       if (patch && req.method === 'PATCH') {
         const b = await req.json();

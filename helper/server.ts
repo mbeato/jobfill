@@ -767,6 +767,53 @@ Bun.serve({
           .get(id);
         return json(updated);
       }
+
+      // GET /applications/:id/doc/:doctype — D-06: streams a generated
+      // cover-letter or brief PDF inline so it's reachable in one click from
+      // the applications tab, mirroring GET /queue/:id/resume. T-15-03
+      // (LOAD-BEARING): the served root is ROUNDS_DIR, not RESUME_DIR — a
+      // RESUME_DIR root would also accept the base resume tree, wider than
+      // this route's intent. safeDocPath does resolve -> assert-under-root ->
+      // extension check -> existence check; any failure streams nothing.
+      const docMatch = pathname.match(/^\/applications\/(\d+)\/doc\/([^/]+)$/);
+      if (docMatch && req.method === 'GET') {
+        const doctype = docMatch[2];
+        if (doctype !== 'cover-letter' && doctype !== 'brief') {
+          return json({ error: 'invalid doc type' }, 400);
+        }
+        const row = db
+          .query('SELECT cover_letter_path, brief_path FROM applications WHERE id = ?')
+          .get(Number(docMatch[1])) as { cover_letter_path: string; brief_path: string } | null;
+        if (!row) return json({ error: 'not found' }, 404);
+        const candidate = doctype === 'cover-letter' ? row.cover_letter_path : row.brief_path;
+        if (!candidate) return json({ error: 'document not generated yet' }, 404);
+        const full = safeDocPath(candidate, ROUNDS_DIR, '.pdf');
+        if (!full) return json({ error: 'document file not found on disk' }, 404);
+        return new Response(Bun.file(full), {
+          headers: {
+            'content-type': 'application/pdf',
+            'content-disposition': `inline; filename="${full.split('/').pop()}"`,
+          },
+        });
+      }
+
+      // GET /applications/:id/email — D-07: the follow-up email draft served
+      // back inline as JSON for the read-back box, reusing the JD toggle
+      // pattern verbatim. T-15-04: safeDocPath runs BEFORE the file read, so
+      // an out-of-ROUNDS_DIR path is never opened.
+      const emailMatch = pathname.match(/^\/applications\/(\d+)\/email$/);
+      if (emailMatch && req.method === 'GET') {
+        const row = db.query('SELECT email_path FROM applications WHERE id = ?').get(Number(emailMatch[1])) as
+          | { email_path: string }
+          | null;
+        if (!row) return json({ error: 'not found' }, 404);
+        if (!row.email_path) return json({ email: '' });
+        const full = safeDocPath(row.email_path, ROUNDS_DIR, '.md');
+        if (!full) return json({ error: 'document file not found on disk' }, 404);
+        const text = await Bun.file(full).text();
+        return json({ email: text });
+      }
+
       if (pathname === '/answers' && req.method === 'GET') {
         const rows = db.query('SELECT * FROM answers ORDER BY created_at DESC, id DESC').all() as AnswerRow[];
         return json(groupByQuestion(rows));

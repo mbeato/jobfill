@@ -20,6 +20,8 @@
   .ghost-badge { display: inline-block; margin-top: 4px; padding: 2px 8px; border-radius: 999px; font-size: 12px; background: rgba(211,47,47,.07); color: #d32f2f; white-space: nowrap; }
   a { color: #1565c0; text-decoration: none; }
   .summary-toggle { cursor: pointer; margin-top: 2px; }
+  .jd-toggle { cursor: pointer; margin-top: 2px; }
+  .jd-body { background: #f5f5f5; padding: 8px; max-height: 300px; overflow: auto; font-size: 14px; line-height: 1.5; white-space: pre-wrap; }
   h2 { font-size: 16px; font-weight: 600; line-height: 1.2; margin-top: 32px; }
   .answer-block { background: #fff8dc; padding: 8px; overflow: hidden; }
   textarea.answer-edit { width: 100%; box-sizing: border-box; border: 1px solid transparent; padding: 8px; background: #fff8dc; }
@@ -200,6 +202,8 @@ function render() {
             ${a.summary.map(line => `<div class="muted" style="padding-left:4px">${esc(line)}</div>`).join('')}
           </div>
         ` : ''}
+        <div class="muted jd-toggle" onclick="toggleJd(${a.id})">job description <span id="jd-arrow-${a.id}">▾</span></div>
+        <div class="jd-slot" id="jd-slot-${a.id}" style="display:none"></div>
       </td>
     </tr>`).join('');
 }

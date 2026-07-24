@@ -10,7 +10,7 @@ import { createApplicationsTable, insertApplication, updateApplicationStatus, de
 // safeDocPath lives in its own module (not inline here) so it stays importable
 // by a test without triggering this file's Bun.serve() side effect on import.
 // Re-exported so it reads as "exported from server.ts" per the phase 15 plan.
-import { safeDocPath } from './docpath';
+import { safeDocPath, safeOutDir } from './docpath';
 export { safeDocPath };
 import { mapViaCLI } from './mapping';
 import { normalizeUrl } from './seek/normalize';
@@ -505,7 +505,7 @@ async function generateCoverLetter(app: GenAppRow): Promise<string> {
   if (app.tailor_state !== 'ran' || !app.resume_path) {
     throw new Error('no tailored resume for this application — tailor the resume first');
   }
-  const outDir = dirname(app.resume_path);
+  const outDir = safeOutDir(dirname(app.resume_path), ROUNDS_DIR);
   const slug = outDir.split('/').pop() || 'unknown';
   const stamp = new Date().toISOString().slice(0, 10);
   const tailoredTexPath = app.resume_path.replace(/\.pdf$/, '.tex');
@@ -544,7 +544,7 @@ async function generateBrief(app: GenAppRow): Promise<string> {
   if (!app.jd || app.jd.length < 200) {
     throw new Error('job description too short to generate an interview-prep brief against');
   }
-  const outDir = app.resume_path ? dirname(app.resume_path) : join(ROUNDS_DIR, slugify(app.company));
+  const outDir = app.resume_path ? safeOutDir(dirname(app.resume_path), ROUNDS_DIR) : join(ROUNDS_DIR, slugify(app.company));
   mkdirSync(outDir, { recursive: true });
   const slug = outDir.split('/').pop() || 'unknown';
   const stamp = new Date().toISOString().slice(0, 10);
@@ -582,7 +582,7 @@ async function generateEmail(app: GenAppRow): Promise<string> {
   if (!app.jd || app.jd.length < 200) {
     throw new Error('job description too short to generate a follow-up email against');
   }
-  const outDir = app.resume_path ? dirname(app.resume_path) : join(ROUNDS_DIR, slugify(app.company));
+  const outDir = app.resume_path ? safeOutDir(dirname(app.resume_path), ROUNDS_DIR) : join(ROUNDS_DIR, slugify(app.company));
   mkdirSync(outDir, { recursive: true });
   const slug = outDir.split('/').pop() || 'unknown';
   const stamp = new Date().toISOString().slice(0, 10);

@@ -119,8 +119,11 @@ export function insertApplication(
   if (!APPLICATION_STATUSES.has(status)) throw new InvalidApplicationStatusError(status);
   return db
     .query(
-      `INSERT INTO applications (company, role, url, status, resume_path, cost_usd, summary, tailor_state, tailor_message)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      // WR-02: seed status_changed_at at insert (same instant the row is created) so a
+      // direct status:'applied' POST starts an honest ghost clock instead of NULL —
+      // consistent with the D-20 boot seed. Pre-submit rows never ghost regardless.
+      `INSERT INTO applications (company, role, url, status, resume_path, cost_usd, summary, tailor_state, tailor_message, status_changed_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now')) RETURNING *`,
     )
     .get(
       String(input.company ?? 'unknown').slice(0, MAX_TEXT),

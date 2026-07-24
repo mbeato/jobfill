@@ -196,3 +196,67 @@ test('scheduled vs manual triggers produce structurally identical detail (differ
 test('spawnSidecar is exported and callable (real impl exercised only via manual/UAT — see acceptance grep for process.execPath usage)', () => {
   expect(typeof spawnSidecar).toBe('function');
 });
+
+test('headline.tokenErrors sums per-token errors across two ATS sources (2 + 1 = 3)', async () => {
+  const db = makeDb();
+  const { runId } = beginSweep(db, 'manual');
+  const config = baseConfig({
+    greenhouse: { enabled: true, tokens: ['acme'] },
+    lever: { enabled: true, tokens: ['beta'] },
+  });
+  const deps = baseDeps({
+    fetchGreenhouse: async () => ({
+      postings: [],
+      errors: [{ token: 'a', error: 'boom' }, { token: 'b', error: 'boom' }],
+    }),
+    fetchLever: async () => ({ postings: [], errors: [{ token: 'c', error: 'boom' }] }),
+  });
+  await runSweepJob(db, config, deps, runId);
+  const row = getSweepById(db, runId);
+  const detail = JSON.parse(row!.detail!);
+  expect(detail.headline.tokenErrors).toBe(3);
+  expect(detail.headline.boardsAdded).toBe(0);
+});
+
+test('headline.boardsAdded sums slug-harvest results across simplify and getro (2 + 1 = 3)', async () => {
+  const db = makeDb();
+  const { runId } = beginSweep(db, 'manual');
+  const config = baseConfig({
+    greenhouse: { enabled: false, tokens: [] },
+    simplify: { enabled: true },
+    getro: { enabled: true, networks: [{ name: 'seedfund', id: '1' }] },
+  });
+  const deps = baseDeps({
+    fetchSimplify: async () => [
+      posting({ url: 'https://boards.greenhouse.io/acme/jobs/1', source: 'simplify' }),
+      posting({ url: 'https://jobs.lever.co/beta/2', source: 'simplify' }),
+    ],
+    fetchGetro: async () => ({
+      postings: [posting({ url: 'https://jobs.ashbyhq.com/gamma/3', source: 'getro' })],
+      errors: [],
+    }),
+    // Real upsertBoard behavior is boards.test.ts's concern — this stub only
+    // needs to signal "a board was added" (non-null) so runSweep's harvest
+    // loop increments boardsAdded per candidate.
+    upsertBoard: () => ({}) as any,
+  });
+  await runSweepJob(db, config, deps, runId);
+  const row = getSweepById(db, runId);
+  const detail = JSON.parse(row!.detail!);
+  expect(detail.headline.boardsAdded).toBe(3);
+  expect(detail.headline.tokenErrors).toBe(0);
+});
+
+test('a clean sweep reports tokenErrors: 0 and boardsAdded: 0 explicitly, never undefined, alongside every pre-existing headline field', async () => {
+  const db = makeDb();
+  const { runId } = beginSweep(db, 'manual');
+  const result = await runSweepJob(db, baseConfig(), baseDeps(), runId);
+  expect(result.status).toBe('ok');
+  const row = getSweepById(db, runId);
+  const detail = JSON.parse(row!.detail!);
+  expect(detail.headline.tokenErrors).toBe(0);
+  expect(detail.headline.boardsAdded).toBe(0);
+  expect(Object.keys(detail.headline).sort()).toEqual(
+    ['at', 'boardsAdded', 'byCriterion', 'deduped', 'fetched', 'held', 'queued', 'rejected', 'tokenErrors'].sort(),
+  );
+});

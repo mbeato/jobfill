@@ -20,6 +20,11 @@ import { fetchGreenhouse } from './seek/greenhouse';
 import { fetchLever } from './seek/lever';
 import { fetchAshby } from './seek/ashby';
 import { fetchHNPostings } from './seek/hn';
+import { createBoardsTable, upsertBoard, recordBoardResult, resolveEffectiveTokens } from './seek/boards';
+import { createSeekMetaTable } from './seek/meta';
+import { fetchSimplify } from './seek/simplify';
+import { fetchGetro } from './seek/getro';
+import { harvestYcDirectory } from './seek/ycdir';
 import type { SourceName } from './seek/types';
 import { classifyMetadata, classifyYoe } from './seek/filter';
 import { fetchJD } from './seek/jd-fetch';
@@ -114,6 +119,11 @@ createQueueTable(db);
 createPostingsTable(db);
 createSweepsTable(db);
 createBatchRunsTable(db);
+// boards is a brand-new table on the live jobfill.db (Phase 16) — it needs
+// ONLY CREATE TABLE IF NOT EXISTS, no ALTER-guard blocks. The ALTER-guard dual
+// pattern below exists solely to add columns to tables that PREDATE a schema
+// bump; a table created for the first time never needs it.
+createBoardsTable(db);
 
 // Live-DB migrations (idempotent, re-run safe): both createQueueTable and
 // createPostingsTable's CREATE TABLE IF NOT EXISTS strings already include
@@ -210,7 +220,7 @@ db.run(`UPDATE applications SET status_changed_at = created_at WHERE status_chan
 }
 
 // D-15 last-sweep summary store: a tiny key/value table, one JSON row.
-db.run('CREATE TABLE IF NOT EXISTS seek_meta (key TEXT PRIMARY KEY, value TEXT)');
+createSeekMetaTable(db);
 
 // RESEARCH Pattern 5: any sweeps row still 'running' when the process starts
 // back up can only mean the prior process crashed mid-sweep — flip it to
@@ -259,7 +269,16 @@ const jobDeps: JobDeps = {
   fetchLever,
   fetchAshby,
   fetchHNPostings,
+  fetchSimplify,
+  fetchGetro,
   upsertPosting,
+  upsertBoard,
+  recordBoardResult,
+  resolveEffectiveTokens,
+  // Adapts the real harvestYcDirectory's wider deps shape (fetchImpl/maxBatches
+  // optional) down to SweepDeps' { db, blocklist } surface, closing over
+  // upsertBoard here so sweep.ts stays unaware of the boards module directly.
+  harvestYcDirectory: ({ db, blocklist }) => harvestYcDirectory({ db, upsertBoard, blocklist }),
   classifyMetadata,
   classifyYoe,
   fetchJD,

@@ -5,7 +5,9 @@ import { runSweep, type SweepDeps } from './sweep';
 import { runFilterPromote, type DecideDeps, type FilterCounts } from './decide';
 import { startSweepRun, finishSweepRun, isSweepRunning, getRunningSweep, type SweepTrigger } from './runs';
 import { isBatchRunning, getRunningBatch, reconcileInterruptedBatchRuns } from './batch';
+import { writeSeekMeta } from './meta';
 import type { SeekConfig } from './types';
+import type { SourceResult } from './sweep';
 
 // The single sweep entrypoint (D-09/SCHED-02): scheduler tick and POST /sweep
 // (a later plan) both call runSweepJob — one function performs a sweep, so
@@ -99,8 +101,12 @@ export async function spawnSidecar(): Promise<SidecarResult> {
 
 // D-15-style headline shape (fetched/rejected/deduped/held/queued/byCriterion)
 // — the exact literal helper/server.ts's POST /seek route already builds,
-// preserved verbatim so nothing the old flow printed is dropped.
-function buildHeadline(fetchedTotal: number, filterCounts: FilterCounts) {
+// preserved verbatim so nothing the old flow printed is dropped. Extended
+// with two D-03/D-04/D-11/D-14 fields: tokenErrors is what makes a dead
+// auto-added board visible instead of silent, and boardsAdded is the
+// per-sweep watchlist-growth signal. Both are always numeric (never
+// undefined) so a clean sweep still reports 0 rather than dropping the key.
+function buildHeadline(fetchedTotal: number, filterCounts: FilterCounts, fetchResults: SourceResult[]) {
   return {
     at: new Date().toISOString(),
     fetched: fetchedTotal || filterCounts.toDecide,
@@ -109,6 +115,8 @@ function buildHeadline(fetchedTotal: number, filterCounts: FilterCounts) {
     held: filterCounts.held,
     queued: filterCounts.queued,
     byCriterion: filterCounts.byCriterion,
+    tokenErrors: fetchResults.reduce((sum, r) => sum + (r.tokenErrors ?? 0), 0),
+    boardsAdded: fetchResults.reduce((sum, r) => sum + (r.boardsAdded ?? 0), 0),
   };
 }
 
@@ -141,12 +149,13 @@ export async function runSweepJob(
   }
 
   const fetchedTotal = fetchResults.reduce((sum, r) => sum + (r.fetched ?? 0), 0);
-  const headline = buildHeadline(fetchedTotal, filterCounts);
+  const headline = buildHeadline(fetchedTotal, filterCounts, fetchResults);
   const detail = { fetch: fetchResults, filter: filterCounts, sidecar, headline };
 
   finishSweepRun(db, runId, 'ok', detail);
-  // Preserve the existing dashboard #seekStats path — nothing regresses.
-  db.run('INSERT OR REPLACE INTO seek_meta(key, value) VALUES (?, ?)', ['last_sweep', JSON.stringify(headline)]);
+  // Preserve the existing dashboard #seekStats path — nothing regresses. Now
+  // shares the same accessor the ycdir weekly gate uses (helper/seek/meta.ts).
+  writeSeekMeta(db, 'last_sweep', JSON.stringify(headline));
 
   return { runId, status: 'ok' };
 }

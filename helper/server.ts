@@ -473,8 +473,19 @@ Bun.serve({
           }[];
           return rows.find(r => r.url_key === target)?.id ?? null;
         };
+        // WR-01: an explicit queue_id is only trusted when the target row's url_key
+        // actually equals normalizeUrl(b.url) — the exact-equality the resolveQueueId
+        // fallback already enforces. A stale/wrong/spoofed id therefore can no longer
+        // cross-link this application onto an unrelated queue row (defense-in-depth at
+        // the same-origin/token boundary the phase brief flagged).
+        const target = normalizeUrl(b.url ?? '');
         const explicit = Number(b.queue_id);
-        const queueId = Number.isInteger(explicit) && explicit > 0 ? explicit : resolveQueueId(b.url ?? '');
+        let queueId: number | null = null;
+        if (Number.isInteger(explicit) && explicit > 0 && target) {
+          const q = db.query('SELECT url_key FROM queue WHERE id = ?').get(explicit) as { url_key: string | null } | null;
+          if (q && q.url_key === target) queueId = explicit;
+        }
+        if (queueId === null) queueId = resolveQueueId(b.url ?? '');
         try {
           // insertApplication defaults the new row to PRE_SUBMIT_STATUS (D-06).
           const row = insertApplication(db, b, resolveQueueId);

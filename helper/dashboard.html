@@ -225,6 +225,46 @@ function toggleSummary(id) {
   arrow.textContent = expanded ? '▾' : '▴';
 }
 
+// D-07: jd is kept out of the list payload, so it's fetched on demand here,
+// once per row, and cached — re-collapsing/re-expanding a cached row does not
+// re-hit the endpoint. Only the error state re-attempts on re-expand (T-14-06).
+const jdCache = new Map();
+
+async function toggleJd(id) {
+  const slot = document.getElementById(`jd-slot-${id}`);
+  const arrow = document.getElementById(`jd-arrow-${id}`);
+  const expanded = slot.style.display !== 'none';
+  if (expanded) {
+    slot.style.display = 'none';
+    arrow.textContent = '▾';
+    return;
+  }
+  slot.style.display = 'block';
+  arrow.textContent = '▴';
+
+  if (jdCache.has(id)) {
+    slot.innerHTML = jdCache.get(id);
+    return;
+  }
+
+  slot.innerHTML = `<div class="muted">loading job description…</div>`;
+  try {
+    const resp = await fetch(`/applications/${id}/jd`);
+    if (!resp.ok) {
+      slot.innerHTML = `<div class="muted">couldn't load job description — click to retry</div>`;
+      return;
+    }
+    const { jd } = await resp.json();
+    const html = jd && jd.trim()
+      ? `<div class="jd-body">${esc(jd)}</div>`
+      : `<div class="muted">no JD captured</div>`;
+    jdCache.set(id, html);
+    slot.innerHTML = html;
+  } catch (e) {
+    slot.innerHTML = `<div class="muted">couldn't load job description — click to retry</div>`;
+  }
+}
+
 function esc(s) {
   return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 }

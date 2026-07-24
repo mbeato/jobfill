@@ -29,7 +29,10 @@ export interface PostingRow {
 }
 
 const MAX_TEXT = 2000;
-const VALID_SOURCES = new Set(['greenhouse', 'lever', 'ashby', 'hn', 'yc', 'jobright']);
+// Maintained SEPARATELY from types.ts's SourceName union — both lists MUST be
+// edited together. A source missing here is silently dropped by the
+// `!VALID_SOURCES.has(p.source)` guard below and yields zero rows, no error.
+const VALID_SOURCES = new Set(['greenhouse', 'lever', 'ashby', 'hn', 'yc', 'jobright', 'simplify', 'getro', 'ycdir']);
 
 // D-13 decision audit trail: a posting's final verdict. null = unscored.
 export const DECISION_VALUES = new Set(['queued', 'rejected', 'held']);

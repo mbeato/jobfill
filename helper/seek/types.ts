@@ -3,7 +3,12 @@
 // adapter, the HN parser, the Playwright sidecar, and the /seek route import
 // these types directly instead of re-deriving the shape.
 
-export type SourceName = 'greenhouse' | 'lever' | 'ashby' | 'hn' | 'yc' | 'jobright';
+// `ycdir` (SEEK-09/D-17) is the public YC batch directory slug-harvest source —
+// deliberately separate from the existing login-gated `yc` Work-at-a-Startup
+// sidecar source below, so a stale sidecar login cannot break slug discovery.
+// D-13: Consider.co is intentionally NOT added here — it was dropped from this
+// phase, and an unreachable source value would be dead surface.
+export type SourceName = 'greenhouse' | 'lever' | 'ashby' | 'hn' | 'yc' | 'jobright' | 'simplify' | 'getro' | 'ycdir';
 
 export interface NormalizedPosting {
   company: string;

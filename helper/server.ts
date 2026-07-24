@@ -719,6 +719,54 @@ Bun.serve({
           throw e;
         }
       }
+      // POST /applications/:id/generate/:doctype — the ONLY entry point to the
+      // three on-demand document generators (DOC-05: explicit-click only, never
+      // called from any sweep/batch/fill path). T-15-01: every generation input
+      // (company/role/url/jd/resume_path/tailor_state) is resolved server-side
+      // from the applications row keyed by id — the request body never supplies
+      // a path or slug. No per-route try/catch: a thrown generator error surfaces
+      // as a 500 with its message via the global wrapper below.
+      const genMatch = pathname.match(/^\/applications\/(\d+)\/generate\/([^/]+)$/);
+      if (genMatch && req.method === 'POST') {
+        const doctype = genMatch[2];
+        if (doctype !== 'cover-letter' && doctype !== 'brief' && doctype !== 'email') {
+          return json({ error: 'invalid doc type' }, 400);
+        }
+        const id = Number(genMatch[1]);
+        const app = db
+          .query('SELECT id, company, role, url, jd, resume_path, tailor_state FROM applications WHERE id = ?')
+          .get(id) as GenAppRow | null;
+        if (!app) return json({ error: 'not found' }, 404);
+
+        let producedPath: string;
+        let column: 'cover_letter_path' | 'brief_path' | 'email_path';
+        if (doctype === 'cover-letter') {
+          producedPath = await generateCoverLetter(app);
+          column = 'cover_letter_path';
+        } else if (doctype === 'brief') {
+          producedPath = await generateBrief(app);
+          column = 'brief_path';
+        } else {
+          producedPath = await generateEmail(app);
+          column = 'email_path';
+        }
+
+        // column is one of the three literals selected above — never derived
+        // from the request body or path param, so this is not a SQL-injection surface.
+        db.query(`UPDATE applications SET ${column} = ?, updated_at = datetime('now') WHERE id = ?`).run(
+          producedPath,
+          id,
+        );
+        const updated = db
+          .query(
+            `SELECT id, company, role, url, status, notes, resume_path, cost_usd, summary,
+                    tailor_state, tailor_message, cover_letter_path, brief_path, email_path,
+                    status_changed_at, created_at, updated_at
+             FROM applications WHERE id = ?`,
+          )
+          .get(id);
+        return json(updated);
+      }
       if (pathname === '/answers' && req.method === 'GET') {
         const rows = db.query('SELECT * FROM answers ORDER BY created_at DESC, id DESC').all() as AnswerRow[];
         return json(groupByQuestion(rows));

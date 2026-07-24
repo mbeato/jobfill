@@ -1,5 +1,6 @@
 import { test, expect } from 'bun:test';
-import { normalizeSimplifyListing, fetchSimplify, SIMPLIFY_URL } from './simplify';
+import { normalizeSimplifyListing, fetchSimplify, harvestSimplifyBoards, SIMPLIFY_URL } from './simplify';
+import type { NormalizedPosting } from './types';
 
 // Real captured entry from RESEARCH.md Pattern 5 (SimplifyJobs New-Grad-Positions
 // listings.json, verified live 2026-07-24), plus a small factory for overrides.
@@ -121,4 +122,53 @@ test('fetchSimplify yields an empty array rather than throwing on a non-array bo
 test('SIMPLIFY_URL points at the New-Grad-Positions main branch, not Summer2026-Internships', () => {
   expect(SIMPLIFY_URL).toContain('New-Grad-Positions/main');
   expect(SIMPLIFY_URL).not.toContain('Summer2026');
+});
+
+function posting(url: string): NormalizedPosting {
+  return {
+    company: 'Acme',
+    title: 'Role',
+    location: '',
+    url,
+    source: 'simplify',
+    posted_at: null,
+    posted_at_trusted: false,
+    login_gated: false,
+  };
+}
+
+test('harvestSimplifyBoards yields exactly the real ATS entries across all three Greenhouse host forms, a Lever URL, an Ashby URL, and excludes non-ATS + embed URLs', () => {
+  const postings = [
+    posting('https://job-boards.greenhouse.io/acme/jobs/1'),
+    posting('https://boards.greenhouse.io/foo/jobs/2'),
+    posting('https://job-boards.eu.greenhouse.io/bar/jobs/3'),
+    posting('https://jobs.lever.co/baz/abc-123'),
+    posting('https://jobs.ashbyhq.com/qux/def-456'),
+    posting('https://jobs.smartrecruiters.com/Corp/some-role'),
+    posting('https://ngc.wd1.myworkdayjobs.com/en-US/careers/job/1'),
+    posting('https://boards.greenhouse.io/embed/job_app?token=6099883'),
+  ];
+  const result = harvestSimplifyBoards(postings);
+  expect(result).toHaveLength(5);
+  expect(result).toEqual([
+    { ats: 'greenhouse', token: 'acme' },
+    { ats: 'greenhouse', token: 'foo' },
+    { ats: 'greenhouse', token: 'bar' },
+    { ats: 'lever', token: 'baz' },
+    { ats: 'ashby', token: 'qux' },
+  ]);
+  expect(result.some((r) => r.token === 'embed')).toBe(false);
+});
+
+test('harvestSimplifyBoards collapses two postings on the same company slug to one entry', () => {
+  const postings = [
+    posting('https://jobs.lever.co/acme/abc-111'),
+    posting('https://jobs.lever.co/acme/abc-222'),
+  ];
+  const result = harvestSimplifyBoards(postings);
+  expect(result).toEqual([{ ats: 'lever', token: 'acme' }]);
+});
+
+test('harvestSimplifyBoards yields an empty array for an empty list', () => {
+  expect(harvestSimplifyBoards([])).toEqual([]);
 });

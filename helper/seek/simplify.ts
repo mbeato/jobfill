@@ -15,6 +15,7 @@
 // narrowing discovery here would only hide good roles from manual review.
 
 import type { NormalizedPosting } from './types';
+import { extractAtsToken, type HarvestedBoard } from './slug-harvest';
 
 // Verified live 2026-07-24: HTTP 200, ~12 MB, 17,646-entry JSON array (NOT
 // wrapped in an object). The `dev` branch path 404s — `main` is the live file.
@@ -107,4 +108,27 @@ export async function fetchSimplify(fetchImpl: typeof fetch = fetch): Promise<No
   return entries
     .filter((e) => (e as Record<string, any>)?.active === true && (e as Record<string, any>)?.is_visible === true)
     .map(normalizeSimplifyListing);
+}
+
+/**
+ * D-11: SimplifyJobs is both a posting source and a slug harvester — apply
+ * URLs on greenhouse/lever/ashby yield deduped {ats, token} candidates for
+ * the boards watchlist. Pure, no I/O, no persistence: sweep.ts owns writing
+ * these into the boards table (plan 16-08), keeping this module testable
+ * without a storage handle and preserving the pure-mapper contract. The
+ * /embed/job_app exclusion lives in extractAtsToken, not here (T-16-02), so
+ * every harvester in the phase inherits the same mitigation.
+ */
+export function harvestSimplifyBoards(postings: NormalizedPosting[]): HarvestedBoard[] {
+  const seen = new Set<string>();
+  const result: HarvestedBoard[] = [];
+  for (const p of postings) {
+    const board = extractAtsToken(p.url);
+    if (!board) continue;
+    const key = `${board.ats}:${board.token}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(board);
+  }
+  return result;
 }

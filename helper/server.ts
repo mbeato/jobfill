@@ -6,6 +6,7 @@ import { homedir } from 'node:os';
 import { normalizeQuestion, matchLibrary, selectFewShot, groupByQuestion, type AnswerRow } from './answers';
 import { createFailuresTable, insertFailures, listFailures, type FailureRecordInput } from './failures';
 import { createQueueTable, insertQueueEntry, updateQueueStatus, deleteQueueEntry, listQueue, InvalidQueueStatusError } from './queue';
+import { createApplicationsTable } from './applications';
 import { mapViaCLI } from './mapping';
 import { normalizeUrl } from './seek/normalize';
 import { createPostingsTable, upsertPosting, listPostings, recordDecision, listPostingsToDecide } from './seek/postings';
@@ -55,18 +56,11 @@ const CLAUDE_BIN = join(homedir(), '.local/bin/claude');
 const PDFLATEX = '/Library/TeX/texbin/pdflatex';
 
 const db = new Database(join(HERE, 'jobfill.db'));
-db.run(`CREATE TABLE IF NOT EXISTS applications (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  company TEXT NOT NULL,
-  role TEXT DEFAULT '',
-  url TEXT DEFAULT '',
-  status TEXT DEFAULT 'applied',
-  notes TEXT DEFAULT '',
-  resume_path TEXT DEFAULT '',
-  cost_usd REAL DEFAULT 0,
-  created_at TEXT DEFAULT (datetime('now')),
-  updated_at TEXT DEFAULT (datetime('now'))
-)`);
+// Fresh-create DDL lives in applications.ts so the module and its :memory: tests
+// own the full column set (incl. status_changed_at); the live jobfill.db predates
+// several columns and gets them via the ALTER guards below (dual pattern, same as
+// url_key at queue.ts:103 + server.ts:113).
+createApplicationsTable(db);
 try {
   db.run(`ALTER TABLE applications ADD COLUMN summary TEXT DEFAULT ''`);
 } catch {}
@@ -75,6 +69,9 @@ try {
 } catch {}
 try {
   db.run(`ALTER TABLE applications ADD COLUMN tailor_message TEXT DEFAULT ''`);
+} catch {}
+try {
+  db.run(`ALTER TABLE applications ADD COLUMN status_changed_at TEXT`);
 } catch {}
 
 db.run(`CREATE TABLE IF NOT EXISTS answers (
@@ -161,6 +158,33 @@ try {
 // NULLs as distinct in unique indexes, so no partial WHERE is needed.
 db.run('DROP INDEX IF EXISTS idx_queue_url_key');
 db.run('CREATE UNIQUE INDEX IF NOT EXISTS idx_queue_url_key_full ON queue(url_key)');
+
+// D-20 clock seed (idempotent, every boot): existing application rows predate the
+// status_changed_at column — seed it from created_at wherever NULL so nothing
+// badges on day one and the 21-day ghost mark arrives honestly. Only ever fills
+// NULLs; never rewrites a status (D-19).
+db.run(`UPDATE applications SET status_changed_at = created_at WHERE status_changed_at IS NULL`);
+
+// D-18 link backfill (idempotent, every boot): queue rows inserted before the
+// queue<->application link existed carry a NULL application_id. Link each to the
+// NEWEST application whose normalizeUrl(url) matches the row's already-normalized
+// url_key (newest-wins mirrors D-03 latest-fill-wins). No match => skip. This writes
+// only queue.application_id — it never touches applications.status (D-19) — and
+// self-heals on every boot because it reads only NULL application_id rows (D-21).
+{
+  const unlinked = db.query('SELECT id, url_key FROM queue WHERE application_id IS NULL AND url_key IS NOT NULL').all() as {
+    id: number;
+    url_key: string;
+  }[];
+  const apps = db.query('SELECT id, url FROM applications ORDER BY created_at DESC, id DESC').all() as {
+    id: number;
+    url: string;
+  }[];
+  for (const row of unlinked) {
+    const appId = apps.find(a => normalizeUrl(a.url) === row.url_key)?.id ?? null;
+    if (appId !== null) updateQueueStatus(db, row.id, { application_id: appId });
+  }
+}
 
 // D-15 last-sweep summary store: a tiny key/value table, one JSON row.
 db.run('CREATE TABLE IF NOT EXISTS seek_meta (key TEXT PRIMARY KEY, value TEXT)');

@@ -309,6 +309,48 @@ async function toggleJd(id) {
   }
 }
 
+// D-07: the generated follow-up email surfaces in an inline expandable
+// read-back box, reusing toggleJd's structure verbatim — cache success/empty,
+// never cache the error branch so re-expand re-attempts (mirrors T-14-06).
+// The fetched email text is inserted via esc() before innerHTML — mitigates
+// stored-XSS from generated prose (T-15-06, mirrors T-14-05).
+const emailCache = new Map();
+
+async function toggleEmail(id) {
+  const slot = document.getElementById(`email-slot-${id}`);
+  const arrow = document.getElementById(`email-arrow-${id}`);
+  const expanded = slot.style.display !== 'none';
+  if (expanded) {
+    slot.style.display = 'none';
+    arrow.textContent = '▾';
+    return;
+  }
+  slot.style.display = 'block';
+  arrow.textContent = '▴';
+
+  if (emailCache.has(id)) {
+    slot.innerHTML = emailCache.get(id);
+    return;
+  }
+
+  slot.innerHTML = `<div class="muted">loading follow-up email…</div>`;
+  try {
+    const resp = await fetch(`/applications/${id}/email`);
+    if (!resp.ok) {
+      slot.innerHTML = `<div class="muted">couldn't load follow-up email — click to retry</div>`;
+      return;
+    }
+    const { email } = await resp.json();
+    const html = email && email.trim()
+      ? `<div class="jd-body">${esc(email)}</div>`
+      : `<div class="muted">no email generated</div>`;
+    emailCache.set(id, html);
+    slot.innerHTML = html;
+  } catch (e) {
+    slot.innerHTML = `<div class="muted">couldn't load follow-up email — click to retry</div>`;
+  }
+}
+
 function esc(s) {
   return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 }

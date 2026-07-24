@@ -189,7 +189,7 @@ test('upsertPosting re-run on a decided posting never clobbers decision/decision
 
 // --- D-10 precedence ---
 
-test('precedence: a trusted-date row survives a later untrusted re-upsert on the same url_key, but company/title still refresh', () => {
+test('precedence: a trusted-date row survives a later untrusted re-upsert on the same url_key; company travels with source, title still refreshes', () => {
   const db = makeDb();
   const url = 'https://boards.greenhouse.io/acme/jobs/1';
   upsertPosting(
@@ -210,7 +210,13 @@ test('precedence: a trusted-date row survives a later untrusted re-upsert on the
   expect(second.source).toBe('ashby');
   expect(second.posted_at).toBe('2026-07-01T00:00:00Z');
   expect(second.posted_at_trusted).toBe(true);
-  expect(second.company).toBe('Acme Renamed');
+  // company travels with source: for ATS sources it is the board TOKEN that
+  // fetchAshbyJD/fetchGreenhouseJD interpolate into the JD API path, not a
+  // display name. Letting the aggregator's human-readable name win here is
+  // what stranded 262 live greenhouse rows in held:jd-fetch-error.
+  expect(second.company).toBe('Acme');
+  // title/location are display+filter only, never interpolated into a URL,
+  // so they still take the newer value.
   expect(second.title).toBe('Renamed Title');
 });
 
@@ -236,6 +242,38 @@ test('precedence: a directly-polled greenhouse row keeps its source when an aggr
   upsertPosting(db, posting({ url, source: 'greenhouse', posted_at_trusted: false }));
   const second = upsertPosting(db, posting({ url, source: 'simplify', posted_at_trusted: false }))!;
   expect(second.source).toBe('greenhouse');
+});
+
+test('precedence: a greenhouse board TOKEN survives an aggregator re-discovery carrying a display name', () => {
+  // Reproduces the live defect. The test above could not catch it because both
+  // upserts used the same default company; the whole failure is that the two
+  // sources disagree about what `company` means. Greenhouse stores the board
+  // token (normalizeGreenhouseJob -> `company: token`); SimplifyJobs stores a
+  // human-readable name. fetchGreenhouseJD interpolates company into
+  // boards-api.greenhouse.io/v1/boards/<company>/jobs/<id>, so a clobbered
+  // value is a permanent 404 and a permanent held:jd-fetch-error.
+  const db = makeDb();
+  const url = 'https://boards.greenhouse.io/buyersedge/jobs/4';
+  upsertPosting(db, posting({ url, source: 'greenhouse', company: 'buyersedge', posted_at_trusted: false }));
+  const second = upsertPosting(
+    db,
+    posting({ url, source: 'simplify', company: 'Buyers Edge Platform', posted_at_trusted: false }),
+  )!;
+  expect(second.source).toBe('greenhouse');
+  expect(second.company).toBe('buyersedge');
+});
+
+test('precedence: an aggregator-owned row still accepts a company refresh from another aggregator', () => {
+  // The guard must not over-apply: when no directly-polled source owns the row,
+  // there is no board token to protect and the newer value should win.
+  const db = makeDb();
+  const url = 'https://jobs.smartrecruiters.com/acme/5';
+  upsertPosting(db, posting({ url, source: 'simplify', company: 'Acme Inc', posted_at_trusted: false }));
+  const second = upsertPosting(
+    db,
+    posting({ url, source: 'getro', company: 'Acme Incorporated', posted_at_trusted: false }),
+  )!;
+  expect(second.company).toBe('Acme Incorporated');
 });
 
 test('preserves: login_gated still only ratchets up and a prior decision still survives after the D-10 change', () => {

@@ -109,11 +109,26 @@ export function upsertPosting(db: Database, p: NormalizedPosting): PostingRow | 
        -- jobright) re-discovering a posting already attributed to a directly-
        -- polled board — a direct Greenhouse/Lever/Ashby poll keeps its own
        -- attribution rather than being relabeled as aggregator-sourced. One
-       -- identical predicate drives all three columns so provenance never
+       -- identical predicate drives all FOUR columns so provenance never
        -- splits across them.
+       --
+       -- company is in that set because it is NOT a display field for ATS
+       -- sources: normalizeGreenhouseJob/normalizeAshbyJob store the board
+       -- TOKEN there, and fetchGreenhouseJD/fetchAshbyJD interpolate it
+       -- straight into the JD API path. Letting an aggregator refresh it to a
+       -- human-readable name ("Buyers Edge Platform") produces
+       -- boards-api.greenhouse.io/v1/boards/Buyers%20Edge%20Platform/jobs/N,
+       -- a permanent 404 that strands the posting in held:jd-fetch-error.
+       -- That was live: 262 of 13,921 greenhouse rows had clobbered company
+       -- values before this fix. company must travel with source.
+       --
+       -- title/location deliberately still refresh — they are display and
+       -- filter inputs only, never interpolated into an outbound URL.
        ON CONFLICT(url_key) DO UPDATE SET
          fetched_at = datetime('now'),
-         company = excluded.company,
+         company = CASE WHEN (postings.posted_at_trusted = 1 AND excluded.posted_at_trusted = 0)
+                           OR (excluded.source IN ('simplify','getro','jobright') AND postings.source NOT IN ('simplify','getro','jobright'))
+                         THEN postings.company ELSE excluded.company END,
          title = excluded.title,
          location = excluded.location,
          source = CASE WHEN (postings.posted_at_trusted = 1 AND excluded.posted_at_trusted = 0)

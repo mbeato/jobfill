@@ -242,6 +242,18 @@ async function triggerGenerate(id, doctype) {
     const body = await resp.json();
     if (!resp.ok) {
       status.textContent = esc(body.error || `HTTP ${resp.status}`);
+    } else if (doctype === 'email') {
+      // CR-02: the read-back box's cache is keyed by id and never invalidated on
+      // its own — a successful regeneration must drop the stale cached draft (and
+      // collapse an already-open box) so the next toggleEmail() open re-fetches
+      // the fresh text instead of showing the previous generation.
+      emailCache.delete(id);
+      const slot = document.getElementById(`email-slot-${id}`);
+      const arrow = document.getElementById(`email-arrow-${id}`);
+      if (slot && slot.style.display !== 'none') {
+        slot.style.display = 'none';
+        if (arrow) arrow.textContent = '▾';
+      }
     }
   } catch (e) {
     status.textContent = `helper unreachable — ${esc(String(e?.message || e))}`;

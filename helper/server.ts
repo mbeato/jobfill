@@ -6,7 +6,7 @@ import { homedir } from 'node:os';
 import { normalizeQuestion, matchLibrary, selectFewShot, groupByQuestion, type AnswerRow } from './answers';
 import { createFailuresTable, insertFailures, listFailures, type FailureRecordInput } from './failures';
 import { createQueueTable, insertQueueEntry, updateQueueStatus, deleteQueueEntry, listQueue, InvalidQueueStatusError } from './queue';
-import { createApplicationsTable, insertApplication, updateApplicationStatus, deriveGhost, InvalidApplicationStatusError } from './applications';
+import { createApplicationsTable, insertApplication, updateApplicationStatus, deriveGhost, promoteUnsubmittedToApplied, InvalidApplicationStatusError } from './applications';
 import { mapViaCLI } from './mapping';
 import { normalizeUrl } from './seek/normalize';
 import { createPostingsTable, upsertPosting, listPostings, recordDecision, listPostingsToDecide } from './seek/postings';
@@ -661,7 +661,18 @@ Bun.serve({
       if (queuePatch && req.method === 'PATCH') {
         const b = await req.json();
         try {
-          return json(updateQueueStatus(db, Number(queuePatch[1]), b));
+          const row = updateQueueStatus(db, Number(queuePatch[1]), b);
+          // D-07: react to the human markSubmitted() click — when THIS patch actually
+          // persisted 'submitted' (gated on the RETURNED row, never b.status, so a
+          // WR-05-refused regression triggers nothing) and the row links an application,
+          // promote that application off its pre-submit status in the same round trip.
+          // The cascade constructs NO 'submitted' status (D-02) — markSubmitted() stays
+          // the sole producer; promoteUnsubmittedToApplied only ever writes 'applied'
+          // onto an already-'unsubmitted' row and is idempotent for a re-submitted row.
+          if (row && row.status === 'submitted' && row.application_id) {
+            promoteUnsubmittedToApplied(db, row.application_id);
+          }
+          return json(row);
         } catch (e) {
           if (e instanceof InvalidQueueStatusError) return json({ error: e.message }, 400);
           throw e;

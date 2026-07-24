@@ -186,3 +186,95 @@ test('upsertPosting re-run on a decided posting never clobbers decision/decision
   expect(reupserted.decided_at).toBe(decided.decided_at);
   expect(reupserted.company).toBe('Acme Renamed');
 });
+
+// --- D-10 precedence ---
+
+test('precedence: a trusted-date row survives a later untrusted re-upsert on the same url_key, but company/title still refresh', () => {
+  const db = makeDb();
+  const url = 'https://boards.greenhouse.io/acme/jobs/1';
+  upsertPosting(
+    db,
+    posting({ url, source: 'ashby', posted_at: '2026-07-01T00:00:00Z', posted_at_trusted: true }),
+  );
+  const second = upsertPosting(
+    db,
+    posting({
+      url,
+      source: 'simplify',
+      posted_at: '2026-07-24T00:00:00Z',
+      posted_at_trusted: false,
+      company: 'Acme Renamed',
+      title: 'Renamed Title',
+    }),
+  )!;
+  expect(second.source).toBe('ashby');
+  expect(second.posted_at).toBe('2026-07-01T00:00:00Z');
+  expect(second.posted_at_trusted).toBe(true);
+  expect(second.company).toBe('Acme Renamed');
+  expect(second.title).toBe('Renamed Title');
+});
+
+test('precedence: an untrusted row first, then a trusted row on the same url_key — the trusted row wins', () => {
+  const db = makeDb();
+  const url = 'https://boards.greenhouse.io/acme/jobs/2';
+  upsertPosting(
+    db,
+    posting({ url, source: 'simplify', posted_at: '2026-07-24T00:00:00Z', posted_at_trusted: false }),
+  );
+  const second = upsertPosting(
+    db,
+    posting({ url, source: 'ashby', posted_at: '2026-07-01T00:00:00Z', posted_at_trusted: true }),
+  )!;
+  expect(second.source).toBe('ashby');
+  expect(second.posted_at).toBe('2026-07-01T00:00:00Z');
+  expect(second.posted_at_trusted).toBe(true);
+});
+
+test('precedence: a directly-polled greenhouse row keeps its source when an aggregator re-discovers it', () => {
+  const db = makeDb();
+  const url = 'https://boards.greenhouse.io/acme/jobs/3';
+  upsertPosting(db, posting({ url, source: 'greenhouse', posted_at_trusted: false }));
+  const second = upsertPosting(db, posting({ url, source: 'simplify', posted_at_trusted: false }))!;
+  expect(second.source).toBe('greenhouse');
+});
+
+test('preserves: login_gated still only ratchets up and a prior decision still survives after the D-10 change', () => {
+  const db = makeDb();
+  const url = 'https://www.workatastartup.com/jobs/456';
+  const first = upsertPosting(db, posting({ url, source: 'yc', login_gated: true }))!;
+  const second = upsertPosting(db, posting({ url, source: 'hn', login_gated: false }))!;
+  expect(second.login_gated).toBe(true);
+
+  const decisionRow = upsertPosting(db, posting({ url: 'https://boards.greenhouse.io/acme/jobs/4' }))!;
+  const decided = recordDecision(db, decisionRow.id, 'rejected', 'rules:location')!;
+  const reupserted = upsertPosting(
+    db,
+    posting({ url: 'https://boards.greenhouse.io/acme/jobs/4', source: 'simplify', posted_at_trusted: false }),
+  )!;
+  expect(reupserted.decision).toBe('rejected');
+  expect(reupserted.decision_reason).toBe('rules:location');
+  expect(reupserted.decided_at).toBe(decided.decided_at);
+});
+
+test('the new sources still hit the existing write-boundary guards: scheme allowlist and MAX_TEXT truncation', () => {
+  const db = makeDb();
+  const rejected = upsertPosting(
+    db,
+    posting({ source: 'simplify', url: "javascript:alert(1)//'/job/'", posted_at_trusted: false }),
+  );
+  expect(rejected).toBeNull();
+  const rows = db.query('SELECT count(*) as c FROM postings').get() as { c: number };
+  expect(rows.c).toBe(0);
+
+  const longTitle = 'x'.repeat(5000);
+  const stored = upsertPosting(
+    db,
+    posting({
+      source: 'getro',
+      url: 'https://jobs.uncorkcapital.com/apply/1',
+      title: longTitle,
+      posted_at_trusted: false,
+    }),
+  )!;
+  expect(stored.title.length).toBe(2000);
+});

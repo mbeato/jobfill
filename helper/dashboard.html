@@ -982,7 +982,13 @@ function renderSweeps(rows) {
           const h = r.detail?.headline;
           // Stored detail is untrusted at this innerHTML sink — coerce to
           // numbers, never interpolate raw (mirrors the batch headline).
-          const headline = h ? `${Number(h.fetched) || 0} fetched · ${Number(h.rejected) || 0} rejected · ${Number(h.held) || 0} held · ${Number(h.queued) || 0} queued` : '—';
+          // tokenErrors / boardsAdded are phase-16 fields (D-03 per-token
+          // isolation, D-11/D-14 slug harvest). Appended only when non-zero so
+          // an ordinary sweep's summary stays as short as it was before.
+          const extra = h
+            ? `${Number(h.tokenErrors) ? ` · ${Number(h.tokenErrors)} token errors` : ''}${Number(h.boardsAdded) ? ` · ${Number(h.boardsAdded)} boards added` : ''}`
+            : '';
+          const headline = h ? `${Number(h.fetched) || 0} fetched · ${Number(h.rejected) || 0} rejected · ${Number(h.deduped) || 0} deduped · ${Number(h.held) || 0} held · ${Number(h.queued) || 0} queued${extra}` : '—';
           return `
             <tr>
               <td class="muted">${esc((r.started_at || '').replace('T', ' ').slice(0, 19))}</td>
@@ -1006,8 +1012,19 @@ function renderSweeps(rows) {
 // are third-party/network text and therefore untrusted — esc() every one,
 // mirroring the failures table's snapshot rendering.
 function renderSweepSourceDetail(detail) {
+  // Per-source tokenErrors/boardsAdded (phase 16). Same untrusted-detail rule
+  // as the headline: coerce counts to numbers, esc() any string that reaches
+  // this innerHTML sink. sampleTokenErrors carries attacker-influenceable
+  // upstream text, so each token is escaped individually.
   const fetchLines = (detail.fetch || [])
-    .map(s => `<div class="muted" style="padding-left:4px">${esc(s.source)}: ${s.fetched} fetched${s.upserted != null ? `, ${s.upserted} upserted` : ''}${s.error ? ` — error: ${esc(s.error)}` : ''}</div>`)
+    .map(s => {
+      const tokenErrors = Number(s.tokenErrors) || 0;
+      const boardsAdded = Number(s.boardsAdded) || 0;
+      const sample = tokenErrors && Array.isArray(s.sampleTokenErrors) && s.sampleTokenErrors.length
+        ? ` (${s.sampleTokenErrors.slice(0, 5).map(e => esc(String(e?.token ?? ''))).join(', ')})`
+        : '';
+      return `<div class="muted" style="padding-left:4px">${esc(s.source)}: ${Number(s.fetched) || 0} fetched${s.upserted != null ? `, ${Number(s.upserted) || 0} upserted` : ''}${tokenErrors ? `, ${tokenErrors} token errors${sample}` : ''}${boardsAdded ? `, ${boardsAdded} boards added` : ''}${s.error ? ` — error: ${esc(s.error)}` : ''}</div>`;
+    })
     .join('');
   const bc = detail.filter?.byCriterion || {};
   const criterionLine = `<div class="muted" style="padding-left:4px">rejected by criterion: location ${bc.location ?? 0} · title ${bc.title ?? 0} · yoe ${bc.yoe ?? 0} · stale ${bc.stale ?? 0} · llm ${bc.llm ?? 0}</div>`;

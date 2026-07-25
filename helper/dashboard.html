@@ -707,14 +707,38 @@
     <div class="filters" id="seekFilters"></div>
     <div id="seekBody"></div>
   </div>
-  <div id="applications" data-tab="applications">
-    <h2>applications</h2>
-    <div id="stats"></div>
-    <div class="filters" id="filters"></div>
-    <table>
-      <thead><tr><th>date</th><th>company</th><th>role</th><th>status</th><th>notes</th><th>links</th></tr></thead>
-      <tbody id="rows"></tbody>
-    </table>
+  <div id="applications" data-tab="applications" class="jf-scope">
+    <div class="jf-toolbar">
+      <div class="jf-count">
+        <span class="jf-count-n" id="aCountN">0</span>
+        <span class="jf-count-t">
+          <h2>applications</h2>
+          <p id="aCountSub"></p>
+        </span>
+      </div>
+      <div class="jf-chips" role="group" aria-label="status filter" id="aChips"></div>
+    </div>
+    <div class="jf-gridwrap jf-gridwrap--tall">
+      <table class="jf-grid" id="aGrid">
+        <caption class="jf-sr">applications: every posting submitted or awaiting submit</caption>
+        <colgroup>
+          <col style="width:var(--jf-gutter-w)"><col style="width:6.5rem"><col style="width:11rem"><col>
+          <col style="width:var(--jf-col-decision)"><col style="width:16rem"><col style="width:13rem">
+        </colgroup>
+        <thead>
+          <tr>
+            <th scope="col" class="jf-gut">#</th>
+            <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-date"/></svg>date</span></th>
+            <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-text"/></svg>company</span></th>
+            <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-text"/></svg>role</span></th>
+            <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-enum"/></svg>status · criterion</span></th>
+            <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-text"/></svg>notes</span></th>
+            <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-link"/></svg>links</span></th>
+          </tr>
+        </thead>
+        <tbody id="aBody"></tbody>
+      </table>
+    </div>
   </div>
   <div id="library" data-tab="library">
     <h2>answer library</h2>
@@ -744,71 +768,117 @@ async function load() {
   render();
 }
 
+// D-15: 'ghosted' is a synthetic chip filtering the server-derived a.ghosted flag,
+// not a status equality match — trust the server field, never recompute the rule
+// here. Defaults to the live `apps` global for JF_STATUS.applications' out-of-
+// render-cycle reads; render() always passes its own snapshot of `apps` through.
+function visibleAppRows(rows = apps) {
+  return filter === 'all' ? rows
+    : filter === 'ghosted' ? rows.filter(a => a.ghosted)
+    : rows.filter(a => a.status === filter);
+}
+
+// The signature move's criterion string — derived ONLY from data already on the
+// row, never invented. An unrecognized stored status renders no criterion at all
+// rather than echo an unknown token as a fact.
+function appCriterion(status) {
+  if (!STATUSES.includes(status)) return null;
+  if (status === 'unsubmitted') return 'fill:awaiting your submit';
+  if (status === 'rejected') return 'you:rejected';
+  return `you:${status}`;
+}
+
+// D-04: render every row. No slice, no cap, no pagination, no virtualisation.
+function renderAppRows(rows) {
+  return rows.map((a, i) => {
+    const crit = appCriterion(a.status);
+    const main = `
+      <tr class="jf-row${a.status === 'rejected' ? ' jf-row--done' : ''}${a.ghosted ? ' jf-row--attn' : ''}">
+        <td class="jf-gut">${i + 1}</td>
+        <td title="${esc((a.created_at || '').slice(0, 10))}">${esc((a.created_at || '').slice(0, 10))}</td>
+        <td title="${esc(a.company)}"><strong>${esc(a.company)}</strong></td>
+        <td title="${esc(a.role)}">${esc(a.role)}</td>
+        <td class="jf-decision-cell">
+          <span class="jf-selectwrap">
+            <label class="jf-sr" for="astatus-${a.id}">status for ${esc(a.company)}</label>
+            <select class="jf-select" id="astatus-${a.id}" onchange="patch(${a.id}, {status: this.value})">
+              ${STATUSES.map(s => `<option value="${s}" ${s === a.status ? 'selected' : ''}>${esc(label(s))}</option>`).join('')}
+            </select><svg aria-hidden="true"><use href="#i-down"/></svg>
+          </span>
+          ${crit ? `<span class="jf-sub" title="${esc(crit)}">${esc(crit)}</span>` : ''}
+          ${a.ghosted ? `<span class="jf-sub"><span class="jf-tag jf-tag--attn">ghosted · ${Number(a.days_silent)}d</span></span>` : ''}
+        </td>
+        <td>
+          <label class="jf-sr" for="anote-${a.id}">notes for ${esc(a.company)}</label>
+          <input class="jf-inline" id="anote-${a.id}" value="${esc(a.notes)}" placeholder="notes…"
+            onchange="patch(${a.id}, {notes: this.value})">
+        </td>
+        <td>
+          ${a.url ? `<a href="${esc(a.url)}" target="_blank">posting</a>` : ''}
+          ${a.resume_path ? `<span class="jf-sub" title="${esc(a.resume_path)}">resume: …/${esc(a.resume_path.split('/').slice(-2).join('/'))}</span>` : ''}
+          ${tailorStateLine(a.tailor_state, a.tailor_message)}
+          ${a.summary ? `
+            <span class="jf-sub"><button class="jf-disc" type="button" aria-expanded="false" aria-controls="summary-${a.id}"><svg aria-hidden="true"><use href="#i-chev"/></svg>resume changes</button></span>
+            <div id="summary-${a.id}" hidden>${a.summary.map(line => `<span class="jf-sub">${esc(line)}</span>`).join('')}</div>
+          ` : ''}
+          <span class="jf-sub"><button class="jf-disc" type="button" data-jf-doc="jd" data-jf-id="${a.id}" aria-expanded="false" aria-controls="jd-${a.id}"><svg aria-hidden="true"><use href="#i-chev"/></svg>job description</button></span>
+          <span class="jf-selectwrap">
+            <label class="jf-sr" for="gen-select-${a.id}">generate a document for ${esc(a.company)}</label>
+            <select class="jf-select" id="gen-select-${a.id}" onchange="if(this.value) triggerGenerate(${a.id}, this.value)">
+              <option value="">generate ▾</option>
+              <option value="cover-letter" ${a.tailor_state !== 'ran' ? 'disabled' : ''}>cover letter</option>
+              <option value="email">follow-up email</option>
+              <option value="brief">interview-prep brief</option>
+            </select><svg aria-hidden="true"><use href="#i-down"/></svg>
+          </span>
+          <div id="gen-status-${a.id}"></div>
+          ${a.cover_letter_path ? `<span class="jf-sub">cover letter: <a href="/applications/${a.id}/doc/cover-letter" target="_blank">open PDF</a></span>` : ''}
+          ${a.brief_path ? `<span class="jf-sub">interview-prep brief: <a href="/applications/${a.id}/doc/brief" target="_blank">open PDF</a></span>` : ''}
+          ${a.email_path ? `<span class="jf-sub"><button class="jf-disc" type="button" id="email-disc-${a.id}" data-jf-doc="email" data-jf-id="${a.id}" aria-expanded="false" aria-controls="email-${a.id}"><svg aria-hidden="true"><use href="#i-chev"/></svg>follow-up email</button></span>` : ''}
+        </td>
+      </tr>`;
+    const jdDetail = `
+      <tr class="jf-detailrow" id="jd-${a.id}" hidden><td colspan="7"><div class="jf-panel">
+        <p class="jf-panel-h">job description · ${esc(a.company)}</p>
+        <div id="jd-panel-${a.id}"><p class="jf-dim">expand to load</p></div>
+      </div></td></tr>`;
+    const emailDetail = a.email_path ? `
+      <tr class="jf-detailrow" id="email-${a.id}" hidden><td colspan="7"><div class="jf-panel">
+        <p class="jf-panel-h">follow-up email · ${esc(a.company)}</p>
+        <div id="email-panel-${a.id}"><p class="jf-dim">expand to load</p></div>
+      </div></td></tr>` : '';
+    return main + jdDetail + emailDetail;
+  }).join('');
+}
+
 function render() {
-  // D-15: 'ghosted' is a synthetic chip filtering the server-derived a.ghosted flag,
-  // not a status equality match — trust the server field, never recompute the rule here.
-  const shown = filter === 'all' ? apps
-    : filter === 'ghosted' ? apps.filter(a => a.ghosted)
-    : apps.filter(a => a.status === filter);
   const spend = apps.reduce((s, a) => s + (a.cost_usd || 0), 0);
   // D-09: a filled-but-unsubmitted row is work-in-progress, not in flight — exclude it
   // (alongside 'rejected') from the headline active count.
   const active = apps.filter(a => !['rejected', 'unsubmitted'].includes(a.status)).length;
-  document.getElementById('stats').textContent =
-    `${apps.length} applications · ${active} active · $${spend.toFixed(2)} api spend`;
+  const ghostedCount = apps.filter(a => a.ghosted).length;
+  document.getElementById('aCountN').textContent = String(apps.length);
+  document.getElementById('aCountSub').textContent =
+    `tracked · ${active} active · ${ghostedCount} ghosted · $${spend.toFixed(2)} api spend`;
 
   // Synthetic 'ghosted' chip mixed with the status keys (mirrors QUEUE_CHIPS' 'all').
-  document.getElementById('filters').innerHTML = ['all', ...STATUSES, 'ghosted']
+  document.getElementById('aChips').innerHTML = ['all', ...STATUSES, 'ghosted']
     .map(s => {
-      const count = s === 'all' ? null
-        : s === 'ghosted' ? apps.filter(a => a.ghosted).length
+      const n = s === 'all' ? apps.length
+        : s === 'ghosted' ? ghostedCount
         : apps.filter(a => a.status === s).length;
-      return `<button class="${filter === s ? 'active' : ''}" onclick="filter='${s}';render()">${label(s)}${count === null ? '' : ` (${count})`}</button>`;
+      return `<button class="jf-chip" type="button" aria-pressed="${filter === s}" data-afilter="${s}">${esc(label(s))}<span class="n">${n}</span></button>`;
     })
     .join('');
 
-  document.getElementById('rows').innerHTML = shown.map(a => `
-    <tr>
-      <td class="muted">${(a.created_at || '').slice(0, 10)}</td>
-      <td><strong>${esc(a.company)}</strong></td>
-      <td>${esc(a.role)}</td>
-      <td><select class="s-${a.status}" onchange="patch(${a.id}, {status: this.value})">
-        ${STATUSES.map(s => `<option value="${s}" ${s === a.status ? 'selected' : ''}>${label(s)}</option>`).join('')}
-      </select>
-      ${a.ghosted ? `<div class="ghost-badge">ghosted · ${Number(a.days_silent)}d</div>` : ''}
-      </td>
-      <td><input class="notes" value="${esc(a.notes)}" placeholder="notes…"
-        onchange="patch(${a.id}, {notes: this.value})"></td>
-      <td>
-        ${a.url ? `<a href="${esc(a.url)}" target="_blank">posting</a>` : ''}
-        ${a.resume_path ? `<div class="muted" title="${esc(a.resume_path)}">resume: …/${esc(a.resume_path.split('/').slice(-2).join('/'))}</div>` : ''}
-        ${tailorStateLine(a.tailor_state, a.tailor_message)}
-        ${a.summary ? `
-          <div class="muted summary-toggle" onclick="toggleSummary(${a.id})">resume changes <span id="arrow-${a.id}">▾</span></div>
-          <div class="summary-body" id="summary-${a.id}" style="display:none">
-            ${a.summary.map(line => `<div class="muted" style="padding-left:4px">${esc(line)}</div>`).join('')}
-          </div>
-        ` : ''}
-        <div class="muted jd-toggle" onclick="toggleJd(${a.id})">job description <span id="jd-arrow-${a.id}">▾</span></div>
-        <div class="jd-slot" id="jd-slot-${a.id}" style="display:none"></div>
-        <div class="gen-menu">
-          <select id="gen-select-${a.id}" onchange="if(this.value) triggerGenerate(${a.id}, this.value)">
-            <option value="">generate ▾</option>
-            <option value="cover-letter" ${a.tailor_state !== 'ran' ? 'disabled' : ''}>cover letter</option>
-            <option value="email">follow-up email</option>
-            <option value="brief">interview-prep brief</option>
-          </select>
-        </div>
-        <div class="muted" id="gen-status-${a.id}"></div>
-        ${a.cover_letter_path ? `<div class="muted">cover letter: <a href="/applications/${a.id}/doc/cover-letter" target="_blank">open PDF</a></div>` : ''}
-        ${a.brief_path ? `<div class="muted">interview-prep brief: <a href="/applications/${a.id}/doc/brief" target="_blank">open PDF</a></div>` : ''}
-        ${a.email_path ? `
-          <div class="muted jd-toggle" onclick="toggleEmail(${a.id})">follow-up email <span id="email-arrow-${a.id}">▾</span></div>
-          <div class="jd-slot" id="email-slot-${a.id}" style="display:none"></div>
-        ` : ''}
-      </td>
-    </tr>`).join('');
+  document.getElementById('aBody').innerHTML = renderAppRows(visibleAppRows(apps));
 }
+document.getElementById('aChips').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-afilter]');
+  if (!btn) return;
+  filter = btn.dataset.afilter;
+  render();
+});
 
 // D-05: the generate menu blocks on the request — the control is disabled and
 // shows "generating…" before the fetch, reset in a finally so the row is never
@@ -957,9 +1027,14 @@ function esc(s) {
 // OBS-01: always-visible tailor-state line — unlike the resume-changes toggle above
 // (gated on a.summary truthiness), this renders for every fill regardless of summary.
 function tailorStateLine(tailorState, tailorMessage) {
-  if (tailorState === 'ran') return `<div class="muted">tailored resume attached</div>`;
-  if (tailorState === 'skipped') return `<div class="muted">static resume — ${esc(tailorMessage)}</div>`;
-  if (tailorState === 'error') return `<div style="color:#e65100">tailor failed — ${esc(tailorMessage)} · static resume used</div>`;
+  if (tailorState === 'ran') return `<span class="jf-sub">tailored resume attached</span>`;
+  if (tailorState === 'skipped') return `<span class="jf-sub">static resume — ${esc(tailorMessage)}</span>`;
+  // Deviation (Rule 1): the pre-port version signaled a tailor failure with a raw
+  // inline hex (#e65100), bypassing the design system's tokens and its "no red
+  // anywhere" rule. This is the ONE other visible-failure state on this surface
+  // (alongside the queue's analogous fill-error line, which is also a plain
+  // .jf-sub line, not a full amber .jf-notice banner) -- matched to that precedent.
+  if (tailorState === 'error') return `<span class="jf-sub">tailor failed — ${esc(tailorMessage)} · static resume used</span>`;
   return '';
 }
 
@@ -2817,6 +2892,17 @@ JF_STATUS.queue = () => ({
   filterLabel: 'filter',
   filter: queueFilter,
   sort: 'sorted by <b>actionability</b>',
+});
+
+// Plan 05: applications' status-bar fact for plan 09's syncStatusBar (inert until
+// then) -- lives here, not in the applications section, for the same JF_STATUS-
+// must-exist-first reason as plan 02's/04's registrations above.
+JF_STATUS.applications = () => ({
+  n: visibleAppRows().length,
+  unit: 'rows',
+  filterLabel: 'filter',
+  filter,
+  sort: 'sorted by <b>most recent</b>',
 });
 </script>
 </body>

@@ -208,3 +208,106 @@ export function validateCriteria(x: unknown): { ok: true; criteria: Criteria } |
   // Stored document is always the normalized, trimmed shape.
   return { ok: true, criteria: toCriteria(x) };
 }
+
+// Load-bearing line of CFG-04 (D-05): after this call, no character in `s`
+// retains regex metacharacter meaning, so every pattern compiled below is a
+// fixed alternation of escaped literals — linear, and unable to run away on
+// adversarial input. This is why the phase needs no scoring of pattern
+// danger, no cap on how long a match may run, and no scan for risky nested-
+// repeat shapes: if any of those ever appear, this escape has been bypassed
+// somewhere, and that is the bug to find.
+export function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// terms -> a single compiled alternation, or null when the rule is OFF
+// (D-06 — an empty/all-blank list never compiles to a "match nothing"
+// regex). Both modes compile case-insensitive with NO `g` flag: a `g` regex
+// carries lastIndex state across .test() calls, which would make the
+// classifier non-deterministic.
+export function compileTerms(terms: string[], mode: 'word' | 'whole'): RegExp | null {
+  const clean = terms.map((t) => t.trim()).filter((t) => t.length > 0);
+  if (clean.length === 0) return null;
+  // The escape makes construction unreachable-to-throw in practice; the
+  // try/catch guarantees that even an unreachable failure degrades to
+  // rule-off rather than to a thrown sweep.
+  try {
+    const pattern =
+      mode === 'whole'
+        ? // Whole-string semantics, reproducing WORK_MODE_ONLY_RE.
+          `^(?:${clean.map(escapeRegExp).join('|')})$`
+        : // Word mode: the \b on each side is conditional on whether the
+          // ORIGINAL (pre-escape) first/last character is a word character.
+          // A fixed \b(...)\b would break a term like "u.s.": \b after a "."
+          // demands a following word character, so "Remote, U.S." would
+          // stop matching. Anchoring only where the boundary is actually a
+          // word/non-word transition reproduces filter.ts's existing
+          // asymmetric regexes (US_GENERIC_RE's `\bu\.s\.` has no trailing
+          // \b) exactly.
+          `(?:${clean
+            .map((t) => {
+              const lead = /\w/.test(t[0]) ? '\\b' : '';
+              const trail = /\w/.test(t[t.length - 1]) ? '\\b' : '';
+              return `${lead}${escapeRegExp(t)}${trail}`;
+            })
+            .join('|')})`;
+    return new RegExp(pattern, 'i');
+  } catch {
+    return null;
+  }
+}
+
+// Called once per sweep (D-05), never per posting.
+export function compileCriteria(c: Criteria): CompiledCriteria {
+  return {
+    seniorityRe: compileTerms(c.seniorityTerms, 'word'),
+    nonEngineeringRe: compileTerms(c.nonEngineeringTerms, 'word'),
+    locationRe: compileTerms(c.locationTerms, 'word'),
+    workModeOnlyRe: compileTerms(c.workModeOnlyTerms, 'whole'),
+    staffLeadBuiltins: c.staffLeadBuiltins,
+    maxStaleDays: c.maxStaleDays,
+    maxStaleDaysIndexed: c.maxStaleDaysIndexed,
+    maxFirstSeenDays: c.maxFirstSeenDays,
+    yoeThreshold: c.yoeThreshold,
+  };
+}
+
+// Fresh-read, no caching — mirrors loadSeekConfig/loadProfileSummary.
+// Snapshot-per-sweep semantics: a save that lands mid-sweep takes effect on
+// the NEXT call (the next sweep), not the one in flight. A missing row
+// (fresh install, no seed yet) or any parse failure both fall back to
+// defaultCriteria() — this never throws onto the sweep hot path.
+export function readCriteria(db: Database): Criteria {
+  try {
+    const raw = readSeekMeta(db, CRITERIA_KEY);
+    if (raw === null) return defaultCriteria();
+    return toCriteria(JSON.parse(raw));
+  } catch {
+    return defaultCriteria();
+  }
+}
+
+// The single function plan 05 injects into DecideDeps.
+export function loadCriteria(db: Database): CompiledCriteria {
+  return compileCriteria(readCriteria(db));
+}
+
+// Callers pass the normalized object out of validateCriteria — never a raw
+// request body — so what lands in seek_meta is always the trimmed,
+// bounds-clamped shape.
+export function saveCriteria(db: Database, c: Criteria): void {
+  writeSeekMeta(db, CRITERIA_KEY, JSON.stringify(c));
+}
+
+// Stored as raw text, not JSON-wrapped.
+export function readRelevanceProfile(db: Database): string | null {
+  try {
+    return readSeekMeta(db, RELEVANCE_PROFILE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function saveRelevanceProfile(db: Database, text: string): void {
+  writeSeekMeta(db, RELEVANCE_PROFILE_KEY, text.slice(0, MAX_PROFILE_CHARS));
+}

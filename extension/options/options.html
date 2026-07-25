@@ -17,8 +17,9 @@
   <div id="keyState" class="muted"></div>
 
   <label for="profile">Profile JSON</label>
-  <textarea id="profile" spellcheck="false" placeholder='{"contact": {…}, "work": […], …}'></textarea>
+  <textarea id="profile" spellcheck="false" placeholder='{"contact": {…}, "work": […], …}' readonly></textarea>
   <div id="profileState" class="muted"></div>
+  <div class="muted">this field is read-only — edit your profile in the dashboard's <a href="http://127.0.0.1:7877/#settings" target="_blank">settings tab</a>. changes made only here are discarded the next time the runner starts.</div>
 
   <label for="resume">Resume PDF</label>
   <input type="file" id="resume" accept="application/pdf">

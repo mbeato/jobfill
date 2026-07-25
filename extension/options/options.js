@@ -12,7 +12,7 @@ async function init() {
   }
   if (profile) {
     $('profile').value = JSON.stringify(profile, null, 2);
-    $('profileState').textContent = 'profile saved';
+    $('profileState').textContent = 'profile saved (read-only — edit in the dashboard)';
   }
   if (resume) $('resumeState').textContent = `saved: ${resume.name} (${Math.round(resume.b64.length * 0.75 / 1024)} KB)`;
 }
@@ -38,19 +38,6 @@ $('save').addEventListener('click', async () => {
 
   const key = $('key').value.trim();
   if (key) patch.apiKey = key;
-
-  const profileText = $('profile').value.trim();
-  if (profileText) {
-    try {
-      patch.profile = JSON.parse(profileText);
-      $('profileState').textContent = 'profile valid';
-      $('profileState').className = 'ok';
-    } catch (e) {
-      $('profileState').textContent = `invalid JSON: ${e.message}`;
-      $('profileState').className = 'err';
-      return;
-    }
-  }
 
   if (pendingResume) patch.resume = pendingResume;
   patch.tailorEnabled = $('tailor').checked;

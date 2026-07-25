@@ -6,6 +6,7 @@ import { promotePosting } from './promote';
 import { runFilterPromote, LLM_CAP, type DecideDeps } from './decide';
 import { createBoardsTable, upsertBoard } from './boards';
 import { classifyBoardGrace } from './filter';
+import { compileCriteria, defaultCriteria } from './criteria';
 import type { NormalizedPosting } from './types';
 
 function makeDb(): Database {
@@ -42,6 +43,7 @@ function posting(overrides: Partial<NormalizedPosting> = {}): NormalizedPosting 
 // scoreRelevance/loadProfileSummary so no network/CLI ever runs.
 function baseDeps(overrides: Partial<DecideDeps> = {}): DecideDeps {
   return {
+    loadCriteria: () => compileCriteria(defaultCriteria()),
     classifyMetadata: () => ({ reject: false }),
     classifyBoardGrace: () => ({ reject: false }),
     classifyYoe: () => ({ reject: false }),
@@ -598,4 +600,47 @@ test('a JD-fetchable source keeps held-for-retry semantics: a transient greenhou
   };
   expect(stored.decision).toBe('held');
   expect(stored.decision_reason).toBe('held:jd-fetch-error');
+});
+
+// --- Plan 18-05: criteria loaded once per sweep, injected everywhere -------
+
+test('loadCriteria is called exactly once per runFilterPromote call regardless of posting count (T-18-05-01, no per-posting compile)', async () => {
+  const db = makeDb();
+  upsertPosting(db, posting({ url: 'https://boards.greenhouse.io/acme/jobs/1' }))!;
+  upsertPosting(db, posting({ url: 'https://boards.greenhouse.io/acme/jobs/2' }))!;
+  upsertPosting(db, posting({ url: 'https://boards.greenhouse.io/acme/jobs/3' }))!;
+
+  let loadCriteriaCalls = 0;
+  const deps = baseDeps({
+    loadCriteria: () => {
+      loadCriteriaCalls++;
+      return compileCriteria(defaultCriteria());
+    },
+  });
+
+  await runFilterPromote(db, deps);
+
+  expect(loadCriteriaCalls).toBe(1);
+});
+
+test('every classifyMetadata call receives the exact same compiled criteria object loadCriteria returned (proves the compile is not repeated per posting)', async () => {
+  const db = makeDb();
+  upsertPosting(db, posting({ url: 'https://boards.greenhouse.io/acme/jobs/1' }))!;
+  upsertPosting(db, posting({ url: 'https://boards.greenhouse.io/acme/jobs/2' }))!;
+  upsertPosting(db, posting({ url: 'https://boards.greenhouse.io/acme/jobs/3' }))!;
+
+  const sentinel = compileCriteria(defaultCriteria());
+  const seenCriteria: unknown[] = [];
+  const deps = baseDeps({
+    loadCriteria: () => sentinel,
+    classifyMetadata: (_p, criteria) => {
+      seenCriteria.push(criteria);
+      return { reject: false };
+    },
+  });
+
+  await runFilterPromote(db, deps);
+
+  expect(seenCriteria.length).toBe(3);
+  expect(seenCriteria.every((c) => c === sentinel)).toBe(true);
 });

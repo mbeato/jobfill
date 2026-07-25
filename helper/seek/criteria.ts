@@ -424,3 +424,46 @@ export function readRelevanceProfile(db: Database): string | null {
 export function saveRelevanceProfile(db: Database, text: string): void {
   writeSeekMeta(db, RELEVANCE_PROFILE_KEY, text.slice(0, MAX_PROFILE_CHARS));
 }
+
+// D-13: its own module-local constant with its own version suffix — distinct
+// from sweep.ts's Phase 17 board-backfill gate key. A shared key would make
+// one migration silently skip the other.
+export const CRITERIA_SEED_KEY = 'criteria_seed_v1';
+
+// One-time D-13 seed migration. Two call sites wire this in: runSweep's
+// prologue (covers every sweep path) and helper startup (covers the window
+// between a deploy and the first sweep, during which the settings tab is
+// already reachable and a user could save). Both are gated on the same key,
+// so calling twice is a no-op.
+//
+// Returns whether THIS call seeded, so tests and callers can observe it.
+//
+// Deliberately no try/catch here (unlike readCriteria/readRelevanceProfile
+// above): the callers own the degrade-silently posture (mirroring how
+// runSweep's prologue wraps the board backfill), and swallowing here would
+// make the "gate key written only on success" contract below unobservable —
+// a caller-side catch needs the throw to propagate before the gate key is
+// written, or the retry-on-failure guarantee silently breaks.
+export function seedCriteriaOnce(db: Database): boolean {
+  // The gate has already fired; the ordinary read path (readCriteria) owns
+  // the values from here on.
+  if (readSeekMeta(db, CRITERIA_SEED_KEY) !== null) return false;
+
+  // Absent-only per-key check — a SECOND guard on top of the gate above. If a
+  // user somehow saved settings before the gate fired, the seed must not
+  // clobber their save.
+  if (readSeekMeta(db, CRITERIA_KEY) === null) {
+    saveCriteria(db, SEED_CRITERIA);
+  }
+  if (readSeekMeta(db, RELEVANCE_PROFILE_KEY) === null) {
+    saveRelevanceProfile(db, SEED_RELEVANCE_PROFILE);
+  }
+
+  // Written LAST, only after both writes above succeed. If either throws,
+  // this line never runs, so the gate key is never written and the next
+  // sweep retries instead of burning the one-time window and silently
+  // falling through to the D-14 generic defaults — which on the live install
+  // would mean running a stranger's criteria against the operator's backlog.
+  writeSeekMeta(db, CRITERIA_SEED_KEY, new Date().toISOString());
+  return true;
+}

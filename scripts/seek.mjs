@@ -22,7 +22,7 @@ function printFilterCounts(counts) {
     `  rulesRejected ${counts.rulesRejected}, llmRejected ${counts.llmRejected}, queued ${counts.queued}, held ${counts.held}, deduped ${counts.deduped}, unscored ${counts.unscored}`,
   );
   console.log(
-    `  byCriterion: title ${counts.byCriterion.title}, location ${counts.byCriterion.location}, stale ${counts.byCriterion.stale}, yoe ${counts.byCriterion.yoe}, llm ${counts.byCriterion.llm}`,
+    `  byCriterion: title ${counts.byCriterion.title}, location ${counts.byCriterion.location}, stale ${counts.byCriterion.stale}, yoe ${counts.byCriterion.yoe}, llm ${counts.byCriterion.llm}, grace ${counts.byCriterion.grace}`,
   );
 }
 

@@ -790,6 +790,7 @@ function reasonLabel(code) {
   if (code === 'rules:title') return 'rejected — title outside target roles';
   if (code === 'rules:yoe') return 'rejected — requires more experience than target (incl. seniority-marker titles)';
   if (code === 'rules:stale') return 'rejected — posted more than 2 days ago';
+  if (code === 'rules:board-grace') return 'rejected — new board, first poll skipped to avoid queueing its backlog';
   if (code.startsWith('llm:not-relevant')) {
     return `not relevant — ${esc(code.replace(/^llm:not-relevant\s*—\s*/, ''))}`;
   }
@@ -825,7 +826,7 @@ function renderSeekStats(ls) {
   const bc = ls.byCriterion || {};
   const toggleTitle = seekBreakdownExpanded ? 'hide rejection breakdown' : 'show rejection breakdown';
   const breakdown = seekBreakdownExpanded
-    ? ` (location ${bc.location ?? 0} · title ${bc.title ?? 0} · yoe ${bc.yoe ?? 0} · stale ${bc.stale ?? 0} · llm ${bc.llm ?? 0} · duplicate ${ls.deduped ?? 0})`
+    ? ` (location ${bc.location ?? 0} · title ${bc.title ?? 0} · yoe ${bc.yoe ?? 0} · stale ${bc.stale ?? 0} · grace ${bc.grace ?? 0} · llm ${bc.llm ?? 0} · duplicate ${ls.deduped ?? 0})`
     : '';
   el.innerHTML = `<div>${summary}
     <span class="decision-toggle" title="${toggleTitle}" onclick="toggleSeekBreakdown()">${seekBreakdownExpanded ? '▴' : '▾'}</span><span class="muted">${breakdown}</span>
@@ -1027,7 +1028,7 @@ function renderSweepSourceDetail(detail) {
     })
     .join('');
   const bc = detail.filter?.byCriterion || {};
-  const criterionLine = `<div class="muted" style="padding-left:4px">rejected by criterion: location ${bc.location ?? 0} · title ${bc.title ?? 0} · yoe ${bc.yoe ?? 0} · stale ${bc.stale ?? 0} · llm ${bc.llm ?? 0}</div>`;
+  const criterionLine = `<div class="muted" style="padding-left:4px">rejected by criterion: location ${bc.location ?? 0} · title ${bc.title ?? 0} · yoe ${bc.yoe ?? 0} · stale ${bc.stale ?? 0} · grace ${bc.grace ?? 0} · llm ${bc.llm ?? 0}</div>`;
   const sidecarLine = detail.sidecar
     ? `<div class="muted" style="padding-left:4px">sidecar: ${detail.sidecar.ran ? 'ran' : 'did not run'}${detail.sidecar.error ? ` — error: ${esc(detail.sidecar.error)}` : ''}</div>`
     : '';

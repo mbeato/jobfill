@@ -1,7 +1,7 @@
 import { test, expect } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { createPostingsTable, upsertPosting, listPostings } from './postings';
-import { createBoardsTable, upsertBoard, recordBoardResult, resolveEffectiveTokens } from './boards';
+import { createBoardsTable, upsertBoard, recordBoardResult, resolveEffectiveTokens, SEED_BACKFILL_FIRST_SEEN } from './boards';
 import { createSeekMetaTable, readSeekMeta, writeSeekMeta } from './meta';
 import { runSweep } from './sweep';
 import type { NormalizedPosting, SeekConfig } from './types';
@@ -436,4 +436,171 @@ test('a throwing harvest leaves ycdir_last_run unchanged and pushes an error res
   expect(bySource.ycdir.error).toBe('ycdir probe down');
   expect(bySource.hn.fetched).toBe(1);
   expect(listPostings(db)).toHaveLength(1);
+});
+
+// --- D-05/D-06/D-10 seed sync prologue: one-time backdated backfill, then
+// the per-sweep idempotent config->boards sync ---
+
+test('a fresh sweep gives every config token a seed boards row backdated to the sentinel, and sets the one-time flag', async () => {
+  const db = makeDb();
+  const config = baseConfig({
+    greenhouse: { enabled: true, tokens: ['acme'] },
+    lever: { enabled: true, tokens: ['acme'] },
+    ashby: { enabled: true, tokens: ['acme'] },
+    hn: { enabled: false },
+  });
+  await runSweep(db, config, baseDeps());
+
+  const boards = db.query('SELECT ats, token, first_seen_at, source_of_discovery FROM boards').all() as {
+    ats: string;
+    token: string;
+    first_seen_at: string;
+    source_of_discovery: string;
+  }[];
+  expect(boards).toHaveLength(3);
+  for (const b of boards) {
+    expect(b.first_seen_at).toBe(SEED_BACKFILL_FIRST_SEEN);
+    expect(b.source_of_discovery).toBe('seed');
+  }
+  expect(readSeekMeta(db, 'seed_backfill_v1')).not.toBeNull();
+});
+
+test('a second runSweep on the same DB does not re-run the backfill and leaves first_seen_at at the sentinel (D-10 one-time gate)', async () => {
+  const db = makeDb();
+  const config = baseConfig({
+    greenhouse: { enabled: true, tokens: ['acme'] },
+    lever: { enabled: true, tokens: ['acme'] },
+    ashby: { enabled: true, tokens: ['acme'] },
+    hn: { enabled: false },
+  });
+  await runSweep(db, config, baseDeps());
+  await runSweep(db, config, baseDeps());
+
+  const boards = db.query('SELECT first_seen_at FROM boards').all() as { first_seen_at: string }[];
+  expect(boards).toHaveLength(3);
+  for (const b of boards) {
+    expect(b.first_seen_at).toBe(SEED_BACKFILL_FIRST_SEEN);
+  }
+});
+
+test('a token added to the config after the flag is set enters grace with first_seen_at = now(), not the sentinel (D-06)', async () => {
+  const db = makeDb();
+  const config1 = baseConfig({
+    greenhouse: { enabled: true, tokens: ['acme'] },
+    lever: { enabled: false, tokens: [] },
+    ashby: { enabled: false, tokens: [] },
+    hn: { enabled: false },
+  });
+  await runSweep(db, config1, baseDeps());
+
+  const config2 = baseConfig({
+    greenhouse: { enabled: true, tokens: ['acme', 'beta'] },
+    lever: { enabled: false, tokens: [] },
+    ashby: { enabled: false, tokens: [] },
+    hn: { enabled: false },
+  });
+  await runSweep(db, config2, baseDeps());
+
+  const beta = db.query('SELECT first_seen_at FROM boards WHERE token = ?').get('beta') as { first_seen_at: string };
+  expect(beta.first_seen_at).not.toBe(SEED_BACKFILL_FIRST_SEEN);
+});
+
+test('a pre-existing simplify-discovered row is repaired to the sentinel on the first backfill, keeping its source_of_discovery (D-10 repair proof)', async () => {
+  const db = makeDb();
+  upsertBoard(db, { ats: 'greenhouse', token: 'acme', source_of_discovery: 'simplify' });
+  db.run(`UPDATE boards SET first_seen_at = '2026-07-24 20:52:27' WHERE ats = 'greenhouse' AND token = 'acme'`);
+
+  const config = baseConfig({
+    greenhouse: { enabled: true, tokens: ['acme'] },
+    lever: { enabled: false, tokens: [] },
+    ashby: { enabled: false, tokens: [] },
+    hn: { enabled: false },
+  });
+  await runSweep(db, config, baseDeps());
+
+  const row = db.query('SELECT first_seen_at, source_of_discovery FROM boards WHERE token = ?').get('acme') as {
+    first_seen_at: string;
+    source_of_discovery: string;
+  };
+  expect(row.first_seen_at).toBe(SEED_BACKFILL_FIRST_SEEN);
+  expect(row.source_of_discovery).toBe('simplify');
+});
+
+test('a token in config.blocklist gets no boards row from the seed sync', async () => {
+  const db = makeDb();
+  const config = baseConfig({
+    greenhouse: { enabled: true, tokens: ['acme', 'blocked'] },
+    lever: { enabled: false, tokens: [] },
+    ashby: { enabled: false, tokens: [] },
+    hn: { enabled: false },
+    blocklist: ['blocked'],
+  });
+  await runSweep(db, config, baseDeps());
+
+  const boards = db.query('SELECT token FROM boards').all() as { token: string }[];
+  expect(boards.map(b => b.token)).toEqual(['acme']);
+});
+
+test('a throwing backfillSeedBoards degrades silently and the sweep completes normally', async () => {
+  const db = new Database(':memory:');
+  createPostingsTable(db);
+  createSeekMetaTable(db); // deliberately no createBoardsTable(db) -- forces the backfill's INSERT to throw
+  const config = disabledSourcesConfig({ hn: { enabled: true }, greenhouse: { enabled: false, tokens: ['acme'] } });
+  const results = await runSweep(db, config, baseDeps({
+    // Stubbed so this test isolates the backfill throw, rather than also
+    // hitting the missing boards table via the real resolveEffectiveTokens.
+    resolveEffectiveTokens: () => [],
+    fetchHNPostings: async () => [makePosting({ source: 'hn', url: 'https://news.ycombinator.com/item?id=1' })],
+  }));
+
+  expect(results.some(r => r.error)).toBe(false);
+  const hn = results.find(r => r.source === 'hn')!;
+  expect(hn.fetched).toBe(1);
+  expect(readSeekMeta(db, 'seed_backfill_v1')).toBeNull();
+});
+
+test('deps.upsertBoard throwing during the ordinary per-sweep sync degrades silently and the sweep completes normally', async () => {
+  const db = makeDb();
+  writeSeekMeta(db, 'seed_backfill_v1', new Date().toISOString()); // flag already set -> ordinary sync path
+  const config = disabledSourcesConfig({ hn: { enabled: true }, greenhouse: { enabled: true, tokens: ['acme'] } });
+  const results = await runSweep(db, config, baseDeps({
+    upsertBoard: () => {
+      throw new Error('boom');
+    },
+    fetchGreenhouse: async () => ({ postings: [], errors: [] }),
+    fetchHNPostings: async () => [makePosting({ source: 'hn', url: 'https://news.ycombinator.com/item?id=1' })],
+  }));
+
+  expect(results.some(r => r.error)).toBe(false);
+});
+
+test('the seed sync never contributes to any SourceResult.boardsAdded value', async () => {
+  const db = makeDb();
+  const config = baseConfig();
+  const results = await runSweep(db, config, baseDeps());
+  for (const r of results) {
+    expect(r.boardsAdded).toBeUndefined();
+  }
+});
+
+test('sources disabled in config still have their tokens synced into boards (config membership, not enablement, defines the set)', async () => {
+  const db = makeDb();
+  const config = baseConfig({
+    greenhouse: { enabled: false, tokens: ['acme'] },
+    lever: { enabled: false, tokens: ['acme'] },
+    ashby: { enabled: false, tokens: ['acme'] },
+    hn: { enabled: false },
+  });
+  await runSweep(db, config, baseDeps());
+
+  const boards = db.query('SELECT ats, token, source_of_discovery FROM boards').all() as {
+    ats: string;
+    token: string;
+    source_of_discovery: string;
+  }[];
+  expect(boards).toHaveLength(3);
+  for (const b of boards) {
+    expect(b.token).toBe('acme');
+    expect(b.source_of_discovery).toBe('seed');
+  }
 });

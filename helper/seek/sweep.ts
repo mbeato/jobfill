@@ -5,6 +5,12 @@ import { harvestSimplifyBoards } from './simplify';
 import { harvestGetroBoards } from './getro';
 import { shouldRunYcDir } from './ycdir';
 import { readSeekMeta, writeSeekMeta } from './meta';
+import { backfillSeedBoards } from './boards';
+
+// D-10 one-time gate key for the backdated seed backfill (see the prologue in
+// runSweep below). Its own module-local constant, not shared with 'ycdir_last_run',
+// because it gates a one-time migration rather than a periodic cadence.
+const SEED_BACKFILL_KEY = 'seed_backfill_v1';
 
 // Testable fetch-sweep orchestrator behind POST /seek (D-11). Per-source
 // isolation (D-13): each of the four fetch sources runs in its OWN try/catch,
@@ -69,6 +75,59 @@ export async function runSweep(
   now: Date = new Date(),
 ): Promise<SourceResult[]> {
   const results: SourceResult[] = [];
+
+  // Seed sync prologue — keeps "in seek.config.json" and "in boards" the same
+  // set, permanently, and MUST run before the first deps.resolveEffectiveTokens
+  // call below. That ordering is structural, not incidental: it is what
+  // guarantees the D-10 backdated backfill can never race an ordinary sync that
+  // would stamp a config token with datetime('now').
+  //
+  // (1) D-06: this runs on EVERY sweep, not as a one-time migration — a token
+  //     the operator hand-adds to seek.config.json tomorrow automatically gets
+  //     first_seen_at = datetime('now') and correctly enters grace, no special
+  //     case needed.
+  // (2) D-10: the FIRST pass instead backdates via the one-time backfill call
+  //     below, because stamping the 286 already-established config tokens
+  //     with datetime('now')
+  //     would place every already-staged posting inside the 48h grace delta and
+  //     mass-suppress the entire next sweep.
+  // (3) Ordering requirement: the backfill must precede any ordinary sync,
+  //     which is exactly why both live here, adjacent, rather than split
+  //     across files.
+  // (4) D-06 accepted consequence: removing a token from seek.config.json no
+  //     longer removes it from polling, because its row persists in `boards`
+  //     and resolveEffectiveTokens unions active board rows; the blocklist
+  //     remains the single removal mechanism (Phase 16 D-06). Do not invent a
+  //     second removal path.
+  //
+  // D-05 side benefit, and its precise limit: seed tokens now have rows, so
+  // recordBoardResult records their outcomes and a permanently-404ing seed
+  // entry becomes dead-markable and visible. It does NOT stop being polled,
+  // because resolveEffectiveTokens adds config tokens unconditionally before
+  // it unions active boards — removal still requires a config or blocklist edit.
+  try {
+    const tokenMap: Record<string, string[]> = {
+      greenhouse: config.greenhouse.tokens,
+      lever: config.lever.tokens,
+      ashby: config.ashby.tokens,
+    };
+    if (readSeekMeta(db, SEED_BACKFILL_KEY) === null) {
+      backfillSeedBoards(db, tokenMap, config.blocklist);
+      // Written only on success — a thrown backfill retries on the next
+      // sweep instead of burning the one-time window (mirrors the ycdir
+      // gate's "written only on success" posture below).
+      writeSeekMeta(db, SEED_BACKFILL_KEY, new Date().toISOString());
+    } else {
+      for (const [ats, tokens] of Object.entries(tokenMap)) {
+        for (const token of tokens) {
+          deps.upsertBoard(db, { ats, token, source_of_discovery: 'seed' }, config.blocklist);
+        }
+      }
+    }
+  } catch {
+    // Sync failure degrades silently, matching the harvest loop's posture —
+    // never fails a sweep or marks a source failed.
+  }
 
   const runOne = async (
     source: SourceName,

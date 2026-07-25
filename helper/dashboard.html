@@ -700,10 +700,23 @@
     <div class="batch-actions"><button onclick="triggerBatch()">Trigger batch now</button></div>
     <div id="batchBody"></div>
   </div>
-  <div id="seek" data-tab="runs">
-    <h2>seek decisions</h2>
-    <div id="seekStats"></div>
-    <div class="filters" id="seekFilters"></div>
+  <div id="seek" data-tab="runs" class="jf-scope">
+    <div class="jf-band">
+      <h3>seek decisions</h3>
+      <p id="seekStats"></p>
+      <div class="jf-tools" id="seekBreakdownTools" hidden>
+        <button class="jf-disc" type="button" aria-expanded="false" aria-controls="seekBreakdown"><svg aria-hidden="true"><use href="#i-chev"/></svg>rejection breakdown</button>
+      </div>
+    </div>
+    <div id="seekBreakdown" hidden>
+      <div class="jf-panel">
+        <p class="jf-panel-h">rejected by criterion · last sweep</p>
+        <dl class="jf-kv" id="seekBreakdownKv"></dl>
+      </div>
+    </div>
+    <div class="jf-toolbar">
+      <div class="jf-chips" role="group" aria-label="decision filter" id="seekFilters"></div>
+    </div>
     <div id="seekBody"></div>
   </div>
   <div id="applications" data-tab="applications" class="jf-scope">
@@ -1528,7 +1541,6 @@ const DECISION_VALUES = new Set(['queued', 'rejected', 'held']);
 let lastSweep = null;
 let postingsRows = [];
 let seekFilter = 'all';
-let seekBreakdownExpanded = false;
 
 async function loadPostings() {
   [lastSweep, postingsRows] = await Promise.all([
@@ -1564,34 +1576,43 @@ function reasonLabel(code) {
   return esc(code);
 }
 
-function toggleSeekBreakdown() {
-  seekBreakdownExpanded = !seekBreakdownExpanded;
-  renderSeekStats(lastSweep);
-}
-
 // lastSweep's numeric counts (fetched/rejected/held/queued/byCriterion/deduped)
-// are server-authored — rendered as numbers, never as raw HTML (T-10-11).
+// are server-authored — rendered as numbers, never as raw HTML (T-10-11). The
+// breakdown toggle's own aria-expanded (set by plan 01's shared delegated
+// .jf-disc listener) IS the disclosure state now; no module-level mirror.
 function renderSeekStats(ls) {
-  const el = document.getElementById('seekStats');
+  const stats = document.getElementById('seekStats');
+  const tools = document.getElementById('seekBreakdownTools');
+  const breakdown = document.getElementById('seekBreakdown');
   if (!ls) {
-    el.innerHTML = `<div class="muted">no seek sweep run yet</div>`;
+    stats.textContent = 'no seek sweep run yet';
+    tools.hidden = true;
+    breakdown.hidden = true;
     return;
   }
-  const summary = `${ls.fetched} fetched · ${ls.rejected} rejected · ${ls.held} held · ${ls.queued} queued`;
+  stats.textContent = `${ls.fetched} fetched · ${ls.rejected} rejected · ${ls.held} held · ${ls.queued} queued`;
+  // Only rendered when ls.rejected is non-zero (item 26) — the toggle button
+  // itself is hidden, not just its panel, when there is nothing to break down.
+  tools.hidden = !ls.rejected;
   if (!ls.rejected) {
-    el.innerHTML = `<div>${summary}</div>`;
+    breakdown.hidden = true;
     return;
   }
   const bc = ls.byCriterion || {};
-  const toggleTitle = seekBreakdownExpanded ? 'hide rejection breakdown' : 'show rejection breakdown';
-  const breakdown = seekBreakdownExpanded
-    ? ` (location ${bc.location ?? 0} · title ${bc.title ?? 0} · yoe ${bc.yoe ?? 0} · stale ${bc.stale ?? 0} · grace ${bc.grace ?? 0} · llm ${bc.llm ?? 0} · duplicate ${ls.deduped ?? 0})`
-    : '';
-  el.innerHTML = `<div>${summary}
-    <span class="decision-toggle" title="${toggleTitle}" onclick="toggleSeekBreakdown()">${seekBreakdownExpanded ? '▴' : '▾'}</span><span class="muted">${breakdown}</span>
-  </div>`;
+  document.getElementById('seekBreakdownKv').innerHTML = `
+    <dt>rules:location</dt><dd>${Number(bc.location ?? 0)}</dd>
+    <dt>rules:title</dt><dd>${Number(bc.title ?? 0)}</dd>
+    <dt>rules:yoe</dt><dd>${Number(bc.yoe ?? 0)}</dd>
+    <dt>rules:stale</dt><dd>${Number(bc.stale ?? 0)}</dd>
+    <dt>rules:board-grace</dt><dd>${Number(bc.grace ?? 0)}</dd>
+    <dt>llm:not-relevant</dt><dd>${Number(bc.llm ?? 0)}</dd>
+    <dt>dedupe</dt><dd>${Number(ls.deduped ?? 0)}</dd>
+  `;
 }
 
+// #seekFilters' counts (unlike #seekStats above) are the CURRENT, browsable
+// state derived from all /postings rows — the two scopes legitimately
+// disagree (see the D-15/FILT-04 comment above).
 function renderSeekFilters(rows) {
   const counts = {
     all: rows.length,
@@ -1601,9 +1622,15 @@ function renderSeekFilters(rows) {
     unscored: rows.filter(r => r.decision == null).length,
   };
   document.getElementById('seekFilters').innerHTML = ['all', 'queued', 'rejected', 'held', 'unscored']
-    .map(s => `<button class="${seekFilter === s ? 'active' : ''}" onclick="seekFilter='${s}';renderPostings(postingsRows)">${s} (${counts[s]})</button>`)
+    .map(s => `<button class="jf-chip" type="button" aria-pressed="${seekFilter === s}" data-sfilter="${s}">${s}<span class="n">${counts[s]}</span></button>`)
     .join('');
 }
+document.getElementById('seekFilters').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-sfilter]');
+  if (!btn) return;
+  seekFilter = btn.dataset.sfilter;
+  renderPostings(postingsRows);
+});
 
 function renderPostings(rows) {
   const body = document.getElementById('seekBody');

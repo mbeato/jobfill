@@ -1,0 +1,64 @@
+{
+  "_comment": "jobfill design system, established 2026-07-25 via a greenfield /design run. Direction: catalogue-index. The dashboard is a single hand-written HTML file with an inline <style> block and vanilla JS, served by helper/server.ts on 127.0.0.1:7877. No framework, no build step, no npm UI dependency - a locked project decision.",
+  "designSystem": {
+    "doc": "DESIGN.md",
+    "tokens": "helper/dashboard.catalogue-index.html"
+  },
+  "stack": "vanilla-html-css",
+  "_stackNote": "Not one of the skill's standard enum values. Means: a single .html file, one inline <style> block, CSS custom properties for tokens, vanilla JS for behaviour. NO React, NO JSX, NO Tailwind, NO CSS-in-JS, NO build step, NO npm UI package. Variants are standalone .html files, not .tsx components.",
+  "iconLib": "inline-svg",
+  "_iconNote": "There is no icon package and adding one would violate the no-dependencies rule. Hand-authored inline SVG is therefore EXPLICITLY ALLOWED for this project, overriding the skill's default 'no bespoke SVG' floor. Emoji as icons remain banned.",
+  "tokenPattern": "--jf-*",
+  "constraints": {
+    "forbiddenFonts": [
+      "Inter",
+      "Roboto",
+      "Helvetica",
+      "Arial",
+      "system-ui as the display face"
+    ],
+    "forbiddenIconLibs": [
+      "lucide",
+      "lucide-react",
+      "heroicons",
+      "@tabler/icons",
+      "font-awesome"
+    ],
+    "forbiddenComponentLibs": [
+      "shadcn",
+      "@radix-ui/themes",
+      "material-ui",
+      "ant-design",
+      "bootstrap",
+      "tailwind"
+    ],
+    "motionKeyframes": [
+      "jf-disclose",
+      "jf-countdown"
+    ],
+    "_motionNote": "Static posture: chrome + one functional disclosure + one functional countdown. No entrance choreography, no scroll-linked motion. These two keyframes are the canonical list - do not invent others.",
+    "typeface": "self-hosted-woff2-only",
+    "_typefaceNote": "JetBrains Mono (machine facts) + IBM Plex Sans (human prose), self-hosted at helper/fonts/*.woff2. NO CDN, NO Google Fonts - the helper is localhost-only and must render identically offline."
+  },
+  "corpusTags": [
+    "dev-tools",
+    "dashboard",
+    "data-dense",
+    "minimal",
+    "type-forward"
+  ],
+  "primitives": [],
+  "_primitivesNote": "No shared component primitives exist - the file is monolithic. Variants build their own, scoped to the variant file.",
+  "referencePages": [
+    "helper/dashboard.catalogue-index.html"
+  ],
+  "_referenceNote": "catalogue-index is the DESIGN REFERENCE, not yet the live dashboard: it carries inline mock data and zero fetch calls, while helper/dashboard.html talks to 21 endpoints. Future /design runs in this project must rhyme with the reference; adopting it into the live dashboard is a separate implementation task (see DESIGN.md Adoption).",
+  "playwright": {
+    "devUrlBase": "http://127.0.0.1:7877",
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "firstLoadTimeoutMs": 30000
+  }
+}

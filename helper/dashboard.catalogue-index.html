@@ -1,0 +1,2248 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>jobfill · review console</title>
+<!--
+/**
+ * Direction: catalogue-index — "the spreadsheet of record."
+ * Family: catalogue-index   Posture: static (motion layer 1 only: chrome + one
+ *         functional disclosure + one functional countdown. No entrance
+ *         choreography, no scroll-linked motion.)
+ *
+ * Derived from: jobfill is a local-first, single-user review console for an
+ *   agent that runs overnight. The product attributes drove every call:
+ *     accountable            -> every machine verdict carries its criterion in
+ *                               the same cell; nothing requires a click to
+ *                               learn WHY.
+ *     consequential          -> a rejection is permanent, so the surface reads
+ *                               as a database client / audit log, not a
+ *                               friendly dashboard. Destructive acts arm.
+ *     unattended-then-audited-> the record dominates; chrome is two thin bars.
+ *     private                -> "localhost · single user" states the boundary
+ *                               in the app bar. No marketing voice anywhere.
+ *     fast-scan              -> fixed table layout, values CLIPPED not wrapped,
+ *                               tabular numerals, sticky header, row gutter
+ *                               numbers, sticky status bar with the row count.
+ *
+ * Axes: family catalogue-index · paper light-cool near-white (oklch ~0.986,
+ *       hue 250, chroma 0.003) · display JetBrains Mono 700 · accent ONE amber
+ *       (oklch 0.795 0.150 78), reserved for "needs your attention / held".
+ *
+ * System (condensed):
+ *   paper   4 steps  (paper / cell / sunk / band) + 1 inverse
+ *   ink     4 steps  (ink .255 / ink-2 .440 / ink-3 .560 / ink-4 .680) + on-inverse
+ *   rule    3 weights (rule / rule-2 / rule-strong) x 3 hairline widths
+ *   accent  attn / attn-wash / attn-edge / attn-ink  (its ONE job)
+ *   type    2 families (mono = machine facts, sans = human prose), 8 sizes,
+ *           3 line-heights, 3 tracking steps
+ *   space   8 steps, radii 4 steps (max 3px), 2 layered shadow stacks
+ *   motion  4 durations, 3 easings, 2 keyframes (both used)
+ *
+ * Signature move: THE CRITERION IS IN THE CELL. Every decision cell renders
+ *   the verdict token and the criterion that produced it together, in mono,
+ *   split by a hairline: `rejected` + `rules:location`, `held` +
+ *   `seek:jd-fetch-error`, `filled` + `fill:14/14`. The grid is auditable at a
+ *   glance, which is the direct visual answer to "a rejection is permanent."
+ *   Applied in queue, seek decisions, applications, failures and runs.
+ *
+ * Three specific named decisions (from the reference pixels):
+ *   1. Supabase android-3 — TYPE-SIGIL COLUMN HEADERS. Every data column
+ *      header carries a 14px mono type sigil before its name (T text, # num,
+ *      date, enum, link), set in ink-4 at 10px, exactly as the Supabase table
+ *      client marks column type. Non-data columns (actions) carry no sigil, so
+ *      the sigil means something.
+ *   2. Supabase android-3 — RULES ON BOTH AXES + HARD CLIP. table-layout is
+ *      fixed, every cell carries a 1px right rule and 1px bottom rule, and
+ *      values are ellipsis-clipped at the column boundary and NEVER wrap. The
+ *      cell is a fixed viewport onto the value. The header band is one step
+ *      darker paper and closes with a 2px rule (heavier than row rules) so the
+ *      sticky header reads as a different object from the data.
+ *   3. Sentry web-pricing — FULL-BLEED GROUP BAND ROWS. Sentry breaks one long
+ *      comparison table with tinted full-width band strips carrying the group
+ *      name. Adopted verbatim as `.jf-band` and used in TWO places: runs (3
+ *      bands) and settings (5 bands), so the settings FORM belongs to the same
+ *      grid system as the data — label/value hairline rows under band strips,
+ *      not a soft card floating in a precision grid.
+ *   (bonus, Sentry) sub-value micro caption under a primary value — this is the
+ *      mechanic the signature move rides on.
+ *
+ * Deliberate palette consequence: there is no red anywhere in this system. The
+ *   only chromatic token is amber and its only job is "needs you". This makes
+ *   the project's named catastrophic failure structurally impossible: an empty
+ *   criteria term list CANNOT render as an error, because the system owns no
+ *   error color. It renders as a neutral mono state row: `0 terms · rule off ·
+ *   no title is rejected for seniority wording`.
+ *
+ * Features preserved (enumerated from helper/dashboard.html):
+ *   SHELL      six destinations (queue/runs/applications/library/failures/
+ *              settings), queue count badge, hash-persisted tab state.
+ *   QUEUE      lifecycle filter chips with live counts (all, ready to submit,
+ *              needs review, filling, queued, failed, submitted); status pills
+ *              for queued/filling/filled/reviewed/failed/submitted; per-row
+ *              actions (fill now, mark reviewed, mark submitted, remove);
+ *              two-click ARMED destructive confirm with 4s revert and pinned
+ *              width; receded done-rows; per-row results disclosure with a
+ *              mono field-results panel; skipped-last-batch reason line; fill
+ *              error line; resume link; posting URL; empty state.
+ *   RUNS       sweeps (trigger sweep now, duration, headline counts, status,
+ *              auth-expired badge, per-source detail disclosure in a mono
+ *              snapshot panel); batch fills (trigger batch now, headline,
+ *              stop-reason line, skips/failed detail); seek decisions (last
+ *              sweep stats + expandable rejection breakdown, filter chips
+ *              all/queued/rejected/held/unscored, decision + reason label,
+ *              "queue anyway" action).
+ *   APPS       stats line (count, active, api spend), status filter chips incl.
+ *              the synthetic "ghosted" chip, table (date/company/role/status/
+ *              notes/links), status select, inline-editable notes field,
+ *              ghosted badge, tailor-state line, resume-changes + JD
+ *              disclosures, generate menu (cover letter / follow-up email /
+ *              interview-prep brief), generated-doc links.
+ *   LIBRARY    answer blocks with question/answer/captured/actions, inline
+ *              editable answer, older-versions disclosure, pinned state,
+ *              delete affordance, empty state.
+ *   FAILURES   date/page/field/status/details table, details disclosure with a
+ *              mono outer_html snapshot, options-seen list, aria-resolved line.
+ *   SETTINGS   grouped sections; labelled fields; 4 criteria term lists with
+ *              LIVE fail-open state rows; built-in staff/lead toggle; 3 posting
+ *              age caps; yoe threshold; <select> dropdowns (work auth, EEO x6,
+ *              relocate); relevance-profile textarea with a LIVE character
+ *              count; a LIVE summary panel; armed save for narrowing changes.
+ *
+ * Build depth: shell, queue grid and settings are built FULLY. Runs,
+ *   applications, library and failures are built structurally with real
+ *   populated blocks (6-9 rows each), correct toolbars and headings.
+ *
+ * Data: ALL ROW DATA IN THIS FILE IS FICTIONAL PLACEHOLDER DATA authored for
+ *   design review. Company names, dates, counts and the identity fields are
+ *   invented. No real person or company appears. (countable-gates G10)
+ *
+ * Gates: G2 pass (no filler cells). G7 pass (zero em/en dashes in rendered
+ *   text; `·` is the separator). G9 pass (static posture: the only motion is
+ *   chrome transitions, one disclosure keyframe and one armed-countdown
+ *   keyframe, both used). G10 pass (placeholder labelled above). G11 pass (one
+ *   hand-authored geometric SVG symbol set, 16-unit box, currentColor, zero
+ *   emoji). G12 pass (hover + focus-visible + active + disabled on every
+ *   interactive class). G13 pass (no fake screenshots). G14 stamp below. G15
+ *   pass (every value is a --jf- token or a color-mix on one).
+ *   G1/G3/G4/G5/G6/G8 are [page]-scoped marketing-page gates; this is a single
+ *   application surface with no hero, no zigzag, no marquee and no CTA, so
+ *   they do not apply. There are ZERO uppercase eyebrows in the file: band
+ *   strips are lowercase mono, matching the product's existing lowercase voice.
+ *
+ * Verified: slop-lint 0 FAIL 0 WARN. Renders standalone over file:// with zero
+ *   console errors, zero horizontal page overflow at 1440 and 720. Three bugs
+ *   the render pass caught and this file fixes: (a) color-mix in OKLCH walks
+ *   the hue ARC, so every amber wash rendered CYAN — all mixes are in OKLAB;
+ *   (b) `overflow-x: auto` on a grid wrapper makes that wrapper the nearest
+ *   scrollport, so a thead offset against the app bar was pushed DOWN over row
+ *   1 — the dense grids own their scrollport on both axes and pin at top 0;
+ *   (c) the actions column clipped three labels.
+ *
+ * Revision 1 (render review): (1) the URL is now the single source of truth for
+ *   the destination — navigation writes location.hash, a hashchange listener
+ *   renders it, so a pasted #applications works on a loaded page and back/
+ *   forward traverse destinations; a non-destination hash (the skip link's
+ *   #main) is ignored rather than falling back to queue. (2) Decision cells are
+ *   the ONE exception to clip-never-wrap: the criterion wraps inside its own
+ *   column, the column widens past 1280px, and every criterion also carries a
+ *   title. Nothing truncates on any destination at 1180/1280/1440. (3) The app
+ *   shell is a fixed-height flex column that never scrolls; each destination
+ *   owns its vertical scroll, so the status bar sits on the bottom edge at 5
+ *   rows or 24, and the dense grid flex-fills the exact leftover height instead
+ *   of guessing a max-height. Two bugs that surfaced doing (3): every flex
+ *   child of a fixed-height column shrinks by default (the app bar collapsed to
+ *   19px, now flex:none), and `[hidden]` at 0,1,0 lost to the new
+ *   `main > [role=tabpanel]` rule at 0,1,1, laying all six destinations out at
+ *   once — hence the doubled `[hidden][hidden]` selector.
+ *
+ * Pre-emit critique: P5 H4 E4 S5 R4 V4
+ *   P the grid IS the page; only what needs you is colored.
+ *   H big mono numeral -> filter chips -> sticky column header -> rows ->
+ *     status bar. Primary/secondary/tertiary nameable in under 2s each.
+ *   E rule weights, clip behaviour, accent budget, focus ring and contrast
+ *     pairs are all specified in tokens below.
+ *   S the criterion-in-cell move only makes sense for THIS product.
+ *   R deliberately omitted: zebra striping, per-status color coding, card
+ *     surfaces, row icons, illustration, elevation on rows, any red.
+ *   V a full-bleed uniform grid with no card surfaces is structurally distant
+ *     from any card-dashboard sibling.
+ */
+-->
+<style>
+/* ── fonts ──────────────────────────────────────────────────────────────── */
+@font-face{font-family:'JetBrains Mono';src:url('fonts/jbmono-400.woff2') format('woff2');font-weight:400;font-style:normal;font-display:swap}
+@font-face{font-family:'JetBrains Mono';src:url('fonts/jbmono-700.woff2') format('woff2');font-weight:700;font-style:normal;font-display:swap}
+@font-face{font-family:'IBM Plex Sans';src:url('fonts/plexsans-400.woff2') format('woff2');font-weight:400;font-style:normal;font-display:swap}
+@font-face{font-family:'IBM Plex Sans';src:url('fonts/plexsans-600.woff2') format('woff2');font-weight:600;font-style:normal;font-display:swap}
+
+/* ── tokens ─────────────────────────────────────────────────────────────── */
+:root{
+  /* paper: light-cool, near-white, low chroma. a precision instrument. */
+  --jf-paper:        oklch(0.986 0.003 250);
+  --jf-paper-cell:   oklch(0.998 0.001 250);
+  --jf-paper-sunk:   oklch(0.966 0.005 250);
+  --jf-paper-band:   oklch(0.940 0.007 250);
+  --jf-paper-inv:    oklch(0.255 0.014 255);
+
+  /* ink ramp. contrast vs paper: ink 12:1 · ink-2 6.9:1 · ink-3 4.7:1 ·
+     ink-4 3.1:1 (non-text / sigils only). */
+  --jf-ink:          oklch(0.255 0.014 255);
+  --jf-ink-2:        oklch(0.440 0.013 255);
+  --jf-ink-3:        oklch(0.560 0.012 255);
+  --jf-ink-4:        oklch(0.680 0.010 255);
+  --jf-ink-inv:      oklch(0.968 0.003 250);
+
+  --jf-rule:         oklch(0.905 0.006 250);
+  --jf-rule-2:       oklch(0.845 0.008 250);
+  --jf-rule-strong:  oklch(0.700 0.011 255);
+
+  /* the ONE accent. job: "needs your attention / held". nothing else.
+     mixed in OKLAB, never OKLCH: an oklch mix walks the hue ARC from amber
+     78deg to the cool paper 250deg, so a 20% amber wash renders CYAN. oklab
+     is rectangular, keeps the perceptual lightness, and stays amber. */
+  --jf-attn:         oklch(0.795 0.150 78);
+  --jf-attn-wash:    color-mix(in oklab, var(--jf-attn) 20%, var(--jf-paper-cell));
+  --jf-attn-edge:    color-mix(in oklab, var(--jf-attn) 58%, var(--jf-rule-2));
+  --jf-attn-ink:     oklch(0.330 0.060 62);
+
+  /* focus ring: ink pulled toward the accent hue via color-mix, so it can
+     never be confused with a hover tint or with the accent's own job. */
+  --jf-focus:        color-mix(in oklab, var(--jf-ink) 76%, var(--jf-attn));
+  --jf-select:       color-mix(in oklab, var(--jf-ink) 8%, var(--jf-paper-cell));
+
+  /* type: mono = machine-produced facts. sans = human prose. held everywhere. */
+  --jf-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+  --jf-sans: 'IBM Plex Sans', ui-sans-serif, sans-serif;
+  --jf-t-mega: clamp(2rem, 1.35rem + 2.1vw, 2.75rem);
+  --jf-t-xl:   1.3125rem;
+  --jf-t-lg:   1rem;
+  --jf-t-md:   0.8125rem;
+  --jf-t-sm:   0.75rem;
+  --jf-t-xs:   0.6875rem;
+  --jf-t-xxs:  0.625rem;
+  --jf-lh-tight: 1.02;
+  --jf-lh-data:  1.35;
+  --jf-lh-prose: 1.55;
+  --jf-track-tight: -0.022em;
+  --jf-track-none:  0em;
+  --jf-track-wide:  0.07em;
+
+  /* space */
+  --jf-s1: 0.25rem;  --jf-s2: 0.375rem; --jf-s3: 0.5rem;  --jf-s4: 0.75rem;
+  --jf-s5: 1rem;     --jf-s6: 1.5rem;   --jf-s7: 2rem;    --jf-s8: 3rem;
+
+  /* radii: tops out at 3px. nothing in this instrument is soft. */
+  --jf-r0: 0px; --jf-r1: 1px; --jf-r2: 2px; --jf-r3: 3px;
+
+  /* hairlines */
+  --jf-hair:  1px; --jf-hair-2: 2px; --jf-hair-3: 3px;
+
+  /* layered shadows: 4 stops, each ~doubling, all tinted toward ink not black */
+  --jf-shadow-sticky:
+    0 var(--jf-hair) 0 0 var(--jf-rule-2),
+    0 var(--jf-hair-2) var(--jf-hair-3) calc(-1 * var(--jf-hair-2)) color-mix(in oklab, var(--jf-ink) 9%, transparent),
+    0 var(--jf-s1) var(--jf-s2) calc(-1 * var(--jf-hair-3)) color-mix(in oklab, var(--jf-ink) 7%, transparent),
+    0 var(--jf-s3) var(--jf-s5) calc(-1 * var(--jf-s2)) color-mix(in oklab, var(--jf-ink) 5%, transparent);
+  --jf-shadow-raise:
+    0 var(--jf-hair) 0 0 var(--jf-rule),
+    0 var(--jf-hair-2) var(--jf-hair-2) calc(-1 * var(--jf-hair)) color-mix(in oklab, var(--jf-ink) 6%, transparent),
+    0 var(--jf-s2) var(--jf-s3) calc(-1 * var(--jf-s2)) color-mix(in oklab, var(--jf-ink) 5%, transparent),
+    0 var(--jf-s4) var(--jf-s6) calc(-1 * var(--jf-s3)) color-mix(in oklab, var(--jf-ink) 4%, transparent);
+
+  /* motion. static posture: chrome only. */
+  --jf-dur-fast: 110ms;
+  --jf-dur-base: 160ms;
+  --jf-dur-open: 210ms;
+  --jf-dur-arm:  4000ms;
+  --jf-ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --jf-ease-move: cubic-bezier(0.77, 0, 0.175, 1);
+  --jf-ease-scrub: linear;
+  --jf-lift: 3px;
+
+  /* metrics */
+  --jf-appbar-h: 2.875rem;
+  --jf-gutter-w: 2.875rem;
+  --jf-pad-x: clamp(0.75rem, 0.4rem + 1.2vw, 1.5rem);
+  --jf-cell-y: 0.4375rem;
+  --jf-row-min: 2.125rem;
+  --jf-stroke: 1.25;
+  --jf-sigil: 0.875rem;
+  --jf-gridmin: 12rem;
+  --jf-snapmax: 14rem;
+  --jf-field-max: 42rem;
+  /* the decision column carries the signature move, so it is the one column
+     that gets more room when there is room to give. */
+  --jf-col-decision: 18rem;
+  --jf-col-decision-wide: 20rem;
+  --jf-col-page: 12rem;
+  --jf-tick: 0.1875rem;
+}
+
+/* ── reset / page ───────────────────────────────────────────────────────── */
+*,*::before,*::after{box-sizing:border-box}
+html{overflow-x:clip}
+html{-webkit-text-size-adjust:100%}
+/* App shell: the window never scrolls, each destination owns its own vertical
+   scroll. This is what puts the status bar on the bottom edge of the viewport
+   whether a destination has 5 rows or 24, and it is also what lets the dense
+   grid flex-fill the exact leftover height instead of guessing at a
+   max-height. The app bar and status bar keep their sticky declarations so the
+   chrome still pins if the shell is ever un-fixed. */
+body{
+  margin:0;
+  height:100dvh;
+  overflow:hidden;
+  display:flex;
+  flex-direction:column;
+  background:var(--jf-paper);
+  color:var(--jf-ink);
+  font-family:var(--jf-sans);
+  font-size:var(--jf-t-md);
+  line-height:var(--jf-lh-prose);
+  font-variant-numeric:tabular-nums;
+  -webkit-font-smoothing:antialiased;
+}
+.jf-sr{position:absolute;width:var(--jf-hair);height:var(--jf-hair);margin:calc(-1 * var(--jf-hair));padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0}
+.jf-mono{font-family:var(--jf-mono);font-variant-numeric:tabular-nums}
+::selection{background:var(--jf-select)}
+
+.jf-skip{
+  position:absolute;left:var(--jf-s3);top:calc(-1 * var(--jf-s8));z-index:40;
+  font-family:var(--jf-mono);font-size:var(--jf-t-xs);
+  background:var(--jf-paper-inv);color:var(--jf-ink-inv);
+  padding:var(--jf-s2) var(--jf-s4);border-radius:var(--jf-r2);text-decoration:none;
+  transition:top var(--jf-dur-base) var(--jf-ease-out);
+}
+.jf-skip:focus-visible{top:var(--jf-s3);outline:var(--jf-hair-2) solid var(--jf-focus);outline-offset:var(--jf-hair-2)}
+
+/* ── app bar ────────────────────────────────────────────────────────────── */
+.jf-appbar{
+  position:sticky;top:0;z-index:30;flex:none;
+  display:flex;align-items:stretch;gap:var(--jf-s5);
+  height:var(--jf-appbar-h);
+  padding-inline:var(--jf-pad-x);
+  background:var(--jf-paper-sunk);
+  box-shadow:var(--jf-shadow-sticky);
+}
+.jf-brand{
+  display:flex;align-items:center;gap:var(--jf-s2);
+  font-family:var(--jf-mono);font-weight:700;font-size:var(--jf-t-sm);
+  letter-spacing:var(--jf-track-tight);color:var(--jf-ink);
+  margin:0;padding-right:var(--jf-s5);
+  border-right:var(--jf-hair) solid var(--jf-rule-2);
+  white-space:nowrap;
+}
+.jf-brand svg{width:var(--jf-t-lg);height:var(--jf-t-lg);color:var(--jf-ink-2)}
+
+.jf-nav{display:flex;align-items:stretch;gap:0;overflow-x:auto;scrollbar-width:none}
+.jf-nav::-webkit-scrollbar{display:none}
+.jf-tab{
+  appearance:none;border:0;background:none;cursor:pointer;
+  display:flex;align-items:center;gap:var(--jf-s2);
+  padding:0 var(--jf-s4);
+  font-family:var(--jf-mono);font-size:var(--jf-t-xs);font-weight:400;
+  letter-spacing:var(--jf-track-none);color:var(--jf-ink-3);
+  border-bottom:var(--jf-hair-2) solid transparent;
+  white-space:nowrap;
+  transition:color var(--jf-dur-fast) var(--jf-ease-out),
+             background-color var(--jf-dur-fast) var(--jf-ease-out),
+             border-color var(--jf-dur-fast) var(--jf-ease-out);
+}
+.jf-tab:hover{color:var(--jf-ink);background:var(--jf-paper-cell)}
+.jf-tab:active{background:var(--jf-paper-band)}
+.jf-tab:focus-visible{outline:var(--jf-hair-2) solid var(--jf-focus);outline-offset:calc(-1 * var(--jf-hair-2));color:var(--jf-ink)}
+.jf-tab[aria-selected="true"]{color:var(--jf-ink);font-weight:700;background:var(--jf-paper-cell);border-bottom-color:var(--jf-ink)}
+.jf-badge{
+  font-family:var(--jf-mono);font-size:var(--jf-t-xxs);font-weight:700;
+  color:var(--jf-attn-ink);background:var(--jf-attn-wash);
+  border:var(--jf-hair) solid var(--jf-attn-edge);
+  padding:0 var(--jf-s1);border-radius:var(--jf-r1);line-height:var(--jf-lh-data);
+}
+
+.jf-appmeta{
+  margin-left:auto;display:flex;align-items:center;gap:var(--jf-s4);
+  font-family:var(--jf-mono);font-size:var(--jf-t-xxs);color:var(--jf-ink-3);
+  white-space:nowrap;
+}
+.jf-appmeta svg{width:var(--jf-sigil);height:var(--jf-sigil);color:var(--jf-ink-4)}
+.jf-appmeta span{display:inline-flex;align-items:center;gap:var(--jf-s1)}
+/* below 60rem the meta strip would squeeze the destination nav into a
+   scroller. the privacy statement stays in the accessibility tree; only its
+   pixels go, leaving the lock icon as the visual marker. */
+@media (max-width:60rem){
+  .jf-appmeta .jf-opt{display:none}
+  .jf-appmeta .jf-shrink{position:absolute;width:var(--jf-hair);height:var(--jf-hair);overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+}
+
+/* ── toolbar ────────────────────────────────────────────────────────────── */
+.jf-toolbar{
+  display:flex;flex-wrap:wrap;align-items:flex-end;gap:var(--jf-s5) var(--jf-s6);
+  padding:var(--jf-s6) var(--jf-pad-x) var(--jf-s4);
+  border-bottom:var(--jf-hair) solid var(--jf-rule);
+}
+.jf-count{display:flex;align-items:baseline;gap:var(--jf-s3);min-width:0}
+/* the biggest type on the page is a NUMBER, not a word. */
+.jf-count-n{
+  font-family:var(--jf-mono);font-weight:700;font-size:var(--jf-t-mega);
+  line-height:var(--jf-lh-tight);letter-spacing:var(--jf-track-tight);
+  color:var(--jf-ink);font-variant-numeric:tabular-nums;
+}
+.jf-count-t{display:flex;flex-direction:column;gap:var(--jf-s1);padding-bottom:var(--jf-s1)}
+.jf-count-t h2{
+  margin:0;font-family:var(--jf-sans);font-weight:600;font-size:var(--jf-t-lg);
+  letter-spacing:var(--jf-track-tight);line-height:var(--jf-lh-tight);color:var(--jf-ink);
+}
+.jf-count-t p{margin:0;font-family:var(--jf-mono);font-size:var(--jf-t-xs);color:var(--jf-ink-3);line-height:var(--jf-lh-data)}
+
+/* chips share one hairline: each pulls left by 1px so the group reads as a
+   single segmented control, not seven separate pills. */
+.jf-chips{display:flex;flex-wrap:wrap;gap:0;align-items:stretch}
+.jf-chip{
+  appearance:none;cursor:pointer;
+  display:inline-flex;align-items:center;gap:var(--jf-s2);
+  padding:var(--jf-s2) var(--jf-s4);
+  margin-right:calc(-1 * var(--jf-hair));
+  background:var(--jf-paper-cell);color:var(--jf-ink-2);
+  border:var(--jf-hair) solid var(--jf-rule-2);border-radius:var(--jf-r0);
+  font-family:var(--jf-mono);font-size:var(--jf-t-xs);line-height:var(--jf-lh-data);
+  transition:color var(--jf-dur-fast) var(--jf-ease-out),
+             background-color var(--jf-dur-fast) var(--jf-ease-out),
+             border-color var(--jf-dur-fast) var(--jf-ease-out);
+}
+.jf-chip:first-child{border-start-start-radius:var(--jf-r2);border-end-start-radius:var(--jf-r2)}
+.jf-chip:last-child{border-start-end-radius:var(--jf-r2);border-end-end-radius:var(--jf-r2);margin-right:0}
+.jf-chip:hover{color:var(--jf-ink);border-color:var(--jf-rule-strong);position:relative;z-index:1}
+.jf-chip:active{background:var(--jf-paper-sunk)}
+.jf-chip:focus-visible{outline:var(--jf-hair-2) solid var(--jf-focus);outline-offset:calc(-1 * var(--jf-hair-2));position:relative;z-index:2}
+.jf-chip[aria-pressed="true"]{background:var(--jf-paper-inv);color:var(--jf-ink-inv);border-color:var(--jf-paper-inv);position:relative;z-index:1}
+.jf-chip .n{font-weight:700;font-variant-numeric:tabular-nums}
+.jf-chip[aria-pressed="true"] .n{color:var(--jf-ink-inv)}
+
+.jf-tools{margin-left:auto;display:flex;flex-wrap:wrap;gap:var(--jf-s3);align-items:center}
+
+/* ── buttons ────────────────────────────────────────────────────────────── */
+.jf-btn{
+  appearance:none;position:relative;overflow:hidden;cursor:pointer;
+  display:inline-flex;align-items:center;justify-content:center;gap:var(--jf-s2);
+  min-height:var(--jf-row-min);padding:var(--jf-s1) var(--jf-s4);
+  background:var(--jf-paper-cell);color:var(--jf-ink-2);
+  border:var(--jf-hair) solid var(--jf-rule-2);border-radius:var(--jf-r2);
+  font-family:var(--jf-mono);font-size:var(--jf-t-xs);line-height:var(--jf-lh-data);
+  white-space:nowrap;
+  transition:color var(--jf-dur-fast) var(--jf-ease-out),
+             background-color var(--jf-dur-fast) var(--jf-ease-out),
+             border-color var(--jf-dur-fast) var(--jf-ease-out);
+}
+.jf-btn svg{width:var(--jf-sigil);height:var(--jf-sigil)}
+.jf-btn:hover{color:var(--jf-ink);border-color:var(--jf-rule-strong)}
+.jf-btn:active{background:var(--jf-paper-sunk)}
+.jf-btn:focus-visible{outline:var(--jf-hair-2) solid var(--jf-focus);outline-offset:var(--jf-hair)}
+.jf-btn:disabled{cursor:not-allowed;color:var(--jf-ink-4);background:var(--jf-paper-sunk);border-style:dashed;border-color:var(--jf-rule)}
+.jf-btn--primary{color:var(--jf-ink);border-color:var(--jf-rule-strong);font-weight:700}
+.jf-btn--primary:hover{background:var(--jf-paper-inv);color:var(--jf-ink-inv);border-color:var(--jf-paper-inv)}
+.jf-btn--quiet{border-color:transparent;background:none;color:var(--jf-ink-3)}
+.jf-btn--quiet:hover{background:var(--jf-paper-cell);border-color:var(--jf-rule-2);color:var(--jf-ink)}
+/* armed = second click commits. inverted ink, never a color: this system owns
+   no red, and inversion is legible without hue perception. */
+.jf-btn.is-armed{background:var(--jf-paper-inv);color:var(--jf-ink-inv);border-color:var(--jf-paper-inv);font-weight:700}
+.jf-btn.is-armed:hover{background:var(--jf-ink-2);border-color:var(--jf-ink-2);color:var(--jf-ink-inv)}
+.jf-arm-thread{
+  position:absolute;inset-inline:0;bottom:0;height:var(--jf-hair-2);
+  background:var(--jf-ink-inv);transform-origin:left center;
+  animation:jf-arm-countdown var(--jf-dur-arm) var(--jf-ease-scrub) forwards;
+}
+
+/* ── disclosure control ─────────────────────────────────────────────────── */
+.jf-disc{
+  appearance:none;cursor:pointer;background:none;border:0;padding:0;
+  display:inline-flex;align-items:center;gap:var(--jf-s1);
+  font-family:var(--jf-mono);font-size:var(--jf-t-xs);color:var(--jf-ink-3);
+  transition:color var(--jf-dur-fast) var(--jf-ease-out);
+}
+.jf-disc svg{width:var(--jf-sigil);height:var(--jf-sigil);transition:transform var(--jf-dur-base) var(--jf-ease-move)}
+.jf-disc:hover{color:var(--jf-ink)}
+.jf-disc:active{color:var(--jf-ink-2)}
+.jf-disc:focus-visible{outline:var(--jf-hair-2) solid var(--jf-focus);outline-offset:var(--jf-hair)}
+.jf-disc[aria-expanded="true"]{color:var(--jf-ink)}
+.jf-disc[aria-expanded="true"] svg{transform:rotate(90deg)}
+
+/* ── the grid ───────────────────────────────────────────────────────────── */
+.jf-gridwrap{overflow-x:auto;border-bottom:var(--jf-hair) solid var(--jf-rule)}
+/* A dense grid owns its own scrollport on BOTH axes. This is the only way a
+   sticky column header can work at all: `overflow-x` alone already makes the
+   wrapper the nearest scrollport, so a thead offset against the app bar gets
+   pushed DOWN over row 1 instead of pinning to the viewport. The short grids
+   (runs, library, failures) stay in page flow, where a sticky header would
+   never engage anyway. */
+/* flex-fills exactly the height its panel has left over, so no dead canvas
+   opens between the last row and the status bar, and the sticky column header
+   has a real scrollport to pin against. */
+main > [role="tabpanel"] > .jf-gridwrap--tall{flex:1 1 auto;min-height:var(--jf-gridmin);overflow:auto}
+.jf-grid{
+  width:100%;min-width:78rem;
+  border-collapse:separate;border-spacing:0;
+  table-layout:fixed;
+  background:var(--jf-paper-cell);
+  font-family:var(--jf-mono);font-size:var(--jf-t-sm);
+}
+.jf-grid thead th{
+  position:sticky;top:0;z-index:20;
+  background:var(--jf-paper-sunk);
+  text-align:left;vertical-align:middle;
+  padding:var(--jf-s2) var(--jf-s3);
+  font-family:var(--jf-mono);font-weight:400;font-size:var(--jf-t-xxs);
+  letter-spacing:var(--jf-track-wide);color:var(--jf-ink-3);
+  border-bottom:var(--jf-hair-2) solid var(--jf-rule-strong);
+  border-right:var(--jf-hair) solid var(--jf-rule);
+  white-space:nowrap;
+}
+.jf-grid thead th:last-child{border-right:0}
+.jf-th{display:inline-flex;align-items:center;gap:var(--jf-s1);min-height:var(--jf-t-lg)}
+.jf-th svg{width:var(--jf-sigil);height:var(--jf-sigil);color:var(--jf-ink-4);flex:none}
+.jf-grid tbody td{
+  padding:var(--jf-cell-y) var(--jf-s3);
+  vertical-align:top;
+  height:var(--jf-row-min);
+  color:var(--jf-ink);
+  border-bottom:var(--jf-hair) solid var(--jf-rule);
+  border-right:var(--jf-hair) solid var(--jf-rule);
+  /* Supabase: the cell is a fixed viewport onto the value. clip, never wrap. */
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  transition:background-color var(--jf-dur-fast) var(--jf-ease-out);
+}
+.jf-grid tbody td:last-child{border-right:0}
+/* the app bar and the column header are both sticky, so anything scrolled to
+   must clear BOTH or it lands underneath them. */
+.jf-row,.jf-detailrow,[role="tabpanel"],.jf-band{scroll-margin-block-start:var(--jf-appbar-h)}
+.jf-row:hover > td{background:var(--jf-paper-sunk)}
+.jf-row:focus-within > td{background:var(--jf-paper-sunk)}
+/* receded: done rows are history. ink recedes, paper does not change. */
+.jf-row--done > td{color:var(--jf-ink-3)}
+.jf-row--done .jf-verdict{color:var(--jf-ink-3);font-weight:400}
+
+/* row-number gutter, right-aligned like a spreadsheet */
+.jf-gut{
+  width:var(--jf-gutter-w);text-align:right;
+  color:var(--jf-ink-4);font-size:var(--jf-t-xxs);
+  background:var(--jf-paper-sunk);
+  position:relative;
+  font-variant-numeric:tabular-nums;
+}
+.jf-grid thead .jf-gut{text-align:right;letter-spacing:var(--jf-track-none)}
+.jf-row:hover .jf-gut{color:var(--jf-ink-2)}
+/* attention tick: a 3px amber bar on the gutter edge. never the ONLY signal,
+   always paired with the amber verdict chip in the status cell. */
+.jf-row--attn .jf-gut::after{
+  content:'';position:absolute;inset-block:0;right:0;
+  width:var(--jf-tick);background:var(--jf-attn);
+}
+
+/* the signature move: verdict + criterion, split by a hairline, in one cell */
+/* Decision cells are the ONE exception to the clip-never-wrap rule of the
+   grid. The criterion is the whole reason this surface exists: truncating it
+   would mean clicking to learn why the machine decided something, which is
+   exactly what this direction refuses. It wraps inside its own column, so
+   the hairline separator becomes a vertical rule beside a two-line value.
+   Every other cell still clips. */
+td.jf-decision-cell{white-space:normal}
+.jf-cell-decision{display:flex;align-items:flex-start;gap:var(--jf-s2);min-width:0}
+.jf-verdict{
+  font-weight:700;color:var(--jf-ink);flex:none;line-height:var(--jf-lh-data);
+  letter-spacing:var(--jf-track-tight);
+}
+.jf-verdict--attn{
+  color:var(--jf-attn-ink);background:var(--jf-attn-wash);
+  border:var(--jf-hair) solid var(--jf-attn-edge);border-radius:var(--jf-r1);
+  padding:0 var(--jf-s1);
+  display:inline-flex;align-items:center;gap:var(--jf-s1);
+}
+.jf-verdict--attn::before{
+  content:'';width:var(--jf-s1);height:var(--jf-s1);background:var(--jf-attn);flex:none;
+}
+.jf-verdict--muted{color:var(--jf-ink-3);font-weight:400}
+.jf-crit{
+  color:var(--jf-ink-3);font-size:var(--jf-t-xs);
+  padding-left:var(--jf-s2);
+  border-left:var(--jf-hair) solid var(--jf-rule-2);
+  flex:1 1 auto;min-width:0;align-self:stretch;
+  white-space:normal;overflow-wrap:anywhere;line-height:var(--jf-lh-data);
+}
+.jf-num{text-align:right;font-variant-numeric:tabular-nums}
+.jf-prose{font-family:var(--jf-sans);color:var(--jf-ink)}
+.jf-dim{color:var(--jf-ink-3)}
+.jf-sub{
+  display:block;font-family:var(--jf-mono);font-size:var(--jf-t-xs);
+  color:var(--jf-ink-3);margin-top:var(--jf-s1);
+  overflow:hidden;text-overflow:ellipsis;
+}
+.jf-grid a{color:var(--jf-ink-2);text-decoration:underline;text-underline-offset:var(--jf-hair-2);text-decoration-color:var(--jf-rule-strong)}
+.jf-grid a:hover{color:var(--jf-ink);text-decoration-color:var(--jf-ink)}
+.jf-grid a:active{color:var(--jf-ink-2)}
+.jf-grid a:focus-visible{outline:var(--jf-hair-2) solid var(--jf-focus);outline-offset:var(--jf-hair)}
+.jf-acts{display:flex;gap:var(--jf-s1);flex-wrap:nowrap;overflow:visible}
+.jf-acts > .jf-btn{flex:none;padding-inline:var(--jf-s2)}
+td.jf-acts-cell{overflow:visible}
+
+/* expandable detail row + mono snapshot panel */
+.jf-detailrow > td{
+  padding:0;background:var(--jf-paper-sunk);
+  border-bottom:var(--jf-hair) solid var(--jf-rule-2);
+  overflow:visible;white-space:normal;
+}
+.jf-panel{
+  animation:jf-open var(--jf-dur-open) var(--jf-ease-out) both;
+  padding:var(--jf-s4) var(--jf-s5) var(--jf-s4) calc(var(--jf-gutter-w) + var(--jf-s3));
+}
+.jf-snapshot{
+  margin:0;font-family:var(--jf-mono);font-size:var(--jf-t-xs);
+  line-height:var(--jf-lh-data);color:var(--jf-ink-2);
+  background:var(--jf-paper-cell);
+  border:var(--jf-hair) solid var(--jf-rule);border-left:var(--jf-hair-3) solid var(--jf-rule-strong);
+  border-radius:var(--jf-r2);
+  padding:var(--jf-s3) var(--jf-s4);
+  max-height:var(--jf-snapmax);overflow:auto;white-space:pre-wrap;word-break:break-word;
+}
+.jf-panel-h{
+  font-family:var(--jf-mono);font-size:var(--jf-t-xxs);letter-spacing:var(--jf-track-wide);
+  color:var(--jf-ink-3);margin:0 0 var(--jf-s2);
+}
+.jf-kv{display:grid;grid-template-columns:minmax(0,10rem) minmax(0,1fr);gap:0}
+.jf-kv > dt,.jf-kv > dd{
+  margin:0;padding:var(--jf-s1) var(--jf-s3);
+  font-family:var(--jf-mono);font-size:var(--jf-t-xs);
+  border-bottom:var(--jf-hair) solid var(--jf-rule);
+}
+.jf-kv > dt{color:var(--jf-ink-3);border-right:var(--jf-hair) solid var(--jf-rule)}
+.jf-kv > dd{color:var(--jf-ink-2);overflow:hidden;text-overflow:ellipsis}
+
+/* Sentry: full-bleed tinted group band strips */
+.jf-band{
+  display:flex;align-items:center;gap:var(--jf-s3);
+  padding:var(--jf-s2) var(--jf-pad-x);
+  background:var(--jf-paper-band);
+  border-top:var(--jf-hair) solid var(--jf-rule-2);
+  border-bottom:var(--jf-hair) solid var(--jf-rule-2);
+}
+.jf-band h3{
+  margin:0;font-family:var(--jf-mono);font-weight:700;font-size:var(--jf-t-xs);
+  letter-spacing:var(--jf-track-wide);color:var(--jf-ink);
+}
+.jf-band p{margin:0;font-family:var(--jf-sans);font-size:var(--jf-t-xs);color:var(--jf-ink-3)}
+.jf-band .jf-tools{margin-left:auto}
+
+/* notices, badges, empty states */
+.jf-notice{
+  display:flex;align-items:center;gap:var(--jf-s2);
+  margin:0;padding:var(--jf-s2) var(--jf-pad-x);
+  font-family:var(--jf-mono);font-size:var(--jf-t-xs);
+  color:var(--jf-attn-ink);background:var(--jf-attn-wash);
+  border-bottom:var(--jf-hair) solid var(--jf-attn-edge);
+}
+.jf-notice svg{width:var(--jf-sigil);height:var(--jf-sigil);flex:none}
+.jf-tag{
+  display:inline-flex;align-items:center;gap:var(--jf-s1);
+  font-family:var(--jf-mono);font-size:var(--jf-t-xxs);
+  color:var(--jf-ink-2);background:var(--jf-paper-sunk);
+  border:var(--jf-hair) solid var(--jf-rule-2);border-radius:var(--jf-r1);
+  padding:0 var(--jf-s1);
+}
+.jf-tag--attn{color:var(--jf-attn-ink);background:var(--jf-attn-wash);border-color:var(--jf-attn-edge)}
+.jf-tag--pinned{color:var(--jf-ink);border-color:var(--jf-rule-strong);font-weight:700}
+.jf-empty{
+  padding:var(--jf-s7) var(--jf-pad-x);
+  border-bottom:var(--jf-hair) solid var(--jf-rule);
+  background:var(--jf-paper-cell);
+}
+.jf-empty p{margin:0 0 var(--jf-s2);font-family:var(--jf-mono);font-size:var(--jf-t-sm);color:var(--jf-ink-2)}
+.jf-empty p + p{font-family:var(--jf-sans);font-size:var(--jf-t-xs);color:var(--jf-ink-3);margin:0}
+
+/* inline editable field inside a cell (notes, answers) */
+.jf-inline{
+  width:100%;background:none;color:var(--jf-ink);
+  font-family:var(--jf-sans);font-size:var(--jf-t-sm);line-height:var(--jf-lh-data);
+  border:var(--jf-hair) solid transparent;border-radius:var(--jf-r2);
+  padding:var(--jf-s1) var(--jf-s2);margin:calc(-1 * var(--jf-s1)) calc(-1 * var(--jf-s2));
+  transition:border-color var(--jf-dur-fast) var(--jf-ease-out),
+             background-color var(--jf-dur-fast) var(--jf-ease-out);
+}
+.jf-inline:hover{border-color:var(--jf-rule-2);background:var(--jf-paper-cell)}
+.jf-inline:active{background:var(--jf-paper-sunk)}
+.jf-inline:focus-visible{outline:var(--jf-hair-2) solid var(--jf-focus);outline-offset:calc(-1 * var(--jf-hair));background:var(--jf-paper-cell)}
+.jf-inline:disabled{color:var(--jf-ink-4);cursor:not-allowed}
+.jf-inline::placeholder{color:var(--jf-ink-4)}
+textarea.jf-inline{white-space:pre-wrap;resize:vertical;min-height:var(--jf-s8)}
+
+.jf-select{
+  width:100%;max-width:100%;
+  appearance:none;cursor:pointer;
+  font-family:var(--jf-mono);font-size:var(--jf-t-xs);color:var(--jf-ink);
+  background:var(--jf-paper-cell);
+  border:var(--jf-hair) solid var(--jf-rule-2);border-radius:var(--jf-r2);
+  padding:var(--jf-s1) var(--jf-s5) var(--jf-s1) var(--jf-s2);
+  min-height:var(--jf-row-min);
+  transition:border-color var(--jf-dur-fast) var(--jf-ease-out),
+             background-color var(--jf-dur-fast) var(--jf-ease-out);
+}
+.jf-select:hover{border-color:var(--jf-rule-strong)}
+.jf-select:active{background:var(--jf-paper-sunk)}
+.jf-select:focus-visible{outline:var(--jf-hair-2) solid var(--jf-focus);outline-offset:var(--jf-hair)}
+.jf-select:disabled{color:var(--jf-ink-4);cursor:not-allowed;border-style:dashed}
+.jf-selectwrap{position:relative;display:block;min-width:0}
+.jf-selectwrap > svg{
+  position:absolute;right:var(--jf-s2);top:50%;translate:0 -50%;
+  width:var(--jf-sigil);height:var(--jf-sigil);color:var(--jf-ink-4);pointer-events:none;
+}
+
+/* ── settings form: the same grid, in label/value hairline rows ─────────── */
+.jf-form{background:var(--jf-paper-cell);border-bottom:var(--jf-hair) solid var(--jf-rule)}
+.jf-frow{
+  display:grid;
+  grid-template-columns:minmax(0,20rem) minmax(0,1fr);
+  border-bottom:var(--jf-hair) solid var(--jf-rule);
+  transition:background-color var(--jf-dur-fast) var(--jf-ease-out);
+}
+.jf-frow:hover{background:var(--jf-paper-sunk)}
+.jf-frow:focus-within{background:var(--jf-paper-sunk)}
+.jf-flabel{
+  padding:var(--jf-s4) var(--jf-s4) var(--jf-s4) var(--jf-pad-x);
+  border-right:var(--jf-hair) solid var(--jf-rule);
+  min-width:0;
+}
+.jf-flabel > label,.jf-flabel > .jf-legend{
+  display:block;font-family:var(--jf-sans);font-weight:600;font-size:var(--jf-t-sm);
+  color:var(--jf-ink);line-height:var(--jf-lh-data);
+}
+.jf-help{
+  margin:var(--jf-s1) 0 0;font-family:var(--jf-sans);font-size:var(--jf-t-xs);
+  color:var(--jf-ink-3);line-height:var(--jf-lh-prose);
+}
+.jf-ffield{padding:var(--jf-s4) var(--jf-pad-x) var(--jf-s4) var(--jf-s4);min-width:0;display:flex;flex-direction:column;gap:var(--jf-s2);align-items:stretch}
+/* rules span the sheet; values do not. a five-term list must not stretch to
+   the full width of a 1440px grid. */
+.jf-ffield > *{max-width:var(--jf-field-max)}
+.jf-input{
+  width:100%;
+  font-family:var(--jf-mono);font-size:var(--jf-t-sm);color:var(--jf-ink);
+  line-height:var(--jf-lh-data);
+  background:var(--jf-paper-cell);
+  border:var(--jf-hair) solid var(--jf-rule-2);border-radius:var(--jf-r2);
+  padding:var(--jf-s2) var(--jf-s3);min-height:var(--jf-row-min);
+  transition:border-color var(--jf-dur-fast) var(--jf-ease-out),
+             background-color var(--jf-dur-fast) var(--jf-ease-out);
+}
+.jf-input:hover{border-color:var(--jf-rule-strong)}
+.jf-input:active{background:var(--jf-paper-sunk)}
+.jf-input:focus-visible{outline:var(--jf-hair-2) solid var(--jf-focus);outline-offset:var(--jf-hair)}
+.jf-input:disabled{color:var(--jf-ink-4);cursor:not-allowed;border-style:dashed;background:var(--jf-paper-sunk)}
+.jf-input::placeholder{color:var(--jf-ink-4)}
+textarea.jf-input{resize:vertical;min-height:var(--jf-s8);white-space:pre}
+textarea.jf-prose-input{white-space:pre-wrap;font-family:var(--jf-sans);min-height:calc(var(--jf-s8) * 2)}
+.jf-input--num{max-width:var(--jf-s8);text-align:right}
+
+/* fail-open state row. deliberately calm: neutral ink, sunken paper, a
+   hairline `off` tag. this system owns no error color, so an empty list can
+   NEVER read as an alarm. reserved height, so nothing shifts when it changes. */
+.jf-state{
+  display:flex;align-items:center;gap:var(--jf-s2);flex-wrap:wrap;
+  min-height:var(--jf-row-min);
+  font-family:var(--jf-mono);font-size:var(--jf-t-xs);color:var(--jf-ink-2);
+  background:var(--jf-paper-sunk);
+  border:var(--jf-hair) solid var(--jf-rule);border-radius:var(--jf-r2);
+  padding:var(--jf-s2) var(--jf-s3);
+}
+.jf-state .jf-tag{flex:none}
+.jf-state-note{color:var(--jf-ink-3)}
+
+.jf-checkrow{display:flex;align-items:flex-start;gap:var(--jf-s3)}
+.jf-check{
+  appearance:none;cursor:pointer;flex:none;
+  width:var(--jf-t-lg);height:var(--jf-t-lg);margin:0;
+  background:var(--jf-paper-cell);
+  border:var(--jf-hair) solid var(--jf-rule-strong);border-radius:var(--jf-r2);
+  display:grid;place-content:center;
+  transition:background-color var(--jf-dur-fast) var(--jf-ease-out),
+             border-color var(--jf-dur-fast) var(--jf-ease-out);
+}
+.jf-check::after{
+  content:'';width:var(--jf-s3);height:var(--jf-s2);
+  border-left:var(--jf-hair-2) solid var(--jf-ink-inv);
+  border-bottom:var(--jf-hair-2) solid var(--jf-ink-inv);
+  rotate:-45deg;opacity:0;
+  transition:opacity var(--jf-dur-fast) var(--jf-ease-out);
+}
+.jf-check:checked{background:var(--jf-paper-inv);border-color:var(--jf-paper-inv)}
+.jf-check:checked::after{opacity:1}
+.jf-check:hover{border-color:var(--jf-ink-2)}
+.jf-check:active{background:var(--jf-paper-sunk)}
+.jf-check:checked:active{background:var(--jf-ink-2)}
+.jf-check:focus-visible{outline:var(--jf-hair-2) solid var(--jf-focus);outline-offset:var(--jf-hair)}
+.jf-check:disabled{cursor:not-allowed;border-style:dashed;border-color:var(--jf-rule)}
+.jf-checkrow label{font-family:var(--jf-sans);font-size:var(--jf-t-sm);color:var(--jf-ink);line-height:var(--jf-lh-data)}
+
+/* live summary panel: reads like a query preview of the saved rule set */
+.jf-summary{
+  margin:0;padding:var(--jf-s4) var(--jf-pad-x);
+  background:var(--jf-paper-sunk);
+  border-top:var(--jf-hair) solid var(--jf-rule-2);
+  border-bottom:var(--jf-hair) solid var(--jf-rule-2);
+  box-shadow:var(--jf-shadow-raise);
+}
+.jf-summary-h{
+  font-family:var(--jf-mono);font-size:var(--jf-t-xxs);letter-spacing:var(--jf-track-wide);
+  color:var(--jf-ink-3);margin:0 0 var(--jf-s2);
+}
+.jf-summary-b{
+  margin:0;font-family:var(--jf-mono);font-size:var(--jf-t-xs);line-height:var(--jf-lh-data);
+  color:var(--jf-ink);white-space:pre-wrap;word-break:break-word;
+}
+.jf-saverow{
+  display:flex;align-items:center;gap:var(--jf-s4);flex-wrap:wrap;
+  padding:var(--jf-s4) var(--jf-pad-x);
+  border-bottom:var(--jf-hair) solid var(--jf-rule);
+}
+.jf-saverow .jf-help{margin:0}
+.jf-count-live{font-family:var(--jf-mono);font-size:var(--jf-t-xs);color:var(--jf-ink-3);min-height:var(--jf-t-lg)}
+
+/* ── status bar ─────────────────────────────────────────────────────────── */
+main{flex:1 1 auto;min-height:0;display:flex;flex-direction:column}
+main > [role="tabpanel"]{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;overflow-y:auto}
+main > [role="tabpanel"] > *{flex:none}
+.jf-statusbar{
+  position:sticky;bottom:0;z-index:25;flex:none;
+  display:flex;align-items:center;gap:var(--jf-s4);flex-wrap:wrap;
+  padding:var(--jf-s2) var(--jf-pad-x);
+  background:var(--jf-paper-sunk);
+  border-top:var(--jf-hair) solid var(--jf-rule-strong);
+  font-family:var(--jf-mono);font-size:var(--jf-t-xxs);color:var(--jf-ink-3);
+}
+.jf-statusbar b{color:var(--jf-ink);font-weight:700}
+.jf-statusbar .jf-right{margin-left:auto;display:flex;gap:var(--jf-s4);align-items:center}
+
+/* ── motion ─────────────────────────────────────────────────────────────── */
+@keyframes jf-open{
+  from{opacity:0;transform:translateY(calc(-1 * var(--jf-lift)))}
+  to{opacity:1;transform:translateY(0)}
+}
+@keyframes jf-arm-countdown{
+  from{transform:scaleX(1)}
+  to{transform:scaleX(0)}
+}
+
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{transition-duration:var(--jf-dur-fast)}
+  .jf-panel{animation:jf-open var(--jf-dur-fast) var(--jf-ease-out) both}
+  .jf-panel{transform:none}
+  .jf-disc svg{transition:none}
+  /* the arm countdown is FUNCTIONAL state (how long the confirm stays live),
+     so it is kept, not zeroed. */
+}
+@media (prefers-contrast:more){
+  :root{
+    --jf-rule:var(--jf-ink-3);
+    --jf-rule-2:var(--jf-ink-2);
+    --jf-rule-strong:var(--jf-ink);
+    --jf-ink-3:var(--jf-ink-2);
+    --jf-ink-4:var(--jf-ink-2);
+  }
+}
+@media (forced-colors:active){
+  .jf-chip,.jf-btn,.jf-input,.jf-select,.jf-check,.jf-tag,.jf-state{border:var(--jf-hair) solid ButtonText}
+  .jf-grid tbody td,.jf-grid thead th{border-color:CanvasText}
+  .jf-chip[aria-pressed="true"],.jf-btn.is-armed{background:Highlight;color:HighlightText;forced-color-adjust:none}
+  .jf-verdict--attn{border:var(--jf-hair) solid CanvasText}
+  .jf-row--attn .jf-gut::after{background:Highlight;forced-color-adjust:none}
+}
+
+/* past 1280px there is room to spend, and the criterion is what it gets
+   spent on. */
+@media (min-width:80rem){
+  :root{--jf-col-decision:24rem;--jf-col-decision-wide:26rem;--jf-col-page:15rem}
+}
+
+/* ── responsive: the form stacks to label-above-field, the grids scroll ─── */
+@media (max-width:52rem){
+  .jf-frow{grid-template-columns:minmax(0,1fr)}
+  .jf-flabel{border-right:0;border-bottom:var(--jf-hair) solid var(--jf-rule);padding-block:var(--jf-s3) var(--jf-s2)}
+  .jf-ffield{padding-inline:var(--jf-pad-x);padding-block:var(--jf-s3) var(--jf-s4)}
+  .jf-kv{grid-template-columns:minmax(0,1fr)}
+  .jf-kv > dt{border-right:0}
+}
+
+/* Doubled attribute selector (0,2,0) so [hidden] outranks the app-shell rule
+   `main > [role="tabpanel"]{display:flex}` (0,1,1). Without this every
+   destination lays out at once, each squeezed into a sixth of the shell. Last
+   rule in the sheet as well, so it also wins any tie. No !important needed. */
+[hidden][hidden]{display:none}
+</style>
+</head>
+<body>
+
+<a class="jf-skip" href="#main">skip to grid</a>
+
+<!-- ── icon set: one hand-authored geometric family. 16-unit box, currentColor,
+     stroke width from --jf-stroke. no emoji, no freehand beziers. ───────── -->
+<svg class="jf-sr" aria-hidden="true" focusable="false"><defs>
+  <symbol id="i-mark" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25">
+    <rect x="1.5" y="1.5" width="13" height="13" rx="1"/><path d="M1.5 5.5h13M5.5 5.5v9M10 9h4.5"/>
+  </symbol>
+  <symbol id="i-text" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25">
+    <path d="M3.5 4h9M8 4v8.5"/>
+  </symbol>
+  <symbol id="i-num" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25">
+    <path d="M6 2.5 4.5 13.5M11.5 2.5 10 13.5M2.5 6h11M2 10h11"/>
+  </symbol>
+  <symbol id="i-date" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25">
+    <rect x="2" y="3.5" width="12" height="11" rx="1"/><path d="M2 7h12M5.5 1.75v3M10.5 1.75v3"/>
+  </symbol>
+  <symbol id="i-enum" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25">
+    <rect x="2" y="3" width="12" height="10" rx="1"/><path d="M5 7.5 7 9.5 11 5.5"/>
+  </symbol>
+  <symbol id="i-link" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25">
+    <rect x="1.75" y="6" width="7" height="4" rx="2"/><rect x="7.25" y="6" width="7" height="4" rx="2"/>
+  </symbol>
+  <symbol id="i-chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25">
+    <path d="m6 3.5 5 4.5-5 4.5"/>
+  </symbol>
+  <symbol id="i-down" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25">
+    <path d="m3.5 6 4.5 5 4.5-5"/>
+  </symbol>
+  <symbol id="i-check" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25">
+    <path d="m3 8.5 3.5 3.5L13 4"/>
+  </symbol>
+  <symbol id="i-x" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25">
+    <path d="m4 4 8 8M12 4l-8 8"/>
+  </symbol>
+  <symbol id="i-run" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25">
+    <path d="M4 2.5 13 8l-9 5.5z" stroke-linejoin="round"/>
+  </symbol>
+  <symbol id="i-lock" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25">
+    <rect x="3" y="7" width="10" height="7" rx="1"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/>
+  </symbol>
+  <symbol id="i-pin" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25">
+    <path d="M8 9.5v4.5M4.5 9.5h7l-1-3v-4h-5v4z" stroke-linejoin="round"/>
+  </symbol>
+  <symbol id="i-alert" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25">
+    <rect x="2" y="2" width="12" height="12" rx="1"/><path d="M8 4.75v4.5M8 11.25v.5"/>
+  </symbol>
+  <symbol id="i-grid" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25">
+    <rect x="2" y="2" width="12" height="12" rx="1"/><path d="M2 6h12M2 10h12M6 2v12"/>
+  </symbol>
+</defs></svg>
+
+<!-- ── app bar ───────────────────────────────────────────────────────────── -->
+<header class="jf-appbar">
+  <h1 class="jf-brand"><svg aria-hidden="true"><use href="#i-mark"/></svg>jobfill</h1>
+  <nav class="jf-nav" role="tablist" aria-label="destinations">
+    <button class="jf-tab" role="tab" id="tab-queue" aria-controls="panel-queue" aria-selected="true" data-dest="queue">queue<span class="jf-badge" id="queueBadge">5</span></button>
+    <button class="jf-tab" role="tab" id="tab-runs" aria-controls="panel-runs" aria-selected="false" tabindex="-1" data-dest="runs">runs</button>
+    <button class="jf-tab" role="tab" id="tab-applications" aria-controls="panel-applications" aria-selected="false" tabindex="-1" data-dest="applications">applications</button>
+    <button class="jf-tab" role="tab" id="tab-library" aria-controls="panel-library" aria-selected="false" tabindex="-1" data-dest="library">library</button>
+    <button class="jf-tab" role="tab" id="tab-failures" aria-controls="panel-failures" aria-selected="false" tabindex="-1" data-dest="failures">failures</button>
+    <button class="jf-tab" role="tab" id="tab-settings" aria-controls="panel-settings" aria-selected="false" tabindex="-1" data-dest="settings">settings</button>
+  </nav>
+  <div class="jf-appmeta">
+    <span><svg aria-hidden="true"><use href="#i-lock"/></svg><span class="jf-shrink">localhost · single user</span></span>
+    <span class="jf-opt">last sweep 06:12</span>
+  </div>
+</header>
+
+<main id="main">
+
+<!-- ══ QUEUE ═════════════════════════════════════════════════════════════ -->
+<section role="tabpanel" id="panel-queue" aria-labelledby="tab-queue" tabindex="-1">
+  <div class="jf-toolbar">
+    <div class="jf-count">
+      <span class="jf-count-n" id="qCountN">5</span>
+      <span class="jf-count-t">
+        <h2>posting queue</h2>
+        <p id="qCountSub">rows need you · 24 in queue</p>
+      </span>
+    </div>
+    <div class="jf-chips" role="group" aria-label="lifecycle filter" id="qChips"></div>
+    <div class="jf-tools">
+      <button class="jf-btn" type="button" data-noop><svg aria-hidden="true"><use href="#i-run"/></svg>fill next queued</button>
+    </div>
+  </div>
+
+  <div class="jf-gridwrap jf-gridwrap--tall">
+    <table class="jf-grid" id="qGrid">
+      <caption class="jf-sr">posting queue: one row per posting the agent queued, with the verdict and the criterion that produced it</caption>
+      <colgroup>
+        <col style="width:var(--jf-gutter-w)">
+        <col style="width:var(--jf-col-decision)"><col style="width:10rem"><col><col style="width:6.5rem">
+        <col style="width:6.5rem"><col style="width:5rem"><col style="width:20rem">
+      </colgroup>
+      <thead>
+        <tr>
+          <th scope="col" class="jf-gut">#</th>
+          <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-enum"/></svg>status · criterion</span></th>
+          <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-text"/></svg>company</span></th>
+          <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-text"/></svg>role · posting</span></th>
+          <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-text"/></svg>source</span></th>
+          <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-date"/></svg>added</span></th>
+          <th scope="col" class="jf-num"><span class="jf-th"><svg aria-hidden="true"><use href="#i-num"/></svg>fields</span></th>
+          <th scope="col"><span class="jf-th">actions</span></th>
+        </tr>
+      </thead>
+      <tbody id="qBody"></tbody>
+    </table>
+  </div>
+  <div class="jf-empty" id="qEmpty" hidden>
+    <p>no rows match this filter</p>
+    <p>pick another lifecycle filter above, or add a posting URL from the extension popup.</p>
+  </div>
+</section>
+
+<!-- ══ RUNS ══════════════════════════════════════════════════════════════ -->
+<section role="tabpanel" id="panel-runs" aria-labelledby="tab-runs" tabindex="-1" hidden>
+  <div class="jf-toolbar">
+    <div class="jf-count">
+      <span class="jf-count-n">31</span>
+      <span class="jf-count-t">
+        <h2>runs</h2>
+        <p>postings fetched in the last sweep · 06:12 to 06:14</p>
+      </span>
+    </div>
+    <div class="jf-tools">
+      <button class="jf-btn jf-btn--primary" type="button" data-noop><svg aria-hidden="true"><use href="#i-run"/></svg>trigger sweep now</button>
+      <button class="jf-btn" type="button" data-noop><svg aria-hidden="true"><use href="#i-run"/></svg>trigger batch now</button>
+    </div>
+  </div>
+
+  <p class="jf-notice"><svg aria-hidden="true"><use href="#i-alert"/></svg>YC session expired · re-login with <code>node scripts/seek-sidecar.mjs --login</code></p>
+
+  <div class="jf-band"><h3>sweeps</h3><p>discovery runs, newest first</p></div>
+  <div class="jf-gridwrap">
+    <table class="jf-grid">
+      <caption class="jf-sr">sweep run history</caption>
+      <colgroup><col style="width:var(--jf-gutter-w)"><col style="width:12rem"><col style="width:7rem"><col style="width:6rem"><col><col style="width:13rem"><col style="width:8rem"></colgroup>
+      <thead><tr>
+        <th scope="col" class="jf-gut">#</th>
+        <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-date"/></svg>started</span></th>
+        <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-text"/></svg>trigger</span></th>
+        <th scope="col" class="jf-num"><span class="jf-th"><svg aria-hidden="true"><use href="#i-num"/></svg>duration</span></th>
+        <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-num"/></svg>headline</span></th>
+        <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-enum"/></svg>status · criterion</span></th>
+        <th scope="col"><span class="jf-th">detail</span></th>
+      </tr></thead>
+      <tbody>
+        <tr class="jf-row"><td class="jf-gut">1</td>
+          <td>2026-07-25 06:12:04</td><td class="jf-dim">schedule</td><td class="jf-num">1m 52s</td>
+          <td>31 fetched · 22 rejected · 3 deduped · 2 held · 4 queued</td>
+          <td class="jf-decision-cell"><span class="jf-cell-decision"><span class="jf-verdict">ok</span><span class="jf-crit" title="sweep:complete">sweep:complete</span></span></td>
+          <td><button class="jf-disc" type="button" aria-expanded="false" aria-controls="sw-1"><svg aria-hidden="true"><use href="#i-chev"/></svg>per-source</button></td>
+        </tr>
+        <tr class="jf-detailrow" id="sw-1" hidden><td colspan="7"><div class="jf-panel">
+          <p class="jf-panel-h">per-source fetch log</p>
+          <pre class="jf-snapshot">greenhouse : 18 fetched, 18 upserted
+ashby      : 7 fetched, 7 upserted, 2 token errors (tessellate, byward)
+yc         : 0 fetched, 1 boards added, error: session expired
+simplify   : 6 fetched, 4 upserted
+rejected by criterion: location 9 · title 6 · yoe 3 · stale 2 · grace 1 · llm 1
+sidecar: ran</pre>
+        </div></td></tr>
+
+        <tr class="jf-row"><td class="jf-gut">2</td>
+          <td>2026-07-24 06:12:03</td><td class="jf-dim">schedule</td><td class="jf-num">2m 09s</td>
+          <td>44 fetched · 30 rejected · 6 deduped · 1 held · 7 queued</td>
+          <td class="jf-decision-cell"><span class="jf-cell-decision"><span class="jf-verdict">ok</span><span class="jf-crit" title="sweep:complete">sweep:complete</span></span></td>
+          <td><button class="jf-disc" type="button" aria-expanded="false" aria-controls="sw-2"><svg aria-hidden="true"><use href="#i-chev"/></svg>per-source</button></td>
+        </tr>
+        <tr class="jf-detailrow" id="sw-2" hidden><td colspan="7"><div class="jf-panel">
+          <p class="jf-panel-h">per-source fetch log</p>
+          <pre class="jf-snapshot">greenhouse : 26 fetched, 26 upserted
+ashby      : 11 fetched, 11 upserted
+yc         : 4 fetched, 4 upserted
+simplify   : 3 fetched, 3 upserted
+rejected by criterion: location 12 · title 9 · yoe 5 · stale 3 · grace 0 · llm 1
+sidecar: ran</pre>
+        </div></td></tr>
+
+        <tr class="jf-row"><td class="jf-gut">3</td>
+          <td>2026-07-23 21:40:11</td><td class="jf-dim">manual</td><td class="jf-num">0m 41s</td>
+          <td class="jf-dim">12 fetched · 11 rejected · 0 deduped · 0 held · 1 queued</td>
+          <td class="jf-decision-cell"><span class="jf-cell-decision"><span class="jf-verdict">ok</span><span class="jf-crit" title="sweep:complete">sweep:complete</span></span></td>
+          <td><button class="jf-disc" type="button" aria-expanded="false" aria-controls="sw-3"><svg aria-hidden="true"><use href="#i-chev"/></svg>per-source</button></td>
+        </tr>
+        <tr class="jf-detailrow" id="sw-3" hidden><td colspan="7"><div class="jf-panel">
+          <p class="jf-panel-h">per-source fetch log</p>
+          <pre class="jf-snapshot">greenhouse : 12 fetched, 12 upserted
+rejected by criterion: location 5 · title 4 · yoe 1 · stale 1 · grace 0 · llm 0
+sidecar: did not run</pre>
+        </div></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="jf-band"><h3>batch fills</h3><p>autofill runs, never auto-submitted</p></div>
+  <div class="jf-gridwrap">
+    <table class="jf-grid">
+      <caption class="jf-sr">batch fill run history</caption>
+      <colgroup><col style="width:var(--jf-gutter-w)"><col style="width:12rem"><col style="width:7rem"><col style="width:6rem"><col><col style="width:var(--jf-col-decision)"><col style="width:8rem"></colgroup>
+      <thead><tr>
+        <th scope="col" class="jf-gut">#</th>
+        <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-date"/></svg>started</span></th>
+        <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-text"/></svg>trigger</span></th>
+        <th scope="col" class="jf-num"><span class="jf-th"><svg aria-hidden="true"><use href="#i-num"/></svg>duration</span></th>
+        <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-num"/></svg>headline</span></th>
+        <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-enum"/></svg>status · criterion</span></th>
+        <th scope="col"><span class="jf-th">detail</span></th>
+      </tr></thead>
+      <tbody>
+        <tr class="jf-row"><td class="jf-gut">1</td>
+          <td>2026-07-25 06:20:55</td><td class="jf-dim">schedule</td><td class="jf-num">6m 14s</td>
+          <td>4 filled · 2 skipped · 1 failed</td>
+          <td class="jf-decision-cell"><span class="jf-cell-decision"><span class="jf-verdict">ok</span><span class="jf-crit" title="stop:cap">stop:cap</span></span>
+            <span class="jf-sub">stopped · reached the review backlog cap</span></td>
+          <td><button class="jf-disc" type="button" aria-expanded="false" aria-controls="bt-1"><svg aria-hidden="true"><use href="#i-chev"/></svg>skips</button></td>
+        </tr>
+        <tr class="jf-detailrow" id="bt-1" hidden><td colspan="7"><div class="jf-panel">
+          <p class="jf-panel-h">skipped and failed rows</p>
+          <pre class="jf-snapshot">Coldharbour · Backend Engineer      : skipped · login required
+Nine Elms    · Full Stack Engineer   : skipped · host not on allowlist
+Saltmarsh    · Software Engineer II  : failed  · no form rendered</pre>
+        </div></td></tr>
+
+        <tr class="jf-row"><td class="jf-gut">2</td>
+          <td>2026-07-24 06:21:02</td><td class="jf-dim">schedule</td><td class="jf-num">9m 38s</td>
+          <td>7 filled · 1 skipped · 0 failed</td>
+          <td class="jf-decision-cell"><span class="jf-cell-decision"><span class="jf-verdict">ok</span><span class="jf-crit" title="stop:queue-empty">stop:queue-empty</span></span>
+            <span class="jf-sub">stopped · no more eligible postings</span></td>
+          <td><button class="jf-disc" type="button" aria-expanded="false" aria-controls="bt-2"><svg aria-hidden="true"><use href="#i-chev"/></svg>skips</button></td>
+        </tr>
+        <tr class="jf-detailrow" id="bt-2" hidden><td colspan="7"><div class="jf-panel">
+          <p class="jf-panel-h">skipped and failed rows</p>
+          <pre class="jf-snapshot">Rookery · Platform Engineer : skipped · not fillable</pre>
+        </div></td></tr>
+
+        <tr class="jf-row jf-row--attn"><td class="jf-gut">3</td>
+          <td>2026-07-23 22:04:19</td><td class="jf-dim">manual</td><td class="jf-num">1m 02s</td>
+          <td class="jf-dim">0 filled · 0 skipped · 3 failed</td>
+          <td class="jf-decision-cell"><span class="jf-cell-decision"><span class="jf-verdict jf-verdict--attn">failed</span><span class="jf-crit" title="stop:circuit-breaker">stop:circuit-breaker</span></span>
+            <span class="jf-sub">stopped early · 3 fills in a row failed</span></td>
+          <td><button class="jf-disc" type="button" aria-expanded="false" aria-controls="bt-3"><svg aria-hidden="true"><use href="#i-chev"/></svg>skips</button></td>
+        </tr>
+        <tr class="jf-detailrow" id="bt-3" hidden><td colspan="7"><div class="jf-panel">
+          <p class="jf-panel-h">skipped and failed rows</p>
+          <pre class="jf-snapshot">Ironvane   · Backend Engineer : failed · timed out
+Pelagic    · Product Engineer : failed · couldn't complete the fill
+Windrose   · Software Engineer: failed · couldn't start the fill</pre>
+        </div></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="jf-band">
+    <h3>seek decisions</h3>
+    <p>31 fetched · 22 rejected · 2 held · 4 queued</p>
+    <div class="jf-tools">
+      <button class="jf-disc" type="button" aria-expanded="false" aria-controls="seekBreakdown"><svg aria-hidden="true"><use href="#i-chev"/></svg>rejection breakdown</button>
+    </div>
+  </div>
+  <div id="seekBreakdown" hidden>
+    <div class="jf-panel">
+      <p class="jf-panel-h">rejected by criterion · last sweep</p>
+      <dl class="jf-kv">
+        <dt>rules:location</dt><dd>9</dd>
+        <dt>rules:title</dt><dd>6</dd>
+        <dt>rules:yoe</dt><dd>3</dd>
+        <dt>rules:stale</dt><dd>2</dd>
+        <dt>rules:board-grace</dt><dd>1</dd>
+        <dt>llm:not-relevant</dt><dd>1</dd>
+        <dt>dedupe:already-seen</dt><dd>3</dd>
+      </dl>
+    </div>
+  </div>
+  <div class="jf-toolbar">
+    <div class="jf-chips" role="group" aria-label="decision filter">
+      <button class="jf-chip" type="button" aria-pressed="true" data-noop>all<span class="n">31</span></button>
+      <button class="jf-chip" type="button" aria-pressed="false" data-noop>queued<span class="n">4</span></button>
+      <button class="jf-chip" type="button" aria-pressed="false" data-noop>rejected<span class="n">22</span></button>
+      <button class="jf-chip" type="button" aria-pressed="false" data-noop>held<span class="n">2</span></button>
+      <button class="jf-chip" type="button" aria-pressed="false" data-noop>unscored<span class="n">3</span></button>
+    </div>
+  </div>
+  <div class="jf-gridwrap">
+    <table class="jf-grid">
+      <caption class="jf-sr">seek decisions: every posting the agent judged, with the criterion that decided it</caption>
+      <colgroup><col style="width:var(--jf-gutter-w)"><col style="width:6.5rem"><col style="width:11rem"><col><col style="width:7rem"><col style="width:var(--jf-col-decision-wide)"><col style="width:9rem"></colgroup>
+      <thead><tr>
+        <th scope="col" class="jf-gut">#</th>
+        <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-date"/></svg>fetched</span></th>
+        <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-text"/></svg>company</span></th>
+        <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-text"/></svg>title</span></th>
+        <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-text"/></svg>source</span></th>
+        <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-enum"/></svg>decision · criterion</span></th>
+        <th scope="col"><span class="jf-th">action</span></th>
+      </tr></thead>
+      <tbody>
+        <tr class="jf-row"><td class="jf-gut">1</td><td>2026-07-25</td><td>Cadence Grid</td><td>Software Engineer, Platform</td><td class="jf-dim">greenhouse</td>
+          <td class="jf-decision-cell"><span class="jf-cell-decision"><span class="jf-verdict">queued</span><span class="jf-crit" title="llm:relevant · backend platform, NY hybrid">llm:relevant · backend platform, NY hybrid</span></span></td><td></td></tr>
+        <tr class="jf-row"><td class="jf-gut">2</td><td>2026-07-25</td><td>Otterden</td><td>Senior Staff Engineer, Payments</td><td class="jf-dim">ashby</td>
+          <td class="jf-decision-cell"><span class="jf-cell-decision"><span class="jf-verdict jf-verdict--muted">rejected</span><span class="jf-crit" title="rules:title · seniority wording">rules:title · seniority wording</span></span></td>
+          <td class="jf-acts-cell"><span class="jf-acts"><button class="jf-btn jf-btn--quiet" type="button" data-noop>queue anyway</button></span></td></tr>
+        <tr class="jf-row"><td class="jf-gut">3</td><td>2026-07-25</td><td>Lantern Bay</td><td>Backend Engineer</td><td class="jf-dim">greenhouse</td>
+          <td class="jf-decision-cell"><span class="jf-cell-decision"><span class="jf-verdict jf-verdict--muted">rejected</span><span class="jf-crit" title="rules:location · Austin, TX onsite">rules:location · Austin, TX onsite</span></span></td>
+          <td class="jf-acts-cell"><span class="jf-acts"><button class="jf-btn jf-btn--quiet" type="button" data-noop>queue anyway</button></span></td></tr>
+        <tr class="jf-row jf-row--attn"><td class="jf-gut">4</td><td>2026-07-25</td><td>Fenwick Row</td><td>Product Engineer</td><td class="jf-dim">simplify</td>
+          <td class="jf-decision-cell"><span class="jf-cell-decision"><span class="jf-verdict jf-verdict--attn">held</span><span class="jf-crit" title="seek:jd-fetch-error · retries next sweep">seek:jd-fetch-error · retries next sweep</span></span></td>
+          <td class="jf-acts-cell"><span class="jf-acts"><button class="jf-btn jf-btn--quiet" type="button" data-noop>queue anyway</button></span></td></tr>
+        <tr class="jf-row"><td class="jf-gut">5</td><td>2026-07-25</td><td>Cobbleworks</td><td>Software Engineer II</td><td class="jf-dim">greenhouse</td>
+          <td class="jf-decision-cell"><span class="jf-cell-decision"><span class="jf-verdict jf-verdict--muted">rejected</span><span class="jf-crit" title="rules:yoe · asks for 8+ years">rules:yoe · asks for 8+ years</span></span></td>
+          <td class="jf-acts-cell"><span class="jf-acts"><button class="jf-btn jf-btn--quiet" type="button" data-noop>queue anyway</button></span></td></tr>
+        <tr class="jf-row"><td class="jf-gut">6</td><td>2026-07-24</td><td>Halyard Data</td><td>Infrastructure Engineer</td><td class="jf-dim">ashby</td>
+          <td class="jf-decision-cell"><span class="jf-cell-decision"><span class="jf-verdict jf-verdict--muted">rejected</span><span class="jf-crit" title="rules:stale · posted 6 days ago">rules:stale · posted 6 days ago</span></span></td>
+          <td class="jf-acts-cell"><span class="jf-acts"><button class="jf-btn jf-btn--quiet" type="button" data-noop>queue anyway</button></span></td></tr>
+        <tr class="jf-row"><td class="jf-gut">7</td><td>2026-07-24</td><td>Byward</td><td>Software Engineer, Growth</td><td class="jf-dim">yc</td>
+          <td class="jf-decision-cell"><span class="jf-cell-decision"><span class="jf-verdict jf-verdict--muted">rejected</span><span class="jf-crit" title="dedupe:already-queued">dedupe:already-queued</span></span></td><td></td></tr>
+        <tr class="jf-row"><td class="jf-gut">8</td><td>2026-07-24</td><td>Quorum Bay</td><td>Applied AI Engineer</td><td class="jf-dim">greenhouse</td>
+          <td class="jf-decision-cell"><span class="jf-cell-decision"><span class="jf-verdict">queued</span><span class="jf-crit" title="llm:relevant · agent tooling, remote US">llm:relevant · agent tooling, remote US</span></span></td><td></td></tr>
+        <tr class="jf-row"><td class="jf-gut">9</td><td>2026-07-24</td><td>Tessellate</td><td>Engineer, Data Platform</td><td class="jf-dim">ashby</td>
+          <td class="jf-decision-cell"><span class="jf-cell-decision"><span class="jf-verdict jf-verdict--muted">unscored</span><span class="jf-crit" title="seek:not-yet-judged">seek:not-yet-judged</span></span></td>
+          <td class="jf-acts-cell"><span class="jf-acts"><button class="jf-btn jf-btn--quiet" type="button" data-noop>queue anyway</button></span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ══ APPLICATIONS ══════════════════════════════════════════════════════ -->
+<section role="tabpanel" id="panel-applications" aria-labelledby="tab-applications" tabindex="-1" hidden>
+  <div class="jf-toolbar">
+    <div class="jf-count">
+      <span class="jf-count-n" id="aCountN">14</span>
+      <span class="jf-count-t">
+        <h2>applications</h2>
+        <p id="aCountSub">tracked · 8 active · 3 ghosted · $4.18 api spend</p>
+      </span>
+    </div>
+    <div class="jf-chips" role="group" aria-label="status filter" id="aChips"></div>
+  </div>
+  <div class="jf-gridwrap jf-gridwrap--tall">
+    <table class="jf-grid" id="aGrid">
+      <caption class="jf-sr">applications: every posting submitted or awaiting submit</caption>
+      <colgroup><col style="width:var(--jf-gutter-w)"><col style="width:6.5rem"><col style="width:11rem"><col><col style="width:var(--jf-col-decision)"><col style="width:16rem"><col style="width:13rem"></colgroup>
+      <thead><tr>
+        <th scope="col" class="jf-gut">#</th>
+        <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-date"/></svg>date</span></th>
+        <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-text"/></svg>company</span></th>
+        <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-text"/></svg>role</span></th>
+        <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-enum"/></svg>status · criterion</span></th>
+        <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-text"/></svg>notes</span></th>
+        <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-link"/></svg>links</span></th>
+      </tr></thead>
+      <tbody id="aBody"></tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ══ LIBRARY ═══════════════════════════════════════════════════════════ -->
+<section role="tabpanel" id="panel-library" aria-labelledby="tab-library" tabindex="-1" hidden>
+  <div class="jf-toolbar">
+    <div class="jf-count">
+      <span class="jf-count-n">6</span>
+      <span class="jf-count-t">
+        <h2>answer library</h2>
+        <p>banked answers · 2 pinned · 4 with older versions</p>
+      </span>
+    </div>
+  </div>
+  <div class="jf-gridwrap">
+    <table class="jf-grid">
+      <caption class="jf-sr">answer library: essay answers banked from filled forms</caption>
+      <colgroup><col style="width:var(--jf-gutter-w)"><col style="width:20rem"><col><col style="width:9rem"><col style="width:12rem"></colgroup>
+      <thead><tr>
+        <th scope="col" class="jf-gut">#</th>
+        <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-text"/></svg>question</span></th>
+        <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-text"/></svg>answer</span></th>
+        <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-date"/></svg>captured</span></th>
+        <th scope="col"><span class="jf-th">actions</span></th>
+      </tr></thead>
+      <tbody>
+        <tr class="jf-row">
+          <td class="jf-gut">1</td>
+          <td class="jf-prose">Why do you want to work here?</td>
+          <td><label class="jf-sr" for="ans-1">answer for: why do you want to work here</label>
+            <textarea class="jf-inline" id="ans-1" rows="3">i want to work on tools that other engineers use every day. the parts of my last two projects i cared most about were the ones where the feedback loop was tight and the person on the other end was technical.</textarea></td>
+          <td>2026-07-22<span class="jf-sub">3 versions</span></td>
+          <td class="jf-acts-cell"><span class="jf-acts">
+            <button class="jf-btn jf-btn--quiet" type="button" aria-pressed="true" data-noop><svg aria-hidden="true"><use href="#i-pin"/></svg>pinned</button>
+            <button class="jf-btn jf-btn--quiet jf-armable" type="button" data-armed="sure?" data-resting="delete"><svg aria-hidden="true"><use href="#i-x"/></svg>delete</button>
+          </span></td>
+        </tr>
+        <tr class="jf-row">
+          <td class="jf-gut">2</td>
+          <td class="jf-prose">Describe a technically difficult project.</td>
+          <td><label class="jf-sr" for="ans-2">answer for: describe a technically difficult project</label>
+            <textarea class="jf-inline" id="ans-2" rows="3">i rebuilt a sync pipeline that had been silently dropping rows for months. the hard part was not the rewrite, it was proving which rows were missing before anyone would let me touch it.</textarea></td>
+          <td>2026-07-20<span class="jf-sub">1 version</span></td>
+          <td class="jf-acts-cell"><span class="jf-acts">
+            <button class="jf-btn jf-btn--quiet" type="button" aria-pressed="false" data-noop><svg aria-hidden="true"><use href="#i-pin"/></svg>pin</button>
+            <button class="jf-btn jf-btn--quiet jf-armable" type="button" data-armed="sure?" data-resting="delete"><svg aria-hidden="true"><use href="#i-x"/></svg>delete</button>
+          </span></td>
+        </tr>
+        <tr class="jf-row">
+          <td class="jf-gut">3</td>
+          <td class="jf-prose">What are you looking for in your next role?</td>
+          <td><label class="jf-sr" for="ans-3">answer for: what are you looking for in your next role</label>
+            <textarea class="jf-inline" id="ans-3" rows="3">a small team where i own something end to end, and where the product has real users rather than a pilot.</textarea></td>
+          <td>2026-07-18</td>
+          <td class="jf-acts-cell"><span class="jf-acts">
+            <button class="jf-btn jf-btn--quiet" type="button" aria-pressed="true" data-noop><svg aria-hidden="true"><use href="#i-pin"/></svg>pinned</button>
+            <button class="jf-btn jf-btn--quiet jf-armable" type="button" data-armed="sure?" data-resting="delete"><svg aria-hidden="true"><use href="#i-x"/></svg>delete</button>
+          </span></td>
+        </tr>
+        <tr class="jf-row">
+          <td class="jf-gut">4</td>
+          <td class="jf-prose">How did you hear about us?</td>
+          <td><label class="jf-sr" for="ans-4">answer for: how did you hear about us</label>
+            <textarea class="jf-inline" id="ans-4" rows="2">found the posting on your careers page while looking through companies working on developer tooling.</textarea></td>
+          <td>2026-07-15<span class="jf-sub">2 versions</span></td>
+          <td class="jf-acts-cell"><span class="jf-acts">
+            <button class="jf-btn jf-btn--quiet" type="button" aria-pressed="false" data-noop><svg aria-hidden="true"><use href="#i-pin"/></svg>pin</button>
+            <button class="jf-btn jf-btn--quiet jf-armable" type="button" data-armed="sure?" data-resting="delete"><svg aria-hidden="true"><use href="#i-x"/></svg>delete</button>
+          </span></td>
+        </tr>
+        <tr class="jf-row">
+          <td class="jf-gut">5</td>
+          <td class="jf-prose">What is your proudest engineering achievement?</td>
+          <td><label class="jf-sr" for="ans-5">answer for: what is your proudest engineering achievement</label>
+            <textarea class="jf-inline" id="ans-5" rows="3">shipping the first version of an internal analytics tool that a coach actually used the morning after i deployed it, and then watching what they did with it change what i built next.</textarea></td>
+          <td>2026-07-11<span class="jf-sub">1 version</span></td>
+          <td class="jf-acts-cell"><span class="jf-acts">
+            <button class="jf-btn jf-btn--quiet" type="button" aria-pressed="false" data-noop><svg aria-hidden="true"><use href="#i-pin"/></svg>pin</button>
+            <button class="jf-btn jf-btn--quiet jf-armable" type="button" data-armed="sure?" data-resting="delete"><svg aria-hidden="true"><use href="#i-x"/></svg>delete</button>
+          </span></td>
+        </tr>
+        <tr class="jf-row">
+          <td class="jf-gut">6</td>
+          <td class="jf-prose">Anything else we should know?</td>
+          <td><label class="jf-sr" for="ans-6">answer for: anything else we should know</label>
+            <textarea class="jf-inline" id="ans-6" rows="2">happy to walk through any of the projects on my github in a call, including the parts that did not work.</textarea></td>
+          <td>2026-07-08</td>
+          <td class="jf-acts-cell"><span class="jf-acts">
+            <button class="jf-btn jf-btn--quiet" type="button" aria-pressed="false" data-noop><svg aria-hidden="true"><use href="#i-pin"/></svg>pin</button>
+            <button class="jf-btn jf-btn--quiet jf-armable" type="button" data-armed="sure?" data-resting="delete"><svg aria-hidden="true"><use href="#i-x"/></svg>delete</button>
+          </span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ══ FAILURES ══════════════════════════════════════════════════════════ -->
+<section role="tabpanel" id="panel-failures" aria-labelledby="tab-failures" tabindex="-1" hidden>
+  <div class="jf-toolbar">
+    <div class="jf-count">
+      <span class="jf-count-n">5</span>
+      <span class="jf-count-t">
+        <h2>widget failures</h2>
+        <p>fields the filler could not land · captured automatically</p>
+      </span>
+    </div>
+  </div>
+  <div class="jf-gridwrap">
+    <table class="jf-grid">
+      <caption class="jf-sr">widget failures: fields where the autofill could not set a value</caption>
+      <colgroup><col style="width:var(--jf-gutter-w)"><col style="width:6.5rem"><col style="width:var(--jf-col-page)"><col><col style="width:var(--jf-col-decision)"><col style="width:8rem"></colgroup>
+      <thead><tr>
+        <th scope="col" class="jf-gut">#</th>
+        <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-date"/></svg>date</span></th>
+        <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-link"/></svg>page</span></th>
+        <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-text"/></svg>field</span></th>
+        <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-enum"/></svg>status · criterion</span></th>
+        <th scope="col"><span class="jf-th">details</span></th>
+      </tr></thead>
+      <tbody>
+        <tr class="jf-row jf-row--attn">
+          <td class="jf-gut">1</td><td>2026-07-25</td><td><a href="#panel-failures">boards.cadencegrid.example</a></td>
+          <td>How did you hear about us?<span class="jf-sub">combobox</span></td>
+          <td class="jf-decision-cell"><span class="jf-cell-decision"><span class="jf-verdict jf-verdict--attn">needs_manual</span><span class="jf-crit" title="widget:combobox · no option matched">widget:combobox · no option matched</span></span></td>
+          <td><button class="jf-disc" type="button" aria-expanded="false" aria-controls="fl-1"><svg aria-hidden="true"><use href="#i-chev"/></svg>details</button></td>
+        </tr>
+        <tr class="jf-detailrow" id="fl-1" hidden><td colspan="6"><div class="jf-panel">
+          <p class="jf-panel-h">captured widget</p>
+          <pre class="jf-snapshot">&lt;div role="combobox" aria-expanded="false" aria-controls="src-list" class="select__control"&gt;
+  &lt;div class="select__value-container"&gt;&lt;div class="select__placeholder"&gt;Select...&lt;/div&gt;&lt;/div&gt;
+&lt;/div&gt;</pre>
+          <dl class="jf-kv">
+            <dt>mapped value</dt><dd>Company careers page</dd>
+            <dt>options seen (6)</dt><dd>LinkedIn, Indeed, Referral, Recruiter, Event, Other</dd>
+            <dt>list via aria</dt><dd>yes</dd>
+          </dl>
+        </div></td></tr>
+
+        <tr class="jf-row jf-row--attn">
+          <td class="jf-gut">2</td><td>2026-07-25</td><td><a href="#panel-failures">jobs.pinerock.example</a></td>
+          <td>Desired salary<span class="jf-sub">text</span></td>
+          <td class="jf-decision-cell"><span class="jf-cell-decision"><span class="jf-verdict jf-verdict--attn">didnt_stick</span><span class="jf-crit" title="widget:react-controlled">widget:react-controlled</span></span></td>
+          <td><button class="jf-disc" type="button" aria-expanded="false" aria-controls="fl-2"><svg aria-hidden="true"><use href="#i-chev"/></svg>details</button></td>
+        </tr>
+        <tr class="jf-detailrow" id="fl-2" hidden><td colspan="6"><div class="jf-panel">
+          <p class="jf-panel-h">captured widget</p>
+          <pre class="jf-snapshot">&lt;input type="text" name="salary" value="" data-controlled="true"
+       class="Input_field__2xk1" autocomplete="off"&gt;</pre>
+          <dl class="jf-kv">
+            <dt>mapped value</dt><dd>Open, targeting market rate</dd>
+            <dt>re-read after set</dt><dd>empty</dd>
+          </dl>
+        </div></td></tr>
+
+        <tr class="jf-row">
+          <td class="jf-gut">3</td><td>2026-07-24</td><td><a href="#panel-failures">apply.stembridge.example</a></td>
+          <td>Work authorization<span class="jf-sub">select</span></td>
+          <td class="jf-decision-cell"><span class="jf-cell-decision"><span class="jf-verdict jf-verdict--muted">verify</span><span class="jf-crit" title="widget:select · nearest option taken">widget:select · nearest option taken</span></span></td>
+          <td><button class="jf-disc" type="button" aria-expanded="false" aria-controls="fl-3"><svg aria-hidden="true"><use href="#i-chev"/></svg>details</button></td>
+        </tr>
+        <tr class="jf-detailrow" id="fl-3" hidden><td colspan="6"><div class="jf-panel">
+          <p class="jf-panel-h">captured widget</p>
+          <pre class="jf-snapshot">&lt;select name="work_auth" id="work_auth"&gt;
+  &lt;option&gt;Yes, I am authorized&lt;/option&gt;
+  &lt;option&gt;No, I require sponsorship&lt;/option&gt;
+&lt;/select&gt;</pre>
+          <dl class="jf-kv">
+            <dt>mapped value</dt><dd>U.S. Citizen</dd>
+            <dt>picked</dt><dd>Yes, I am authorized</dd>
+          </dl>
+        </div></td></tr>
+
+        <tr class="jf-row">
+          <td class="jf-gut">4</td><td>2026-07-24</td><td><a href="#panel-failures">careers.mistbank.example</a></td>
+          <td>Resume upload<span class="jf-sub">file</span></td>
+          <td class="jf-decision-cell"><span class="jf-cell-decision"><span class="jf-verdict jf-verdict--muted">not_found</span><span class="jf-crit" title="widget:file · input behind a shadow root">widget:file · input behind a shadow root</span></span></td>
+          <td><button class="jf-disc" type="button" aria-expanded="false" aria-controls="fl-4"><svg aria-hidden="true"><use href="#i-chev"/></svg>details</button></td>
+        </tr>
+        <tr class="jf-detailrow" id="fl-4" hidden><td colspan="6"><div class="jf-panel">
+          <p class="jf-panel-h">captured widget</p>
+          <pre class="jf-snapshot">&lt;upload-widget data-accept=".pdf,.docx"&gt;#shadow-root (closed)&lt;/upload-widget&gt;</pre>
+          <dl class="jf-kv">
+            <dt>mapped value</dt><dd>resume/2026-07/backend.pdf</dd>
+            <dt>frames searched</dt><dd>3</dd>
+          </dl>
+        </div></td></tr>
+
+        <tr class="jf-row jf-row--done">
+          <td class="jf-gut">5</td><td>2026-07-21</td><td><a href="#panel-failures">boards.alderway.example</a></td>
+          <td>Pronouns<span class="jf-sub">radio</span></td>
+          <td class="jf-decision-cell"><span class="jf-cell-decision"><span class="jf-verdict jf-verdict--muted">stale</span><span class="jf-crit" title="widget:radio · posting closed">widget:radio · posting closed</span></span></td>
+          <td><button class="jf-disc" type="button" aria-expanded="false" aria-controls="fl-5"><svg aria-hidden="true"><use href="#i-chev"/></svg>details</button></td>
+        </tr>
+        <tr class="jf-detailrow" id="fl-5" hidden><td colspan="6"><div class="jf-panel">
+          <p class="jf-panel-h">captured widget</p>
+          <pre class="jf-snapshot">&lt;fieldset name="pronouns"&gt;&lt;legend&gt;Pronouns&lt;/legend&gt;
+  &lt;input type="radio" value="he/him"&gt;&lt;input type="radio" value="she/her"&gt;
+&lt;/fieldset&gt;</pre>
+          <dl class="jf-kv">
+            <dt>mapped value</dt><dd>they/them</dd>
+            <dt>options seen (2)</dt><dd>he/him, she/her</dd>
+          </dl>
+        </div></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ══ SETTINGS ══════════════════════════════════════════════════════════ -->
+<section role="tabpanel" id="panel-settings" aria-labelledby="tab-settings" tabindex="-1" hidden>
+  <div class="jf-toolbar">
+    <div class="jf-count">
+      <span class="jf-count-n" id="sCountN">21</span>
+      <span class="jf-count-t">
+        <h2>settings</h2>
+        <p id="sCountSub">filter terms active across 4 rules</p>
+      </span>
+    </div>
+    <div class="jf-tools">
+      <button class="jf-btn" type="button" data-noop><svg aria-hidden="true"><use href="#i-grid"/></svg>reload from disk</button>
+    </div>
+  </div>
+
+  <form id="settingsForm" novalidate>
+
+  <!-- ── band 1 ─────────────────────────────────────────────────────────── -->
+  <div class="jf-band"><h3>search criteria</h3><p>the rules that permanently reject a posting</p></div>
+  <div class="jf-form">
+    <div class="jf-frow">
+      <div class="jf-flabel">
+        <label for="crit-seniority">reject titles containing (seniority)</label>
+        <p class="jf-help">one term per line. matched anywhere in the title.</p>
+      </div>
+      <div class="jf-ffield">
+        <textarea class="jf-input jf-term" id="crit-seniority" rows="6" data-rule="seniority" aria-describedby="state-seniority" spellcheck="false">senior
+principal
+sr.
+vp
+director
+head of</textarea>
+        <p class="jf-state" id="state-seniority" role="status"></p>
+      </div>
+    </div>
+
+    <div class="jf-frow">
+      <div class="jf-flabel">
+        <label for="crit-nonEng">reject titles containing (non-engineering)</label>
+        <p class="jf-help">one term per line. keeps the queue to engineering roles.</p>
+      </div>
+      <div class="jf-ffield">
+        <textarea class="jf-input jf-term" id="crit-nonEng" rows="6" data-rule="non-engineering" aria-describedby="state-nonEng" spellcheck="false">product manager
+designer
+sales
+recruiter
+marketing</textarea>
+        <p class="jf-state" id="state-nonEng" role="status"></p>
+      </div>
+    </div>
+
+    <div class="jf-frow">
+      <div class="jf-flabel">
+        <label for="crit-location">accept locations containing</label>
+        <p class="jf-help">a posting is rejected only when its location matches none of these.</p>
+      </div>
+      <div class="jf-ffield">
+        <textarea class="jf-input jf-term" id="crit-location" rows="6" data-rule="location" aria-describedby="state-location" spellcheck="false">new york
+nyc
+san francisco
+remote
+united states</textarea>
+        <p class="jf-state" id="state-location" role="status"></p>
+      </div>
+    </div>
+
+    <div class="jf-frow">
+      <div class="jf-flabel">
+        <label for="crit-workmode">ignore these exact location values</label>
+        <p class="jf-help">matched only when the ENTIRE location field equals one of these, so "hybrid" will not match "hybrid, nyc".</p>
+      </div>
+      <div class="jf-ffield">
+        <textarea class="jf-input jf-term" id="crit-workmode" rows="5" data-rule="work-mode-neutral" aria-describedby="state-workmode" spellcheck="false">hybrid
+in-office
+on-site
+flexible</textarea>
+        <p class="jf-state" id="state-workmode" role="status"></p>
+      </div>
+    </div>
+
+    <div class="jf-frow">
+      <div class="jf-flabel">
+        <span class="jf-legend">built-in staff/lead heuristics</span>
+        <p class="jf-help">rejects titles like "staff software engineer" while letting "member of technical staff" through. this logic lives in code and cannot be edited here, only turned off.</p>
+      </div>
+      <div class="jf-ffield">
+        <div class="jf-checkrow">
+          <input class="jf-check" type="checkbox" id="crit-builtins" checked>
+          <label for="crit-builtins">reject staff and lead engineering titles automatically</label>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── band 2 ─────────────────────────────────────────────────────────── -->
+  <div class="jf-band"><h3>posting age limits</h3><p>rejected as stale before the relevance check runs</p></div>
+  <div class="jf-form">
+    <div class="jf-frow">
+      <div class="jf-flabel">
+        <label for="cap-stale">max age, trusted date (days)</label>
+        <p class="jf-help">sources that publish a real posting date.</p>
+      </div>
+      <div class="jf-ffield"><span><input class="jf-input jf-input--num" type="number" id="cap-stale" min="1" max="365" value="2" inputmode="numeric"> <span class="jf-count-live" aria-hidden="true">days</span></span></div>
+    </div>
+    <div class="jf-frow">
+      <div class="jf-flabel">
+        <label for="cap-indexed">max age, index-only sources (days)</label>
+        <p class="jf-help">aggregators such as Simplify and Getro, where the date is the index date.</p>
+      </div>
+      <div class="jf-ffield"><span><input class="jf-input jf-input--num" type="number" id="cap-indexed" min="1" max="365" value="5" inputmode="numeric"> <span class="jf-count-live" aria-hidden="true">days</span></span></div>
+    </div>
+    <div class="jf-frow">
+      <div class="jf-flabel">
+        <label for="cap-firstseen">max time since first seen (days)</label>
+        <p class="jf-help">for Greenhouse and YC, where jobfill's own first sighting is the clock.</p>
+      </div>
+      <div class="jf-ffield"><span><input class="jf-input jf-input--num" type="number" id="cap-firstseen" min="1" max="365" value="3" inputmode="numeric"> <span class="jf-count-live" aria-hidden="true">days</span></span></div>
+    </div>
+    <div class="jf-frow">
+      <div class="jf-flabel">
+        <label for="cap-yoe">years-of-experience cap (years)</label>
+        <p class="jf-help">leave blank for no cap.</p>
+      </div>
+      <div class="jf-ffield">
+        <span><input class="jf-input jf-input--num" type="number" id="cap-yoe" min="0" max="50" value="6" placeholder="none" inputmode="numeric" aria-describedby="state-yoe"> <span class="jf-count-live" aria-hidden="true">years</span></span>
+        <p class="jf-state" id="state-yoe" role="status"></p>
+      </div>
+    </div>
+  </div>
+
+  <div class="jf-summary">
+    <p class="jf-summary-h">live rule set · what the next sweep will apply</p>
+    <p class="jf-summary-b" id="ruleSummary"></p>
+  </div>
+  <div class="jf-saverow">
+    <button class="jf-btn jf-btn--primary jf-armable" type="button" id="saveCriteria" data-armed="confirm?" data-resting="save search criteria">save search criteria</button>
+    <p class="jf-help" id="saveCriteriaHint">narrowing a rule asks for a second click, because a posting rejected by the next sweep is rejected permanently.</p>
+  </div>
+
+  <!-- ── band 3 ─────────────────────────────────────────────────────────── -->
+  <div class="jf-band"><h3>relevance profile</h3><p>prose the relevance check reads for every posting that passes the rules</p></div>
+  <div class="jf-form">
+    <div class="jf-frow">
+      <div class="jf-flabel">
+        <label for="profileText">target roles, seniority and locations</label>
+        <p class="jf-help">written for a model, not for a recruiter. be concrete about what you do and do not want.</p>
+      </div>
+      <div class="jf-ffield">
+        <textarea class="jf-input jf-prose-input" id="profileText" rows="8" aria-describedby="profileCount">i'm targeting backend and full-stack engineering roles at small teams, ideally 5 to 60 people, where i'd own a service end to end. strongest in typescript, python and postgres, with real experience building data pipelines and internal analytics tools.
+
+interested in developer tooling, applied AI infrastructure and anything where the user is technical. not interested in pure frontend roles, agency work, or roles that are mostly configuring someone else's platform.
+
+new york preferred, remote-US fine. open to hybrid in NYC. not relocating outside the US.</textarea>
+        <p class="jf-count-live" id="profileCount" role="status"></p>
+      </div>
+    </div>
+  </div>
+  <div class="jf-saverow">
+    <button class="jf-btn jf-btn--primary" type="button" id="saveProfile" data-noop>save relevance profile</button>
+    <p class="jf-help">free-form prose is never a narrowing change, so this saves on one click.</p>
+  </div>
+
+  <!-- ── band 4 ─────────────────────────────────────────────────────────── -->
+  <div class="jf-band"><h3>identity</h3><p>what the filler types into every application</p></div>
+  <div class="jf-form">
+    <div class="jf-frow">
+      <div class="jf-flabel"><label for="id-first">first name</label></div>
+      <div class="jf-ffield"><input class="jf-input" type="text" id="id-first" value="Alex" autocomplete="given-name"></div>
+    </div>
+    <div class="jf-frow">
+      <div class="jf-flabel"><label for="id-last">last name</label></div>
+      <div class="jf-ffield"><input class="jf-input" type="text" id="id-last" value="Placeholder" autocomplete="family-name"></div>
+    </div>
+    <div class="jf-frow">
+      <div class="jf-flabel"><label for="id-pronouns">pronouns</label></div>
+      <div class="jf-ffield"><input class="jf-input" type="text" id="id-pronouns" value="they/them"></div>
+    </div>
+    <div class="jf-frow">
+      <div class="jf-flabel"><label for="id-email">email</label></div>
+      <div class="jf-ffield"><input class="jf-input" type="email" id="id-email" value="alex@example.invalid" autocomplete="email" inputmode="email"></div>
+    </div>
+    <div class="jf-frow">
+      <div class="jf-flabel"><label for="id-phone">phone</label></div>
+      <div class="jf-ffield"><input class="jf-input" type="tel" id="id-phone" value="+1 555 0100" autocomplete="tel" inputmode="tel"></div>
+    </div>
+    <div class="jf-frow">
+      <div class="jf-flabel">
+        <label for="id-location">location, as shown on applications</label>
+        <p class="jf-help">city, state and country are stored separately and used when a form splits them.</p>
+      </div>
+      <div class="jf-ffield"><input class="jf-input" type="text" id="id-location" value="New York, NY, United States" autocomplete="address-level2"></div>
+    </div>
+    <div class="jf-frow">
+      <div class="jf-flabel"><label for="id-linkedin">linkedin</label></div>
+      <div class="jf-ffield"><input class="jf-input" type="url" id="id-linkedin" value="https://linkedin.com/in/example" autocomplete="url"></div>
+    </div>
+    <div class="jf-frow">
+      <div class="jf-flabel"><label for="id-github">github</label></div>
+      <div class="jf-ffield"><input class="jf-input" type="url" id="id-github" value="https://github.com/example" autocomplete="url"></div>
+    </div>
+    <div class="jf-frow">
+      <div class="jf-flabel">
+        <label for="id-workauth">work authorization</label>
+        <p class="jf-help">used when a form asks for authorization as a dropdown rather than yes/no.</p>
+      </div>
+      <div class="jf-ffield"><span class="jf-selectwrap">
+        <select class="jf-select" id="id-workauth">
+          <option>U.S. Citizen</option>
+          <option>Permanent Resident (Green Card)</option>
+          <option>H-1B</option>
+          <option>F-1 OPT / STEM OPT</option>
+          <option>TN</option>
+          <option>L-1</option>
+          <option>Other visa</option>
+          <option>Require sponsorship</option>
+        </select><svg aria-hidden="true"><use href="#i-down"/></svg>
+      </span></div>
+    </div>
+    <div class="jf-frow">
+      <div class="jf-flabel"><span class="jf-legend">authorization flags</span></div>
+      <div class="jf-ffield">
+        <div class="jf-checkrow"><input class="jf-check" type="checkbox" id="wa-authorized" checked><label for="wa-authorized">authorized to work in the US</label></div>
+        <div class="jf-checkrow"><input class="jf-check" type="checkbox" id="wa-sponsor"><label for="wa-sponsor">needs sponsorship now</label></div>
+        <div class="jf-checkrow"><input class="jf-check" type="checkbox" id="wa-future"><label for="wa-future">will need sponsorship in the future</label></div>
+        <div class="jf-checkrow"><input class="jf-check" type="checkbox" id="wa-over18" checked><label for="wa-over18">18 or older</label></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── band 5 ─────────────────────────────────────────────────────────── -->
+  <div class="jf-band"><h3>eeo and canned answers</h3><p>optional · used only where a form asks</p></div>
+  <div class="jf-form">
+    <div class="jf-frow">
+      <div class="jf-flabel">
+        <span class="jf-legend">about these options</span>
+        <p class="jf-help">these are the standard US categories employers report against: EEO-1 for race, VEVRAA for veteran status, form CC-305 for disability. leaving a field on <strong>not set</strong> makes the filler pick a decline option where a form offers one, and otherwise leave the question alone.</p>
+      </div>
+      <div class="jf-ffield"><p class="jf-state"><span class="jf-tag">6 questions</span><span class="jf-state-note">3 set · 3 left unanswered</span></p></div>
+    </div>
+    <div class="jf-frow">
+      <div class="jf-flabel"><label for="eeo-gender">gender</label></div>
+      <div class="jf-ffield"><span class="jf-selectwrap">
+        <select class="jf-select" id="eeo-gender">
+          <option value="">not set</option><option>Male</option><option>Female</option>
+          <option selected>Non-binary</option><option>Decline to self-identify</option>
+        </select><svg aria-hidden="true"><use href="#i-down"/></svg>
+      </span></div>
+    </div>
+    <div class="jf-frow">
+      <div class="jf-flabel">
+        <label for="eeo-hispanic">are you hispanic or latino?</label>
+        <p class="jf-help">asked as its own question on most forms, separately from race.</p>
+      </div>
+      <div class="jf-ffield"><span class="jf-selectwrap">
+        <select class="jf-select" id="eeo-hispanic">
+          <option value="" selected>not set</option><option>Yes</option><option>No</option>
+          <option>Decline to self-identify</option>
+        </select><svg aria-hidden="true"><use href="#i-down"/></svg>
+      </span></div>
+    </div>
+    <div class="jf-frow">
+      <div class="jf-flabel"><label for="eeo-race">race</label></div>
+      <div class="jf-ffield"><span class="jf-selectwrap">
+        <select class="jf-select" id="eeo-race">
+          <option value="">not set</option><option>Hispanic or Latino</option>
+          <option>American Indian or Alaska Native</option><option>Asian</option>
+          <option>Black or African American</option>
+          <option>Native Hawaiian or Other Pacific Islander</option><option>White</option>
+          <option>Two or More Races</option><option selected>Decline to self-identify</option>
+        </select><svg aria-hidden="true"><use href="#i-down"/></svg>
+      </span></div>
+    </div>
+    <div class="jf-frow">
+      <div class="jf-flabel"><label for="eeo-veteran">veteran status</label></div>
+      <div class="jf-ffield"><span class="jf-selectwrap">
+        <select class="jf-select" id="eeo-veteran">
+          <option value="">not set</option>
+          <option value="I am not a protected veteran" selected>Not a protected veteran</option>
+          <option value="I identify as one or more of the classifications of a protected veteran">I am a protected veteran</option>
+          <option value="I don't wish to answer">Don't wish to answer</option>
+        </select><svg aria-hidden="true"><use href="#i-down"/></svg>
+      </span></div>
+    </div>
+    <div class="jf-frow">
+      <div class="jf-flabel"><label for="eeo-disability">disability status</label></div>
+      <div class="jf-ffield"><span class="jf-selectwrap">
+        <select class="jf-select" id="eeo-disability">
+          <option value="" selected>not set</option>
+          <option value="Yes, I have a disability, or have had one in the past">Yes, have or have had a disability</option>
+          <option value="No, I do not have a disability and have not had one in the past">No</option>
+          <option value="I do not want to answer">Don't want to answer</option>
+        </select><svg aria-hidden="true"><use href="#i-down"/></svg>
+      </span></div>
+    </div>
+    <div class="jf-frow">
+      <div class="jf-flabel">
+        <label for="eeo-orientation">sexual orientation</label>
+        <p class="jf-help">not a federally standardised set. these are the options ATS forms commonly offer.</p>
+      </div>
+      <div class="jf-ffield"><span class="jf-selectwrap">
+        <select class="jf-select" id="eeo-orientation">
+          <option value="" selected>not set</option><option>Heterosexual</option><option>Gay</option>
+          <option>Lesbian</option><option>Bisexual</option><option>Queer</option>
+          <option>Pansexual</option><option>Asexual</option><option>Other</option>
+          <option>Decline to self-identify</option>
+        </select><svg aria-hidden="true"><use href="#i-down"/></svg>
+      </span></div>
+    </div>
+    <div class="jf-frow">
+      <div class="jf-flabel"><label for="ans-salary">salary expectation</label></div>
+      <div class="jf-ffield"><input class="jf-input" type="text" id="ans-salary" value="Open, targeting market rate"></div>
+    </div>
+    <div class="jf-frow">
+      <div class="jf-flabel"><label for="ans-start">start date availability</label></div>
+      <div class="jf-ffield"><input class="jf-input" type="text" id="ans-start" value="Two weeks from offer"></div>
+    </div>
+    <div class="jf-frow">
+      <div class="jf-flabel"><label for="ans-relocate">willing to relocate</label></div>
+      <div class="jf-ffield"><span class="jf-selectwrap">
+        <select class="jf-select" id="ans-relocate">
+          <option value="">not set</option><option>Yes</option><option>No</option>
+          <option selected>Depends on the location</option>
+        </select><svg aria-hidden="true"><use href="#i-down"/></svg>
+      </span></div>
+    </div>
+  </div>
+  <div class="jf-saverow">
+    <button class="jf-btn jf-btn--primary" type="button" id="saveIdentity" data-noop>save identity and eeo</button>
+    <p class="jf-help">written to helper/profile.local.json. the resume-derived sections are never touched.</p>
+  </div>
+
+  </form>
+</section>
+
+</main>
+
+<footer class="jf-statusbar">
+  <span><b id="sbRows">24</b> <span id="sbUnit">rows</span></span>
+  <span><span id="sbFilterLabel">filter</span> <b id="sbFilter">all</b></span>
+  <span id="sbSort">sorted by <b>actionability</b></span>
+  <div class="jf-right">
+    <span>db jobfill.db</span>
+    <span>read only until you click</span>
+  </div>
+</footer>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════════════
+   MOCK DATA — FICTIONAL PLACEHOLDER ROWS, authored for design review only.
+   Every company name, date, count and identity value below is invented. No
+   real person or company appears. Nothing here fetches; the file renders
+   fully from these constants when opened over file://.
+   ═════════════════════════════════════════════════════════════════════════ */
+
+const QUEUE_ROWS = [
+  { st:'reviewed',  crit:'you:2026-07-25 09:04',        co:'Cadence Grid',  role:'Software Engineer, Platform', url:'boards.cadencegrid.example/se-platform', src:'greenhouse', at:'2026-07-25', f:'16/16' },
+  { st:'reviewed',  crit:'you:2026-07-25 09:01',        co:'Quorum Bay',    role:'Applied AI Engineer',         url:'jobs.quorumbay.example/applied-ai',      src:'greenhouse', at:'2026-07-25', f:'14/14' },
+  { st:'filled',    crit:'fill:12/14 · 2 need review',  co:'Halyard Data',  role:'Infrastructure Engineer',     url:'jobs.ashbyhq.example/halyard/infra',     src:'ashby',      at:'2026-07-25', f:'12/14' },
+  { st:'filled',    crit:'fill:18/18',                  co:'Pinerock',      role:'Backend Engineer, Payments',  url:'jobs.pinerock.example/backend-payments', src:'greenhouse', at:'2026-07-25', f:'18/18' },
+  { st:'filled',    crit:'fill:9/11 · 2 need review',   co:'Orbital Ledger', role:'Full Stack Engineer',        url:'careers.orbitalledger.example/fse',      src:'ashby',      at:'2026-07-25', f:'9/11'  },
+  { st:'failed',    crit:'fill:no-form · nothing rendered', co:'Saltmarsh', role:'Software Engineer II',        url:'apply.saltmarsh.example/swe-2',          src:'simplify',   at:'2026-07-25', f:'0/0'   },
+  { st:'filling',   crit:'fill:in-progress · field 7',  co:'Stembridge',    role:'Product Engineer',            url:'apply.stembridge.example/product-eng',   src:'greenhouse', at:'2026-07-25', f:'7/15'  },
+  { st:'queued',    crit:'llm:relevant · agent tooling, remote US', co:'Kestrel Works', role:'Backend Engineer', url:'jobs.kestrelworks.example/be',         src:'greenhouse', at:'2026-07-25', f:'0/0'   },
+  { st:'queued',    crit:'llm:relevant · data platform, NYC',       co:'Vantage Loom',  role:'Engineer, Data Platform', url:'jobs.vantageloom.example/data', src:'ashby',      at:'2026-07-25', f:'0/0'   },
+  { st:'queued',    crit:'skip:login-gated · fill from the popup',  co:'Coldharbour',   role:'Backend Engineer', url:'careers.coldharbour.example/be',       src:'yc',         at:'2026-07-24', f:'0/0'   },
+  { st:'queued',    crit:'skip:unsupported-host · not on allowlist',co:'Nine Elms',     role:'Full Stack Engineer', url:'nineelms.example/careers/fse',      src:'simplify',   at:'2026-07-24', f:'0/0'   },
+  { st:'queued',    crit:'llm:relevant · internal tools',           co:'Ferrous Labs',  role:'Software Engineer, Tools', url:'jobs.ferrouslabs.example/tools', src:'greenhouse', at:'2026-07-24', f:'0/0' },
+  { st:'queued',    crit:'queued:manual · added from the popup',    co:'Mistbank',      role:'Platform Engineer', url:'careers.mistbank.example/platform',   src:'manual',     at:'2026-07-24', f:'0/0'   },
+  { st:'queued',    crit:'llm:relevant · postgres heavy',           co:'Alderway',      role:'Backend Engineer',  url:'jobs.alderway.example/backend',       src:'ashby',      at:'2026-07-24', f:'0/0'   },
+  { st:'failed',    crit:'fill:timeout · 90s at field 3',           co:'Ironvane',      role:'Backend Engineer',  url:'apply.ironvane.example/be',           src:'greenhouse', at:'2026-07-24', f:'3/17'  },
+  { st:'failed',    crit:'fill:duplicate · already applied',        co:'Pelagic',       role:'Product Engineer',  url:'jobs.pelagic.example/product',        src:'ashby',      at:'2026-07-24', f:'0/0'   },
+  { st:'submitted', crit:'you:2026-07-24 08:40',        co:'Windrose',      role:'Software Engineer',            url:'jobs.windrose.example/swe',           src:'greenhouse', at:'2026-07-23', f:'15/15' },
+  { st:'submitted', crit:'you:2026-07-24 08:36',        co:'Rookery',       role:'Platform Engineer',            url:'jobs.rookery.example/platform',       src:'ashby',      at:'2026-07-23', f:'13/13' },
+  { st:'submitted', crit:'you:2026-07-23 19:12',        co:'Cobbleworks',   role:'Software Engineer II',         url:'careers.cobbleworks.example/swe2',    src:'greenhouse', at:'2026-07-22', f:'11/11' },
+  { st:'submitted', crit:'you:2026-07-23 19:08',        co:'Fenwick Row',   role:'Product Engineer',             url:'jobs.fenwickrow.example/product',     src:'simplify',   at:'2026-07-22', f:'12/12' },
+  { st:'submitted', crit:'you:2026-07-22 20:55',        co:'Lantern Bay',   role:'Backend Engineer',             url:'jobs.lanternbay.example/be',          src:'greenhouse', at:'2026-07-21', f:'14/14' },
+  { st:'submitted', crit:'you:2026-07-22 20:50',        co:'Otterden',      role:'Software Engineer, Infra',     url:'jobs.otterden.example/infra',         src:'ashby',      at:'2026-07-21', f:'16/16' },
+  { st:'submitted', crit:'you:2026-07-21 18:22',        co:'Byward',        role:'Software Engineer, Growth',    url:'jobs.byward.example/growth',          src:'yc',         at:'2026-07-20', f:'10/10' },
+  { st:'submitted', crit:'you:2026-07-21 18:15',        co:'Tessellate',    role:'Engineer, Data Platform',      url:'jobs.tessellate.example/data',        src:'ashby',      at:'2026-07-20', f:'13/13' },
+];
+
+/* per-row field results, keyed by company. mono panel content. */
+const QUEUE_RESULTS = {
+  'Halyard Data': `first name        : ok    Alex
+last name         : ok    Placeholder
+email             : ok    alex@example.invalid
+phone             : ok    +1 555 0100
+resume            : ok    resume/2026-07/backend.pdf
+work authorization: ok    U.S. Citizen
+why this company  : ok    banked answer #1
+desired salary    : VERIFY didn't stick, re-read came back empty
+how did you hear  : NEEDS_MANUAL combobox, no option matched`,
+  'Orbital Ledger': `first name        : ok    Alex
+last name         : ok    Placeholder
+email             : ok    alex@example.invalid
+linkedin          : ok    https://linkedin.com/in/example
+resume            : ok    resume/2026-07/fullstack.pdf
+start date        : VERIFY free-text parsed as a date field
+pronouns          : NOT_FOUND radio group has no they/them option`,
+};
+
+const APP_ROWS = [
+  { d:'2026-07-24', co:'Windrose',    role:'Software Engineer',        st:'applied',      crit:'you:submitted', note:'applied through their board, no recruiter contact', ghost:false, docs:['resume','cover letter'] },
+  { d:'2026-07-24', co:'Rookery',     role:'Platform Engineer',        st:'replied',      crit:'them:2026-07-25', note:'recruiter screen offered for tuesday',            ghost:false, docs:['resume'] },
+  { d:'2026-07-23', co:'Cobbleworks', role:'Software Engineer II',     st:'interviewing', crit:'them:2026-07-25', note:'technical round scheduled, 60m systems design',   ghost:false, docs:['resume','brief'] },
+  { d:'2026-07-23', co:'Fenwick Row', role:'Product Engineer',         st:'applied',      crit:'you:submitted', note:'',                                                 ghost:false, docs:['resume'] },
+  { d:'2026-07-21', co:'Lantern Bay', role:'Backend Engineer',         st:'applied',      crit:'you:submitted', note:'follow-up email drafted, not sent',                ghost:true,  docs:['resume','email'] },
+  { d:'2026-07-21', co:'Otterden',    role:'Software Engineer, Infra', st:'offer',        crit:'them:2026-07-24', note:'verbal, waiting on written terms',                ghost:false, docs:['resume','cover letter','brief'] },
+  { d:'2026-07-20', co:'Byward',      role:'Software Engineer, Growth',st:'rejected',     crit:'them:2026-07-23', note:'rejected after the screen, no reason given',      ghost:false, docs:['resume'] },
+  { d:'2026-07-20', co:'Tessellate',  role:'Engineer, Data Platform',  st:'applied',      crit:'you:submitted', note:'',                                                 ghost:true,  docs:['resume'] },
+  { d:'2026-07-18', co:'Pelagic',     role:'Product Engineer',         st:'unsubmitted',  crit:'fill:14/14 · awaiting your submit', note:'filled, still needs a read-through', ghost:false, docs:['resume'] },
+  { d:'2026-07-17', co:'Ironvane',    role:'Backend Engineer',         st:'applied',      crit:'you:submitted', note:'',                                                 ghost:true,  docs:['resume'] },
+];
+
+/* ── helpers ─────────────────────────────────────────────────────────────── */
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+const $ = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
+
+/* statuses that mean "needs your attention" — the ONE job of the accent. */
+const ATTN = new Set(['failed', 'held']);
+const DONE = new Set(['submitted', 'rejected']);
+
+function verdictHtml(st, crit) {
+  const cls = ATTN.has(st) ? ' jf-verdict--attn' : DONE.has(st) ? ' jf-verdict--muted' : '';
+  return `<span class="jf-cell-decision"><span class="jf-verdict${cls}">${esc(st)}</span>` +
+         `<span class="jf-crit" title="${esc(crit)}">${esc(crit)}</span></span>`;
+}
+
+/* ── destination switching ───────────────────────────────────────────────── */
+const DESTS = ['queue', 'runs', 'applications', 'library', 'failures', 'settings'];
+
+let currentDest = null;
+
+/* Pure render: switch the visible destination. Never touches history, so it is
+   safe to call from a hashchange without re-entering navigation. */
+function applyDest(name, focusTab) {
+  if (!DESTS.includes(name)) name = 'queue';
+  currentDest = name;
+  for (const d of DESTS) {
+    const tab = document.getElementById(`tab-${d}`);
+    const panel = document.getElementById(`panel-${d}`);
+    const on = d === name;
+    tab.setAttribute('aria-selected', String(on));
+    tab.tabIndex = on ? 0 : -1;
+    panel.hidden = !on;
+  }
+  if (focusTab) document.getElementById(`tab-${name}`).focus();
+  syncStatusBar(name);
+}
+
+/* The URL is the single source of truth for the destination, so back/forward
+   traverse destinations and a pasted #applications works on an already-loaded
+   page. Navigation writes `location.hash` rather than pushState: it creates a
+   real history entry AND it works when the file is opened straight off disk,
+   where pushState throws on a null origin. None of the six destination names
+   is used as an element id, so setting the hash never scrolls. */
+function destFromHash() {
+  const h = location.hash.replace(/^#/, '').replace(/^panel-/, '');
+  return DESTS.includes(h) ? h : null;
+}
+
+function navigate(name, focusTab) {
+  if (!DESTS.includes(name)) return;
+  // Render synchronously so focus and the visible panel never disagree, even
+  // for the microtask before hashchange fires. The listener then sees the
+  // destination already current and does nothing; back/forward, which do not
+  // go through here, still find a stale currentDest and re-render.
+  applyDest(name, focusTab);
+  if (location.hash !== `#${name}`) location.hash = name;
+}
+
+addEventListener('hashchange', () => {
+  const d = destFromHash();
+  // the skip link targets #main; ignore any hash that is not a destination
+  // rather than falling back to queue and stealing the user's place.
+  if (d && d !== currentDest) applyDest(d);
+});
+
+$$('.jf-tab').forEach((tab) => {
+  tab.addEventListener('click', () => navigate(tab.dataset.dest));
+  tab.addEventListener('keydown', (e) => {
+    const i = DESTS.indexOf(tab.dataset.dest);
+    let next = null;
+    if (e.key === 'ArrowRight') next = DESTS[(i + 1) % DESTS.length];
+    else if (e.key === 'ArrowLeft') next = DESTS[(i - 1 + DESTS.length) % DESTS.length];
+    else if (e.key === 'Home') next = DESTS[0];
+    else if (e.key === 'End') next = DESTS[DESTS.length - 1];
+    if (next) { e.preventDefault(); navigate(next, true); }
+  });
+});
+
+/* ── status bar: the row count is a first-class fact, so it lives in chrome ─ */
+function syncStatusBar(dest) {
+  const [n, unit, filterLabel, filter, sort] = {
+    queue:        [visibleQueueRows().length, 'rows',    'filter', queueFilter,      'sorted by <b>actionability</b>'],
+    runs:         [15,                        'rows',    'filter', 'all',            'sorted by <b>most recent</b>'],
+    applications: [visibleAppRows().length,   'rows',    'filter', appFilter,        'sorted by <b>most recent</b>'],
+    library:      [6,                         'answers', 'filter', 'all',            'sorted by <b>most recent</b>'],
+    failures:     [5,                         'rows',    'filter', 'all',            'sorted by <b>most recent</b>'],
+    settings:     [termCount(),               'terms',   'across', '4 rules',        'unsaved edits are <b>not applied</b>'],
+  }[dest] || [0, 'rows', 'filter', 'all', ''];
+  $('#sbRows').textContent = String(n);
+  $('#sbUnit').textContent = unit;
+  $('#sbFilterLabel').textContent = filterLabel;
+  $('#sbFilter').textContent = filter;
+  $('#sbSort').innerHTML = sort;
+}
+
+/* ── queue ───────────────────────────────────────────────────────────────── */
+const QUEUE_CHIPS = [
+  { key: 'all',       label: 'all' },
+  { key: 'reviewed',  label: 'ready to submit' },
+  { key: 'filled',    label: 'needs review' },
+  { key: 'filling',   label: 'filling' },
+  { key: 'queued',    label: 'queued' },
+  { key: 'failed',    label: 'failed' },
+  { key: 'submitted', label: 'submitted' },
+];
+const QUEUE_ORDER = { reviewed: 0, filled: 1, filling: 2, queued: 3, failed: 4, submitted: 5 };
+let queueFilter = 'all';
+
+const visibleQueueRows = () => QUEUE_ROWS
+  .filter((r) => queueFilter === 'all' || r.st === queueFilter)
+  .slice()
+  .sort((a, b) => (QUEUE_ORDER[a.st] ?? 9) - (QUEUE_ORDER[b.st] ?? 9) || b.at.localeCompare(a.at));
+
+function queueActions(r, i) {
+  if (r.st === 'submitted') return '';
+  const parts = [];
+  if (r.st === 'queued' || r.st === 'failed') parts.push(`<button class="jf-btn jf-btn--quiet" type="button" data-noop>fill now</button>`);
+  if (r.st === 'filling') parts.push(`<button class="jf-btn" type="button" disabled>filling</button>`);
+  if (r.st === 'filled') parts.push(`<button class="jf-btn jf-btn--quiet" type="button" data-noop>mark reviewed</button>`);
+  parts.push(`<button class="jf-btn${r.st === 'reviewed' ? ' jf-btn--primary' : ' jf-btn--quiet'} jf-armable" type="button" data-armed="confirm?" data-resting="mark submitted">mark submitted</button>`);
+  if (r.st !== 'filling') parts.push(`<button class="jf-btn jf-btn--quiet jf-armable" type="button" data-armed="sure?" data-resting="remove" aria-label="remove ${esc(r.co)} from the queue"><svg aria-hidden="true"><use href="#i-x"/></svg>remove</button>`);
+  return `<span class="jf-acts">${parts.join('')}</span>`;
+}
+
+function renderQueue() {
+  const rows = visibleQueueRows();
+  const counts = {};
+  for (const r of QUEUE_ROWS) counts[r.st] = (counts[r.st] || 0) + 1;
+  const actionable = (counts.reviewed || 0) + (counts.filled || 0);
+
+  $('#queueBadge').textContent = String(actionable);
+  $('#queueBadge').hidden = actionable === 0;
+  $('#qCountN').textContent = String(actionable);
+  $('#qCountSub').textContent = `rows need you · ${QUEUE_ROWS.length} in queue`;
+
+  $('#qChips').innerHTML = QUEUE_CHIPS
+    .filter((c) => c.key === 'all' || counts[c.key])
+    .map((c) => {
+      const n = c.key === 'all' ? QUEUE_ROWS.length : counts[c.key];
+      return `<button class="jf-chip" type="button" aria-pressed="${queueFilter === c.key}" data-qfilter="${c.key}">${c.label}<span class="n">${n}</span></button>`;
+    }).join('');
+
+  $('#qBody').innerHTML = rows.map((r, i) => {
+    const done = r.st === 'submitted';
+    const attn = ATTN.has(r.st);
+    const results = QUEUE_RESULTS[r.co];
+    const panelId = `qr-${i}`;
+    const main = `
+      <tr class="jf-row${done ? ' jf-row--done' : ''}${attn ? ' jf-row--attn' : ''}">
+        <td class="jf-gut">${i + 1}</td>
+        <td class="jf-decision-cell">${verdictHtml(r.st, r.crit)}</td>
+        <td title="${esc(r.co)}">${esc(r.co)}</td>
+        <td title="${esc(r.role)}">${esc(r.role)}<span class="jf-sub"><a href="#panel-queue">${esc(r.url)}</a></span></td>
+        <td class="jf-dim">${esc(r.src)}</td>
+        <td>${esc(r.at)}</td>
+        <td class="jf-num">${esc(r.f)}${results ? `<span class="jf-sub"><button class="jf-disc" type="button" aria-expanded="false" aria-controls="${panelId}"><svg aria-hidden="true"><use href="#i-chev"/></svg>fields</button></span>` : ''}</td>
+        <td class="jf-acts-cell">${queueActions(r, i)}</td>
+      </tr>`;
+    const detail = results ? `
+      <tr class="jf-detailrow" id="${panelId}" hidden><td colspan="8"><div class="jf-panel">
+        <p class="jf-panel-h">field results · ${esc(r.co)}</p>
+        <pre class="jf-snapshot">${esc(results)}</pre>
+      </div></td></tr>` : '';
+    return main + detail;
+  }).join('');
+
+  $('#qEmpty').hidden = rows.length > 0;
+  $('#qGrid').hidden = rows.length === 0;
+  syncStatusBar('queue');
+}
+
+$('#qChips').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-qfilter]');
+  if (!btn) return;
+  queueFilter = btn.dataset.qfilter;
+  renderQueue();
+});
+
+/* ── applications ────────────────────────────────────────────────────────── */
+const APP_STATUSES = ['unsubmitted', 'applied', 'replied', 'interviewing', 'offer', 'rejected'];
+const APP_LABELS = { unsubmitted: 'awaiting submit' };
+let appFilter = 'all';
+
+const visibleAppRows = () => appFilter === 'all' ? APP_ROWS
+  : appFilter === 'ghosted' ? APP_ROWS.filter((a) => a.ghost)
+  : APP_ROWS.filter((a) => a.st === appFilter);
+
+function renderApps() {
+  const rows = visibleAppRows();
+  const active = APP_ROWS.filter((a) => !['rejected', 'unsubmitted'].includes(a.st)).length;
+  const ghosted = APP_ROWS.filter((a) => a.ghost).length;
+  $('#aCountN').textContent = String(APP_ROWS.length);
+  $('#aCountSub').textContent = `tracked · ${active} active · ${ghosted} ghosted · $4.18 api spend`;
+
+  $('#aChips').innerHTML = ['all', ...APP_STATUSES, 'ghosted'].map((s) => {
+    const n = s === 'all' ? APP_ROWS.length
+      : s === 'ghosted' ? ghosted
+      : APP_ROWS.filter((a) => a.st === s).length;
+    return `<button class="jf-chip" type="button" aria-pressed="${appFilter === s}" data-afilter="${s}">${APP_LABELS[s] || s}<span class="n">${n}</span></button>`;
+  }).join('');
+
+  $('#aBody').innerHTML = rows.map((a, i) => `
+    <tr class="jf-row${DONE.has(a.st) ? ' jf-row--done' : ''}${a.ghost ? ' jf-row--attn' : ''}">
+      <td class="jf-gut">${i + 1}</td>
+      <td>${esc(a.d)}</td>
+      <td title="${esc(a.co)}">${esc(a.co)}</td>
+      <td title="${esc(a.role)}">${esc(a.role)}</td>
+      <td>
+        <span class="jf-selectwrap">
+          <label class="jf-sr" for="astatus-${i}">status for ${esc(a.co)}</label>
+          <select class="jf-select" id="astatus-${i}">
+            ${APP_STATUSES.map((s) => `<option ${s === a.st ? 'selected' : ''}>${APP_LABELS[s] || s}</option>`).join('')}
+          </select><svg aria-hidden="true"><use href="#i-down"/></svg>
+        </span>
+        <span class="jf-sub">${esc(a.crit)}</span>
+        ${a.ghost ? `<span class="jf-sub"><span class="jf-tag jf-tag--attn">ghosted · 11d silent</span></span>` : ''}
+      </td>
+      <td>
+        <label class="jf-sr" for="anote-${i}">notes for ${esc(a.co)}</label>
+        <input class="jf-inline" id="anote-${i}" value="${esc(a.note)}" placeholder="notes">
+      </td>
+      <td>
+        <span class="jf-selectwrap">
+          <label class="jf-sr" for="agen-${i}">generate a document for ${esc(a.co)}</label>
+          <select class="jf-select" id="agen-${i}">
+            <option value="">generate</option>
+            <option>cover letter</option>
+            <option>follow-up email</option>
+            <option>interview-prep brief</option>
+          </select><svg aria-hidden="true"><use href="#i-down"/></svg>
+        </span>
+        <span class="jf-sub">${a.docs.map((d) => `<a href="#panel-applications">${esc(d)}</a>`).join(' · ')}</span>
+      </td>
+    </tr>`).join('');
+  syncStatusBar('applications');
+}
+
+$('#aChips').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-afilter]');
+  if (!btn) return;
+  appFilter = btn.dataset.afilter;
+  renderApps();
+});
+
+/* ── disclosures (delegated: rows, panels, breakdowns) ───────────────────── */
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('.jf-disc');
+  if (!btn) return;
+  const target = document.getElementById(btn.getAttribute('aria-controls'));
+  if (!target) return;
+  const open = btn.getAttribute('aria-expanded') === 'true';
+  btn.setAttribute('aria-expanded', String(!open));
+  target.hidden = open;
+});
+
+/* ── two-click armed confirm ──────────────────────────────────────────────
+   Native confirm() dies in the Playwright runner's browser, so destructive
+   acts arm instead. Zero layout shift: the armed label is always SHORTER than
+   the resting label and the width is pinned before the swap. The armed state
+   signals by INVERTING ink, never by color: this system owns no red, and
+   inversion survives both colour-blindness and forced-colors. A hairline
+   thread under the label scrubs away over the 4s window so the revert is
+   visible rather than surprising. ─────────────────────────────────────────── */
+const armTimers = new WeakMap();
+
+function disarm(btn) {
+  const t = armTimers.get(btn);
+  if (t) { clearTimeout(t); armTimers.delete(btn); }
+  btn.classList.remove('is-armed');
+  btn.textContent = btn.dataset.resting;
+  btn.style.minWidth = '';
+}
+
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('.jf-armable');
+  if (!btn) return;
+  if (armTimers.has(btn)) { disarm(btn); return; }   // second click commits
+  for (const other of $$('.jf-armable.is-armed')) disarm(other);
+  btn.style.minWidth = `${btn.offsetWidth}px`;
+  btn.textContent = btn.dataset.armed;
+  btn.classList.add('is-armed');
+  const thread = document.createElement('span');
+  thread.className = 'jf-arm-thread';
+  thread.setAttribute('aria-hidden', 'true');
+  btn.appendChild(thread);
+  armTimers.set(btn, setTimeout(() => disarm(btn), 4000));
+});
+
+/* ── settings: live state rows, live summary, live character count ───────── */
+const TERM_FIELDS = [
+  { id: 'crit-seniority', state: 'state-seniority', off: 'no title is rejected for seniority wording',
+    on: 'titles matching any of these are rejected' },
+  { id: 'crit-nonEng', state: 'state-nonEng', off: 'no title is rejected as non-engineering',
+    on: 'titles matching any of these are rejected' },
+  { id: 'crit-location', state: 'state-location', off: 'location filtering is off · every posting reaches the relevance check wherever it is based',
+    on: 'a posting is rejected only when its location matches none of these' },
+  { id: 'crit-workmode', state: 'state-workmode', off: 'no location value is treated as mode-only noise',
+    on: 'these exact values are ignored as locations' },
+];
+
+const termsOf = (id) => $(`#${id}`).value.split('\n').map((s) => s.trim()).filter(Boolean);
+const termCount = () => TERM_FIELDS.reduce((n, f) => n + termsOf(f.id).length, 0);
+
+/* FAIL-OPEN COPY. An empty list DISABLES the rule. It renders neutral: ink,
+   sunken paper, a hairline "rule off" tag. It is never red, never a warning,
+   never an error, and the word "off" always precedes what that means, so the
+   reading "rejects everything" is not reachable. */
+function renderTermState(f) {
+  const terms = termsOf(f.id);
+  const el = $(`#${f.state}`);
+  if (!terms.length) {
+    el.innerHTML = `<span class="jf-tag">rule off</span>` +
+      `<span>0 terms</span><span class="jf-state-note">${esc(f.off)}</span>`;
+  } else {
+    el.innerHTML = `<span class="jf-tag">${terms.length} terms</span>` +
+      `<span class="jf-state-note">${esc(f.on)}</span>`;
+  }
+}
+
+function renderYoeState() {
+  const raw = $('#cap-yoe').value.trim();
+  $('#state-yoe').innerHTML = raw === ''
+    ? `<span class="jf-tag">rule off</span><span class="jf-state-note">no cap · postings are not filtered by years-of-experience wording</span>`
+    : `<span class="jf-tag">cap ${esc(raw)}</span><span class="jf-state-note">postings asking for more than ${esc(raw)} years are rejected</span>`;
+}
+
+function renderSummary() {
+  const n = (id) => termsOf(id).length;
+  const off = (c) => c === 0 ? ' (off)' : '';
+  const yoe = $('#cap-yoe').value.trim();
+  $('#ruleSummary').textContent =
+    `seniority     ${n('crit-seniority')} terms${off(n('crit-seniority'))}\n` +
+    `non-engineering ${n('crit-nonEng')} terms${off(n('crit-nonEng'))}\n` +
+    `location      ${n('crit-location')} terms${off(n('crit-location'))}\n` +
+    `work-mode     ${n('crit-workmode')} terms${off(n('crit-workmode'))}\n` +
+    `staff/lead    ${$('#crit-builtins').checked ? 'on' : 'off'}\n` +
+    `age caps      ${$('#cap-stale').value} / ${$('#cap-indexed').value} / ${$('#cap-firstseen').value} days\n` +
+    `yoe cap       ${yoe === '' ? 'none (off)' : yoe + ' years'}`;
+  $('#sCountN').textContent = String(termCount());
+  $('#sCountSub').textContent = 'filter terms active across 4 rules';
+}
+
+function renderProfileCount() {
+  const ta = $('#profileText');
+  const el = $('#profileCount');
+  const len = ta.value.length;
+  const btn = $('#saveProfile');
+  if (!ta.value.trim()) {
+    el.textContent = 'empty · the relevance check needs prose to judge against';
+    btn.disabled = true;
+  } else if (len > 4000) {
+    el.textContent = `${len} of 4,000 characters · trim before saving`;
+    btn.disabled = true;
+  } else {
+    el.textContent = `${len} of 4,000 characters`;
+    btn.disabled = false;
+  }
+}
+
+function refreshSettings() {
+  TERM_FIELDS.forEach(renderTermState);
+  renderYoeState();
+  renderSummary();
+  syncStatusBar('settings');
+}
+
+$('#settingsForm').addEventListener('input', (e) => {
+  if (e.target.matches('.jf-term, #cap-yoe, #cap-stale, #cap-indexed, #cap-firstseen')) refreshSettings();
+  if (e.target.id === 'profileText') renderProfileCount();
+});
+$('#settingsForm').addEventListener('change', (e) => {
+  if (e.target.id === 'crit-builtins') refreshSettings();
+});
+
+/* ── boot ────────────────────────────────────────────────────────────────── */
+renderQueue();
+renderApps();
+refreshSettings();
+renderProfileCount();
+applyDest(destFromHash() || 'queue');
+// Seed the hash so the FIRST back press has somewhere to go. replaceState, not
+// location.hash, so booting does not itself create a history entry; it throws
+// on a file:// null origin, where the seed is simply skipped.
+if (!destFromHash()) {
+  try { history.replaceState(null, '', '#queue'); } catch (e) { /* file:// origin */ }
+}
+</script>
+</body>
+</html>

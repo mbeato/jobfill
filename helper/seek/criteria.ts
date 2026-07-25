@@ -105,6 +105,119 @@ export function defaultCriteria(): Criteria {
   };
 }
 
+// D-13 (HARD CONSTRAINT): today's live values, transcribed from the PRE-PHASE
+// regexes in filter.ts (as they stood immediately before plan 18-03 deleted
+// them — verified via `git show 3ea0546~1:helper/seek/filter.ts`) and from
+// the committed seek.profile.md text. This is deliberately NOT
+// defaultCriteria() (D-14): the seed answers "what was this install already
+// doing," the defaults answer "what should a stranger's install do," and
+// collapsing the two would silently change criteria on a live pipeline whose
+// rejections are permanent — upsertPosting's ON CONFLICT omits
+// decision/decision_reason/decided_at, so a wrongly-rejected posting is never
+// revived by re-discovery (Phase 9 D-14). A one-time seed migration
+// (seedCriteriaOnce, added by this plan) writes these into seek_meta exactly
+// once so the live install's next sweep is byte-identical to its last one.
+export const SEED_CRITERIA: Criteria = {
+  // From BARE_SENIORITY_RE = /\b(senior|principal|sr\.?|vp|director|head of)\b/i.
+  // 'sr' (not 'sr.') is the exact equivalent of the old `sr\.?`: a bare `sr`
+  // term compiled with word boundaries matches both "Sr" and "Sr." — the \b
+  // boundary sits between "r" and ".", which is itself a word/non-word
+  // transition, so the trailing "." needs no explicit optional-dot handling.
+  seniorityTerms: ['senior', 'principal', 'sr', 'vp', 'director', 'head of'],
+  // From NON_ENGINEERING_RE, same order.
+  nonEngineeringTerms: [
+    'product manager',
+    'product designer',
+    'designer',
+    'sales',
+    'recruiter',
+    'marketing',
+    'account executive',
+    'customer success',
+  ],
+  // The union of NY_RE, SF_RE, US_GENERIC_RE and REMOTE_RE. 'u.s.' is
+  // US_GENERIC_RE's second branch (`\bu\.s\.`, no trailing \b) — it relies on
+  // compileTerms' conditional trailing boundary (the term's own last
+  // character, ".", is not \w, so no trailing \b is added) and must not be
+  // dropped or rewritten as 'u.s'.
+  locationTerms: ['new york', 'nyc', 'ny', 'san francisco', 'sf', 'united states', 'usa', 'us', 'u.s.', 'remote'],
+  // WORK_MODE_ONLY_RE used `[- ]?` optional separators
+  // (/^(hybrid|in[- ]?office|on[- ]?site|full[- ]?time|part[- ]?time|contract|flexible)$/i),
+  // which a flat term list cannot express, so every separator variant is
+  // enumerated explicitly. THIS IS THE SINGLE HIGHEST DRIFT RISK IN THE SEED:
+  // an incomplete expansion means a location string that used to be treated
+  // as mode-only noise (e.g. "in office") starts being compared against the
+  // accepted-location list instead and gets rejected — permanently, per the
+  // Phase 9 D-14 note above.
+  workModeOnlyTerms: [
+    'hybrid',
+    'in-office',
+    'in office',
+    'inoffice',
+    'on-site',
+    'on site',
+    'onsite',
+    'full-time',
+    'full time',
+    'fulltime',
+    'part-time',
+    'part time',
+    'parttime',
+    'contract',
+    'flexible',
+  ],
+  staffLeadBuiltins: true,
+  // From MAX_STALE_DAYS / MAX_STALE_DAYS_INDEXED / MAX_FIRST_SEEN_DAYS.
+  maxStaleDays: 2,
+  maxStaleDaysIndexed: 7,
+  maxFirstSeenDays: 7,
+  // From classifyYoe's pre-phase `years > 1` comparison.
+  yoeThreshold: 1,
+};
+
+// D-13: the seek.profile.md text as committed, verbatim — captured here
+// because plan 05 deletes that file. Byte-for-byte: same headings, same line
+// breaks, same trailing-newline state, so the live install's next relevance
+// pass sees exactly the prose it saw before this migration.
+export const SEED_RELEVANCE_PROFILE = `# Seek Relevance Profile
+
+Compact, the operator-editable steering summary for the LLM relevance pass (FILT-02).
+Edit this file directly to change what "relevant" means — no code change needed.
+
+## Target roles
+
+Software engineer, fullstack software engineer, AI engineer / applied AI
+engineer, member of technical staff, founding engineer at early-stage
+startups (founder-evaluated — a "Founding Engineer" title is NOT a seniority
+marker and should not be rejected for implied experience). Early-career only
+— no conventional seniority track (Senior/Staff/Principal/Lead).
+
+## Years of experience
+
+0-1 years. New-grad / junior. State University CS B.S. (May 2026), ~1 year combined
+experience as a startup cofounder/CTO and a short applied-AI contract role.
+Not a fit for anything requiring multiple years of professional experience.
+
+## Core stack
+
+TypeScript, Python, React, Next.js, Node.js, NestJS, GraphQL, Bun, Hono,
+PostgreSQL, Redis, Docker, Kubernetes, AWS. AI/agents: Claude, OpenAI, MCP,
+RAG, LLM-as-judge evals.
+
+## Location
+
+New York City or San Francisco, or explicitly US-remote-friendly roles.
+Generic "United States" locations count as US-remote-friendly.
+
+## Anti-criteria (reject)
+
+- Senior, Staff, Principal, or Lead titles (or any title implying 2+ years
+  required)
+- Postings explicitly requiring more than 1 year of experience
+- Non-engineering roles: PM, design, sales, recruiting, marketing, ops
+- On-site roles outside New York or San Francisco with no remote option
+`;
+
 // Read-boundary coercion, mirroring config.ts's toStringArray/toScheduleConfig
 // house style for fail-closed parsing of untrusted config. A field that is
 // entirely ABSENT falls back to the caller-supplied default (so a fresh
@@ -310,4 +423,47 @@ export function readRelevanceProfile(db: Database): string | null {
 
 export function saveRelevanceProfile(db: Database, text: string): void {
   writeSeekMeta(db, RELEVANCE_PROFILE_KEY, text.slice(0, MAX_PROFILE_CHARS));
+}
+
+// D-13: its own module-local constant with its own version suffix — distinct
+// from sweep.ts's Phase 17 board-backfill gate key. A shared key would make
+// one migration silently skip the other.
+export const CRITERIA_SEED_KEY = 'criteria_seed_v1';
+
+// One-time D-13 seed migration. Two call sites wire this in: runSweep's
+// prologue (covers every sweep path) and helper startup (covers the window
+// between a deploy and the first sweep, during which the settings tab is
+// already reachable and a user could save). Both are gated on the same key,
+// so calling twice is a no-op.
+//
+// Returns whether THIS call seeded, so tests and callers can observe it.
+//
+// Deliberately no try/catch here (unlike readCriteria/readRelevanceProfile
+// above): the callers own the degrade-silently posture (mirroring how
+// runSweep's prologue wraps the board backfill), and swallowing here would
+// make the "gate key written only on success" contract below unobservable —
+// a caller-side catch needs the throw to propagate before the gate key is
+// written, or the retry-on-failure guarantee silently breaks.
+export function seedCriteriaOnce(db: Database): boolean {
+  // The gate has already fired; the ordinary read path (readCriteria) owns
+  // the values from here on.
+  if (readSeekMeta(db, CRITERIA_SEED_KEY) !== null) return false;
+
+  // Absent-only per-key check — a SECOND guard on top of the gate above. If a
+  // user somehow saved settings before the gate fired, the seed must not
+  // clobber their save.
+  if (readSeekMeta(db, CRITERIA_KEY) === null) {
+    saveCriteria(db, SEED_CRITERIA);
+  }
+  if (readSeekMeta(db, RELEVANCE_PROFILE_KEY) === null) {
+    saveRelevanceProfile(db, SEED_RELEVANCE_PROFILE);
+  }
+
+  // Written LAST, only after both writes above succeed. If either throws,
+  // this line never runs, so the gate key is never written and the next
+  // sweep retries instead of burning the one-time window and silently
+  // falling through to the D-14 generic defaults — which on the live install
+  // would mean running a stranger's criteria against the operator's backlog.
+  writeSeekMeta(db, CRITERIA_SEED_KEY, new Date().toISOString());
+  return true;
 }

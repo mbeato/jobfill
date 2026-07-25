@@ -6,6 +6,7 @@ import { harvestGetroBoards } from './getro';
 import { shouldRunYcDir } from './ycdir';
 import { readSeekMeta, writeSeekMeta } from './meta';
 import { backfillSeedBoards } from './boards';
+import { seedCriteriaOnce } from './criteria';
 
 // D-10 one-time gate key for the backdated seed backfill (see the prologue in
 // runSweep below). Its own module-local constant, not shared with 'ycdir_last_run',
@@ -105,7 +106,17 @@ export async function runSweep(
   // entry becomes dead-markable and visible. It does NOT stop being polled,
   // because resolveEffectiveTokens adds config tokens unconditionally before
   // it unions active boards — removal still requires a config or blocklist edit.
+  //
+  // D-13: the criteria seed must precede anything that reads criteria, so it
+  // runs first in this same prologue, before the board seed sync below.
+  // runSweepJob calls runSweep before runFilterPromote, so this placement is
+  // what makes the first post-deploy sweep read the operator's values rather than the
+  // D-14 generic defaults.
   try {
+    // Reuses this try/catch rather than adding a second one — a seed failure
+    // must not fail the sweep; the gate's own one-time key handles retry.
+    seedCriteriaOnce(db);
+
     const tokenMap: Record<string, string[]> = {
       greenhouse: config.greenhouse.tokens,
       lever: config.lever.tokens,

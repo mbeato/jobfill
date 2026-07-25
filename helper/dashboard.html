@@ -11,11 +11,6 @@
   .muted { color: #999; font-size: 12px; }
   a { color: #1565c0; text-decoration: none; }
   h2 { font-size: 16px; font-weight: 600; line-height: 1.2; margin-top: 32px; }
-  .s-queued { color: #999; } .s-filling { color: #e65100; } .s-filled { color: #2e7d32; }
-  .s-failed { color: #d32f2f; } .s-reviewed { color: #1565c0; } .s-submitted { color: #2e7d32; font-weight: 600; }
-  .s-running { color: #e65100; } .s-ok { color: #2e7d32; }
-  .batch-actions button { margin-right: 8px; padding: 4px 10px; cursor: pointer; border: 1px solid #ccc; background: #fff; border-radius: 4px; }
-  .batch-toggle { color: #1565c0; cursor: pointer; }
   /* tab navigation: sticky header, underline tabs (distinct from filter chips) */
   .tabbar { position: sticky; top: 0; background: #fff; z-index: 10; display: flex; gap: 2px; border-bottom: 1px solid #eee; margin: 12px 0 4px; }
   .tabbar button { border: none; background: none; cursor: pointer; padding: 8px 14px; font-size: 14px; color: #777; border-bottom: 2px solid transparent; margin-bottom: -1px; }
@@ -713,10 +708,38 @@
       <p>trigger one above, or wait for the daily scheduled sweep.</p>
     </div>
   </div>
-  <div id="batch" data-tab="runs">
-    <h2>batch fills</h2>
-    <div class="batch-actions"><button onclick="triggerBatch()">Trigger batch now</button></div>
-    <div id="batchBody"></div>
+  <div id="batch" data-tab="runs" class="jf-scope">
+    <div class="jf-band">
+      <h3>batch fills</h3>
+      <p>autofill runs, never auto-submitted</p>
+      <div class="jf-tools">
+        <button class="jf-btn jf-btn--primary" type="button" onclick="triggerBatch()"><svg aria-hidden="true"><use href="#i-run"/></svg>trigger batch now</button>
+      </div>
+    </div>
+    <div class="jf-gridwrap">
+      <table class="jf-grid" id="batchGrid">
+        <caption class="jf-sr">batch fill run history: every autofill run, newest first</caption>
+        <colgroup>
+          <col style="width:var(--jf-gutter-w)"><col style="width:12rem"><col style="width:7rem"><col style="width:6rem"><col><col style="width:var(--jf-col-decision)"><col style="width:8rem">
+        </colgroup>
+        <thead>
+          <tr>
+            <th scope="col" class="jf-gut">#</th>
+            <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-date"/></svg>started</span></th>
+            <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-enum"/></svg>trigger</span></th>
+            <th scope="col" class="jf-num"><span class="jf-th"><svg aria-hidden="true"><use href="#i-num"/></svg>duration</span></th>
+            <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-text"/></svg>headline</span></th>
+            <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-enum"/></svg>status · criterion</span></th>
+            <th scope="col"><span class="jf-th">detail</span></th>
+          </tr>
+        </thead>
+        <tbody id="batchBody"></tbody>
+      </table>
+    </div>
+    <div class="jf-empty" id="batchEmpty" hidden>
+      <p>no batch fills run yet</p>
+      <p>trigger one above, or wait for the daily scheduled batch after today's sweep.</p>
+    </div>
   </div>
   <div id="seek" data-tab="runs" class="jf-scope">
     <div class="jf-band">
@@ -1975,7 +1998,8 @@ async function loadBatch() {
 }
 
 // Fire-and-poll (mirrors triggerSweep): reload-then-notify order. Two distinct 409
-// notices — sweep running (D-08 mutual exclusion) vs batch already running.
+// notices — sweep running (D-08 mutual exclusion) vs batch already running —
+// rendered as .jf-notice blocks at the top of the #batch panel.
 async function triggerBatch() {
   const resp = await fetch('/batch', { method: 'POST' });
   const body = await resp.json();
@@ -1984,7 +2008,7 @@ async function triggerBatch() {
     const notice = String(body.error || '').includes('sweep')
       ? "can't start batch — sweep is running, try again after it finishes"
       : `batch already running (run ${Number(body.runId) || ''})`;
-    document.getElementById('batchBody').insertAdjacentHTML('afterbegin', `<div class="muted">${notice}</div>`);
+    document.getElementById('batch').insertAdjacentHTML('afterbegin', `<div class="jf-notice"><svg aria-hidden="true"><use href="#i-alert"/></svg>${esc(notice)}</div>`);
     return;
   }
   if (resp.ok && body.id) pollBatch(body.id);
@@ -2006,64 +2030,78 @@ function pollBatch(runId) {
   }, 3000);
 }
 
+// Batch's vocabulary: only 'failed' needs the attention accent (mirrors
+// SWEEP_VOCAB — a finished 'ok' batch is the unremarkable common case).
+const BATCH_VOCAB = { attn: new Set(['failed']), done: new Set([]) };
+
+// Item 48's stop-reason line relocates into the decision cell's criterion
+// (a relocation, not a loss): batch:{stop_reason} · {STOP_REASON_LABELS
+// translation}, gated identically to the original — only when NOT running
+// and detail.stop_reason is present. No criterion at all when there is no
+// stop reason yet (verdictHtml (plan 01) always renders a .jf-crit span, so
+// a local wrapper below special-cases crit===null, mirroring
+// queueVerdictHtml/failureVerdictHtml).
+function batchCriterion(r) {
+  if (r.status === 'running' || !r.detail?.stop_reason) return null;
+  const reason = r.detail.stop_reason;
+  return `batch:${reason} · ${STOP_REASON_LABELS[reason] || reason}`;
+}
+function batchVerdictHtml(status, crit) {
+  if (crit === null) {
+    const cls = BATCH_VOCAB.attn.has(status) ? ' jf-verdict--attn' : BATCH_VOCAB.done.has(status) ? ' jf-verdict--muted' : '';
+    return `<span class="jf-cell-decision"><span class="jf-verdict${cls}">${esc(status)}</span></span>`;
+  }
+  return verdictHtml(status, crit, BATCH_VOCAB);
+}
+
+// D-04: render every row — no slice, no cap, no pagination.
 function renderBatch(rows) {
-  const body = document.getElementById('batchBody');
-  if (!rows.length) {
-    body.innerHTML = `
-      <div class="muted">no batch fills run yet</div>
-      <div class="muted" style="font-size: 12px">trigger one above, or wait for the daily scheduled batch after today's sweep.</div>`;
+  const empty = rows.length === 0;
+  document.getElementById('batchEmpty').hidden = !empty;
+  document.getElementById('batchGrid').hidden = empty;
+  if (empty) {
+    document.getElementById('batchBody').innerHTML = '';
     return;
   }
-  body.innerHTML = `
-    <table>
-      <thead><tr><th>started</th><th>trigger</th><th>duration</th><th>headline</th><th>status</th><th>detail</th></tr></thead>
-      <tbody>
-        ${rows.map(r => {
-          const statusClass = BATCH_STATUSES.has(r.status) ? `s-${r.status}` : 'muted';
-          const h = r.detail?.headline;
-          // Stored detail is untrusted at this innerHTML sink (PATCHable by
-          // any authorized() client) — coerce to numbers, never interpolate raw.
-          const headline = h ? `${Number(h.filled) || 0} filled · ${Number(h.skipped) || 0} skipped · ${Number(h.failed) || 0} failed` : '—';
-          const stopReasonLine = r.status !== 'running' && r.detail?.stop_reason
-            ? `<div class="muted">${esc(STOP_REASON_LABELS[r.detail.stop_reason] || r.detail.stop_reason)}</div>`
-            : '';
-          return `
-            <tr>
-              <td class="muted">${esc((r.started_at || '').replace('T', ' ').slice(0, 19))}</td>
-              <td>${esc(r.trigger)}</td>
-              <td>${fmtDuration(r.started_at, r.finished_at, r.status)}</td>
-              <td>${headline}</td>
-              <td><span class="${statusClass}">${esc(r.status)}</span>${stopReasonLine}</td>
-              <td>
-                ${r.detail ? `
-                  <div class="batch-toggle" onclick="toggleBatchDetail(${r.id})">skips <span id="barrow-${r.id}">▾</span></div>
-                  <div id="bdetail-${r.id}" style="display:none">${renderBatchDetail(r.detail)}</div>
-                ` : `<span class="muted">in progress…</span>`}
-              </td>
-            </tr>`;
-        }).join('')}
-      </tbody>
-    </table>`;
+  document.getElementById('batchBody').innerHTML = rows.map((r, i) => {
+    // BATCH_STATUSES allowlist before status reaches the verdict's class
+    // logic (T-19-05) — mirrors SWEEP_STATUSES precedent.
+    const status = BATCH_STATUSES.has(r.status) ? r.status : 'unknown';
+    const crit = batchCriterion(r);
+    const h = r.detail?.headline;
+    // Stored detail is untrusted at this innerHTML sink (PATCHable by
+    // any authorized() client) — coerce to numbers, never interpolate raw.
+    const headline = h ? `${Number(h.filled) || 0} filled · ${Number(h.skipped) || 0} skipped · ${Number(h.failed) || 0} failed` : '—';
+    const main = `
+      <tr class="jf-row${status === 'failed' ? ' jf-row--attn' : ''}">
+        <td class="jf-gut">${i + 1}</td>
+        <td>${esc((r.started_at || '').replace('T', ' ').slice(0, 19))}</td>
+        <td class="jf-dim">${esc(r.trigger)}</td>
+        <td class="jf-num">${fmtDuration(r.started_at, r.finished_at, r.status)}</td>
+        <td>${headline}</td>
+        <td class="jf-decision-cell">${batchVerdictHtml(status, crit)}</td>
+        <td>${r.detail ? `<button class="jf-disc" type="button" aria-expanded="false" aria-controls="bt-${r.id}"><svg aria-hidden="true"><use href="#i-chev"/></svg>skips</button>` : `<span class="jf-dim">in progress…</span>`}</td>
+      </tr>`;
+    const detail = r.detail ? `
+      <tr class="jf-detailrow" id="bt-${r.id}" hidden><td colspan="7"><div class="jf-panel">
+        <p class="jf-panel-h">skipped and failed rows</p>
+        ${renderBatchDetail(r.detail)}
+      </div></td></tr>` : '';
+    return main + detail;
+  }).join('');
 }
 
 // detail.skipped/detail.failed carry third-party-derived company/role text
 // (untrusted stored data) — esc() every one, mirroring renderSweepSourceDetail.
+// SKIP_REASON_LABELS/FAILED_REASON_LABELS both fall back to the raw reason
+// when unmapped, unchanged.
 function renderBatchDetail(detail) {
   const skipLines = (detail.skipped || [])
-    .map(s => `<div class="muted" style="padding-left:4px">${esc(s.company)} · ${esc(s.role)}: ${esc(SKIP_REASON_LABELS[s.reason] || s.reason)}</div>`)
-    .join('');
+    .map(s => `${esc(s.company)} · ${esc(s.role)}: ${esc(SKIP_REASON_LABELS[s.reason] || s.reason)}`);
   const failLines = (detail.failed || [])
-    .map(f => `<div class="muted" style="padding-left:4px">${esc(f.company)} · ${esc(f.role)}: ${esc(FAILED_REASON_LABELS[f.reason] || f.reason)}</div>`)
-    .join('');
-  return skipLines + failLines;
-}
-
-function toggleBatchDetail(id) {
-  const body = document.getElementById(`bdetail-${id}`);
-  const arrow = document.getElementById(`barrow-${id}`);
-  const expanded = body.style.display !== 'none';
-  body.style.display = expanded ? 'none' : 'block';
-  arrow.textContent = expanded ? '▾' : '▴';
+    .map(f => `${esc(f.company)} · ${esc(f.role)}: ${esc(FAILED_REASON_LABELS[f.reason] || f.reason)}`);
+  const lines = [...skipLines, ...failLines];
+  return lines.length ? `<pre class="jf-snapshot">${lines.join('\n')}</pre>` : '<p class="jf-sub">no skips or failures on this run</p>';
 }
 
 // -----------------------------------------------------------------------

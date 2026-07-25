@@ -443,11 +443,27 @@
 .jf-scope .jf-saverow .jf-help{margin:0}
 .jf-scope .jf-count-live{font-family:var(--jf-mono);font-size:var(--jf-t-xs);color:var(--jf-ink-3);min-height:var(--jf-t-lg)}
 
+/* ── jf: grouped compact fields (plan 02, user-directed deviation from the
+   reference — see 19-02-SUMMARY.md "deliberate change 4"). Several small
+   number fields sharing one band and one unit each got their own full-bleed
+   .jf-frow in the reference, which reads as a near-empty row for one small box.
+   .jf-ffield--group lets a handful of compact controls share one row and
+   still wrap to stacked on a narrow viewport with no extra breakpoint. */
+.jf-scope .jf-ffield--group{flex-direction:row;flex-wrap:wrap;align-items:flex-start;gap:var(--jf-s5) var(--jf-s6)}
+.jf-scope .jf-fitem{flex:1 1 9rem;min-width:8rem;max-width:none}
+.jf-scope .jf-fitem-label{display:block;margin:0 0 var(--jf-s1);font-family:var(--jf-sans);font-size:var(--jf-t-xs);color:var(--jf-ink-3)}
+/* validation cue on a specific grouped field: ink-only (dashed, heavier
+   rule), never a color — this system owns no error hue and the accent's
+   reserved-for list does not include field-level validation. */
+.jf-scope .jf-input--invalid{border-style:dashed;border-color:var(--jf-rule-strong)}
+
 /* ── jf: responsive — the form stacks to label-above-field ───────────────── */
 @media (max-width:52rem){
   .jf-scope .jf-frow{grid-template-columns:minmax(0,1fr)}
   .jf-scope .jf-flabel{border-right:0;border-bottom:var(--jf-hair) solid var(--jf-rule);padding-block:var(--jf-s3) var(--jf-s2)}
   .jf-scope .jf-ffield{padding-inline:var(--jf-pad-x);padding-block:var(--jf-s3) var(--jf-s4)}
+  .jf-scope .jf-ffield--group{flex-direction:column;gap:var(--jf-s3)}
+  .jf-scope .jf-fitem{flex:none;width:100%}
   .jf-scope .jf-kv{grid-template-columns:minmax(0,1fr)}
   .jf-scope .jf-kv > dt{border-right:0}
 }
@@ -1769,24 +1785,23 @@ function renderCriteria(c) {
     <div class="jf-form">
       <div class="jf-frow">
         <div class="jf-flabel">
-          <label for="cap-stale">max age, trusted date (days)</label>
-          <p class="jf-help">sources that publish a real posting date.</p>
+          <span class="jf-legend">max age, by source type (days)</span>
+          <p class="jf-help">trusted date: sources that publish a real posting date. index-only: aggregators such as Simplify and Getro, where the date is the index date. first seen: Greenhouse and YC, where jobfill's own first sighting is the clock.</p>
         </div>
-        <div class="jf-ffield"><span><input class="jf-input jf-input--num" type="number" id="cap-stale" min="1" max="365" value="${esc(String(c.maxStaleDays))}" inputmode="numeric"> <span class="jf-count-live" aria-hidden="true">days</span></span></div>
-      </div>
-      <div class="jf-frow">
-        <div class="jf-flabel">
-          <label for="cap-indexed">max age, index-only sources (days)</label>
-          <p class="jf-help">aggregators such as Simplify and Getro, where the date is the index date.</p>
+        <div class="jf-ffield jf-ffield--group">
+          <div class="jf-fitem">
+            <label class="jf-fitem-label" for="cap-stale">trusted date</label>
+            <span><input class="jf-input jf-input--num" type="number" id="cap-stale" min="1" max="365" value="${esc(String(c.maxStaleDays))}" inputmode="numeric"> <span class="jf-count-live" aria-hidden="true">days</span></span>
+          </div>
+          <div class="jf-fitem">
+            <label class="jf-fitem-label" for="cap-indexed">index-only</label>
+            <span><input class="jf-input jf-input--num" type="number" id="cap-indexed" min="1" max="365" value="${esc(String(c.maxStaleDaysIndexed))}" inputmode="numeric"> <span class="jf-count-live" aria-hidden="true">days</span></span>
+          </div>
+          <div class="jf-fitem">
+            <label class="jf-fitem-label" for="cap-firstseen">first seen</label>
+            <span><input class="jf-input jf-input--num" type="number" id="cap-firstseen" min="1" max="365" value="${esc(String(c.maxFirstSeenDays))}" inputmode="numeric"> <span class="jf-count-live" aria-hidden="true">days</span></span>
+          </div>
         </div>
-        <div class="jf-ffield"><span><input class="jf-input jf-input--num" type="number" id="cap-indexed" min="1" max="365" value="${esc(String(c.maxStaleDaysIndexed))}" inputmode="numeric"> <span class="jf-count-live" aria-hidden="true">days</span></span></div>
-      </div>
-      <div class="jf-frow">
-        <div class="jf-flabel">
-          <label for="cap-firstseen">max time since first seen (days)</label>
-          <p class="jf-help">for Greenhouse and YC, where jobfill's own first sighting is the clock.</p>
-        </div>
-        <div class="jf-ffield"><span><input class="jf-input jf-input--num" type="number" id="cap-firstseen" min="1" max="365" value="${esc(String(c.maxFirstSeenDays))}" inputmode="numeric"> <span class="jf-count-live" aria-hidden="true">days</span></span></div>
       </div>
       <div class="jf-frow">
         <div class="jf-flabel">
@@ -1856,6 +1871,19 @@ function refreshCriteriaHints() {
     errorEl.innerHTML = violation
       ? `<div class="jf-notice"><svg aria-hidden="true"><use href="#i-alert"/></svg>${esc(violation.message)}</div>`
       : '';
+  }
+
+  // The three age caps now share one grouped row (deliberate change 4 —
+  // 19-02-SUMMARY.md), so the shared notice above no longer sits directly
+  // next to a single offending field. Point at the specific box with an
+  // ink-only dashed border (never a color — no error hue exists) instead of
+  // leaving the user to guess which of the three is out of range.
+  for (const capId of ['cap-stale', 'cap-indexed', 'cap-firstseen']) {
+    document.getElementById(capId).classList.remove('jf-input--invalid');
+  }
+  const CAP_FIELD_TO_ID = { maxStaleDays: 'cap-stale', maxStaleDaysIndexed: 'cap-indexed', maxFirstSeenDays: 'cap-firstseen' };
+  if (violation && CAP_FIELD_TO_ID[violation.field]) {
+    document.getElementById(CAP_FIELD_TO_ID[violation.field]).classList.add('jf-input--invalid');
   }
 
   // Keep the save button's resting label AND its armable-ness in sync with

@@ -5,7 +5,10 @@ import {
   upsertBoard,
   recordBoardResult,
   listActiveBoards,
+  listAllBoards,
   resolveEffectiveTokens,
+  backfillSeedBoards,
+  SEED_BACKFILL_FIRST_SEEN,
   DEAD_AFTER,
   DEAD_RECHECK_DAYS,
 } from './boards';
@@ -116,6 +119,28 @@ test('recordBoardResult on an unknown (ats, token) does not throw and inserts no
   expect(rows.length).toBe(0);
 });
 
+test('listAllBoards on an empty table returns []', () => {
+  const db = makeDb();
+  expect(listAllBoards(db)).toEqual([]);
+});
+
+test('listAllBoards returns all rows ordered by token, across every ats value', () => {
+  const db = makeDb();
+  upsertBoard(db, { ats: 'ashby', token: 'zeta', source_of_discovery: 'simplify' });
+  upsertBoard(db, { ats: 'greenhouse', token: 'alpha', source_of_discovery: 'simplify' });
+  upsertBoard(db, { ats: 'lever', token: 'mid', source_of_discovery: 'getro' });
+  const tokens = listAllBoards(db).map(r => r.token);
+  expect(tokens).toEqual(['alpha', 'mid', 'zeta']);
+});
+
+test('listAllBoards includes a dead-marked board that listActiveBoards excludes', () => {
+  const db = makeDb();
+  upsertBoard(db, { ats: 'greenhouse', token: 'dead', source_of_discovery: 'simplify' });
+  for (let i = 0; i < DEAD_AFTER; i++) recordBoardResult(db, 'greenhouse', 'dead', false);
+  expect(listAllBoards(db).map(r => r.token)).toContain('dead');
+  expect(listActiveBoards(db, 'greenhouse').map(r => r.token)).not.toContain('dead');
+});
+
 test('resolveEffectiveTokens is config tokens union active boards rows, minus blocklist', () => {
   const db = makeDb();
   upsertBoard(db, { ats: 'greenhouse', token: 'beta', source_of_discovery: 'simplify' });
@@ -135,4 +160,73 @@ test('resolveEffectiveTokens excludes a dead board token and enforces the blockl
   const blocklist = ['acme'];
   expect(upsertBoard(db, { ats: 'greenhouse', token: 'acme', source_of_discovery: 'simplify' }, blocklist)).toBeNull();
   expect(resolveEffectiveTokens(db, 'greenhouse', ['acme'], blocklist)).toEqual([]);
+});
+
+test('backfillSeedBoards inserts fresh seed tokens at the SENTINEL, never datetime(now)', () => {
+  const db = makeDb();
+  const written = backfillSeedBoards(db, { greenhouse: ['acme', 'beta'] });
+  const rows = db.query('SELECT * FROM boards ORDER BY token').all() as any[];
+  expect(rows.length).toBe(2);
+  expect(rows[0].source_of_discovery).toBe('seed');
+  expect(rows[0].first_seen_at).toBe(SEED_BACKFILL_FIRST_SEEN);
+  expect(rows[1].first_seen_at).toBe(SEED_BACKFILL_FIRST_SEEN);
+  expect(written).toBe(2);
+  // D-10 proof (insert path)
+  const bad = db
+    .query(`SELECT COUNT(*) c FROM boards WHERE source_of_discovery='seed' AND first_seen_at <> '2020-01-01 00:00:00'`)
+    .get() as { c: number };
+  expect(bad.c).toBe(0);
+});
+
+test('backfillSeedBoards repairs an existing harvest-stamped row without re-attributing provenance', () => {
+  const db = makeDb();
+  const first = upsertBoard(db, { ats: 'greenhouse', token: 'acme', source_of_discovery: 'simplify' });
+  db.query(`UPDATE boards SET first_seen_at = '2026-07-24 20:52:27' WHERE id = ?`).run(first!.id);
+  recordBoardResult(db, 'greenhouse', 'acme', true); // give it last_ok_at to prove it survives
+  const before = db.query('SELECT * FROM boards WHERE id = ?').get(first!.id) as any;
+
+  backfillSeedBoards(db, { greenhouse: ['acme'] });
+
+  const after = db.query('SELECT * FROM boards WHERE id = ?').get(first!.id) as any;
+  expect(after.first_seen_at).toBe(SEED_BACKFILL_FIRST_SEEN);
+  expect(after.source_of_discovery).toBe('simplify');
+  expect(after.id).toBe(before.id);
+  expect(after.last_ok_at).toBe(before.last_ok_at);
+  expect(after.dead_since).toBe(before.dead_since);
+  expect(after.consecutive_failures).toBe(before.consecutive_failures);
+});
+
+test('backfillSeedBoards is idempotent: a second identical call changes nothing', () => {
+  const db = makeDb();
+  backfillSeedBoards(db, { greenhouse: ['acme', 'beta'] });
+  const before = db.query('SELECT * FROM boards ORDER BY token').all() as any[];
+  backfillSeedBoards(db, { greenhouse: ['acme', 'beta'] });
+  const after = db.query('SELECT * FROM boards ORDER BY token').all() as any[];
+  expect(after.length).toBe(before.length);
+  for (const row of after) expect(row.first_seen_at).toBe(SEED_BACKFILL_FIRST_SEEN);
+});
+
+test('backfillSeedBoards leaves a row for a token not in the supplied config lists untouched', () => {
+  const db = makeDb();
+  const other = upsertBoard(db, { ats: 'greenhouse', token: 'untouched', source_of_discovery: 'simplify' });
+  db.query(`UPDATE boards SET first_seen_at = '2026-07-24 20:52:27' WHERE id = ?`).run(other!.id);
+  backfillSeedBoards(db, { greenhouse: ['acme'] });
+  const row = db.query('SELECT * FROM boards WHERE id = ?').get(other!.id) as any;
+  expect(row.first_seen_at).toBe('2026-07-24 20:52:27');
+});
+
+test('backfillSeedBoards rejects a malformed token, a blocklisted token, an out-of-enum ats, and blank/non-string entries without throwing', () => {
+  const db = makeDb();
+  expect(() =>
+    backfillSeedBoards(
+      db,
+      {
+        greenhouse: ['bad/slug', 'acme', '', '   ', null as unknown as string, 'blocked'],
+        workday: ['nope'],
+      },
+      ['blocked'],
+    ),
+  ).not.toThrow();
+  const tokens = db.query('SELECT token FROM boards').all().map((r: any) => r.token);
+  expect(tokens).toEqual(['acme']);
 });

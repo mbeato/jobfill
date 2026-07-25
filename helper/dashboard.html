@@ -1631,15 +1631,21 @@ const IDENTITY_OPTIONS = {
     'Two or More Races',
     DECLINE_SELF_ID,
   ],
+  // The VEVRAA and CC-305 options are full sentences (up to 71 chars). A native
+  // <select> popup sizes to its widest option, so showing them verbatim blew the
+  // dropdown out to screen width. Entries may therefore be `{ v, label }`: `v` is
+  // the canonical string we store and hand the filler, `label` is the short text
+  // shown in the menu. Never shorten `v` — the regulatory wording is the whole
+  // point of these sets.
   'eeo.veteran': [
-    'I am not a protected veteran',
-    'I identify as one or more of the classifications of a protected veteran',
-    "I don't wish to answer",
+    { v: 'I am not a protected veteran', label: 'Not a protected veteran' },
+    { v: 'I identify as one or more of the classifications of a protected veteran', label: 'I am a protected veteran' },
+    { v: "I don't wish to answer", label: "Don't wish to answer" },
   ],
   'eeo.disability': [
-    'Yes, I have a disability, or have had one in the past',
-    'No, I do not have a disability and have not had one in the past',
-    'I do not want to answer',
+    { v: 'Yes, I have a disability, or have had one in the past', label: 'Yes — have or have had a disability' },
+    { v: 'No, I do not have a disability and have not had one in the past', label: 'No' },
+    { v: 'I do not want to answer', label: "Don't want to answer" },
   ],
   'eeo.sexualOrientation': [
     'Heterosexual',
@@ -1680,16 +1686,19 @@ function renderIdentity(p) {
   // kind of unrecoverable quiet data loss the profile merge exists to prevent.
   const selectField = (id, label, value, options, hint = '') => {
     const raw = (value ?? '').trim();
+    // Entries are either a plain string (value doubles as the menu text) or
+    // { v, label } where the stored value and the menu text differ.
+    const norm = options.map((o) => (typeof o === 'string' ? { v: o, label: o } : o));
     // Match case-insensitively and select the canonical spelling. A profile
     // holding "yes" should snap to "Yes" rather than be carried as a one-off
     // variant — same meaning, and canonical casing is what the filler wants to
     // hand an ATS. Only a genuinely unrecognised value falls through to the
     // preserved-value branch below.
-    const canonical = options.find((o) => o.toLowerCase() === raw.toLowerCase());
-    const current = canonical ?? raw;
+    const canonical = norm.find((o) => o.v.toLowerCase() === raw.toLowerCase());
+    const current = canonical ? canonical.v : raw;
     const opts = [
       `<option value=""${current === '' ? ' selected' : ''}>— not set —</option>`,
-      ...options.map((o) => `<option value="${esc(o)}"${o === current ? ' selected' : ''}>${esc(o)}</option>`),
+      ...norm.map((o) => `<option value="${esc(o.v)}"${o.v === current ? ' selected' : ''}>${esc(o.label)}</option>`),
     ];
     if (current !== '' && !canonical) {
       opts.push(`<option value="${esc(current)}" selected>${esc(current)} — kept from your existing profile</option>`);

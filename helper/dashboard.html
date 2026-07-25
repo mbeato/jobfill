@@ -573,7 +573,7 @@
     <h2>relevance profile</h2>
     <div id="settingsProfileBody" class="jf-scope"></div>
     <h2>identity &amp; eeo</h2>
-    <div id="settingsIdentityBody"></div>
+    <div id="settingsIdentityBody" class="jf-scope"></div>
   </div>
 <script>
 const STATUSES = ['unsubmitted', 'applied', 'replied', 'interviewing', 'offer', 'rejected'];
@@ -2138,19 +2138,19 @@ document.getElementById('settingsProfileBody').addEventListener('click', (e) => 
 
 async function loadIdentity() {
   const body = document.getElementById('settingsIdentityBody');
-  body.innerHTML = `<div class="muted">loading profile…</div>`;
+  body.innerHTML = `<div class="jf-empty"><p>loading…</p><p>fetching your identity &amp; eeo profile.</p></div>`;
   try {
     const resp = await fetch('/profile');
     if (resp.status === 404) {
       renderIdentity({});
-      body.insertAdjacentHTML('afterbegin', `<div class="settings-hint">no profile.local.json yet — fill in what you can below and save to create it. fields left blank stay blank until you fill them in.</div>`);
+      body.insertAdjacentHTML('afterbegin', `<div class="jf-empty"><p>no profile.local.json yet</p><p>fill in what you can below and save to create it. fields left blank stay blank until you fill them in.</p></div>`);
       return;
     }
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const profile = await resp.json();
     renderIdentity(profile);
   } catch (e) {
-    body.innerHTML = `<div class="muted">couldn't load your profile — ${esc(String(e?.message || e))}. check helper/profile.local.json directly if this keeps happening.</div>`;
+    body.innerHTML = `<div class="jf-notice"><svg aria-hidden="true"><use href="#i-alert"/></svg>${esc(`couldn't load your profile — ${String(e?.message || e)}. check helper/profile.local.json directly if this keeps happening.`)}</div>`;
   }
 }
 
@@ -2242,21 +2242,31 @@ function renderIdentity(p) {
   const answers = p.answers || {};
 
   const textField = (id, label, value, type = 'text') => `
-    <div class="settings-field">
-      <label for="${id}">${label}</label>
-      <input type="${type}" id="${id}" value="${esc(value ?? '')}">
+    <div class="jf-frow">
+      <div class="jf-flabel"><label for="${id}">${label}</label></div>
+      <div class="jf-ffield"><input class="jf-input" type="${type}" id="${id}" value="${esc(value ?? '')}"></div>
+    </div>`;
+  // Compact variant of textField for use inside a .jf-ffield--group row
+  // (19-02-SUMMARY.md's grouped-compact-field pattern, carried forward here
+  // per the phase's directed grouping change).
+  const fitem = (id, label, value, type = 'text') => `
+    <div class="jf-fitem">
+      <label class="jf-fitem-label" for="${id}">${label}</label>
+      <input class="jf-input" type="${type}" id="${id}" value="${esc(value ?? '')}">
     </div>`;
   const checkboxRow = (id, label, checked) => `
-    <div class="settings-checkbox-row">
-      <input type="checkbox" id="${id}" ${checked ? 'checked' : ''}>
-      <label for="${id}" style="margin-bottom:0">${label}</label>
+    <div class="jf-checkrow">
+      <input class="jf-check" type="checkbox" id="${id}" ${checked ? 'checked' : ''}>
+      <label for="${id}">${label}</label>
     </div>`;
   // A stored value that isn't in the canonical set is carried as an extra
   // selected option rather than dropped. Without this, a hand-edited
   // profile.local.json — or a set we later revise — would silently reset to
   // the first option the next time this form is saved, which is exactly the
   // kind of unrecoverable quiet data loss the profile merge exists to prevent.
-  const selectField = (id, label, value, options, hint = '') => {
+  // Shared by both selectField (standalone row) and fitemSelect (grouped
+  // row) so this logic exists in exactly one place.
+  const selectOptions = (value, options) => {
     const raw = (value ?? '').trim();
     // Entries are either a plain string (value doubles as the menu text) or
     // { v, label } where the stored value and the menu text differ.
@@ -2275,67 +2285,132 @@ function renderIdentity(p) {
     if (current !== '' && !canonical) {
       opts.push(`<option value="${esc(current)}" selected>${esc(current)} — kept from your existing profile</option>`);
     }
-    return `
-    <div class="settings-field">
-      <label for="${id}">${label}</label>
-      <select id="${id}">${opts.join('')}</select>
-      ${hint ? `<div class="settings-hint">${hint}</div>` : ''}
-    </div>`;
+    return opts.join('');
   };
+  const selectField = (id, label, value, options, hint = '') => `
+    <div class="jf-frow">
+      <div class="jf-flabel">
+        <label for="${id}">${label}</label>
+        ${hint ? `<p class="jf-help">${hint}</p>` : ''}
+      </div>
+      <div class="jf-ffield"><span class="jf-selectwrap">
+        <select class="jf-select" id="${id}">${selectOptions(value, options)}</select><svg aria-hidden="true"><use href="#i-down"/></svg>
+      </span></div>
+    </div>`;
+  // Compact variant of selectField for use inside a .jf-ffield--group row.
+  const fitemSelect = (id, label, value, options) => `
+    <div class="jf-fitem">
+      <label class="jf-fitem-label" for="${id}">${label}</label>
+      <span class="jf-selectwrap">
+        <select class="jf-select" id="${id}">${selectOptions(value, options)}</select><svg aria-hidden="true"><use href="#i-down"/></svg>
+      </span>
+    </div>`;
 
   body.innerHTML = `
-    <div class="settings-subhead">contact</div>
-    ${textField('id-contact-firstName', 'first name', contact.firstName)}
-    ${textField('id-contact-lastName', 'last name', contact.lastName)}
-    ${textField('id-contact-pronouns', 'pronouns', contact.pronouns)}
-    ${textField('id-contact-email', 'email', contact.email, 'email')}
-    ${textField('id-contact-phone', 'phone', contact.phone, 'tel')}
-    ${textField('id-contact-city', 'city', contact.city)}
-    ${textField('id-contact-state', 'state', contact.state)}
-    ${textField('id-contact-country', 'country', contact.country)}
-    ${textField('id-contact-location', 'location (as shown on applications)', contact.location)}
-
-    <div class="settings-subhead">links</div>
-    ${textField('id-links-linkedin', 'linkedin', links.linkedin, 'url')}
-    ${textField('id-links-github', 'github', links.github, 'url')}
-    ${textField('id-links-portfolio', 'portfolio', links.portfolio, 'url')}
-
-    <div class="settings-subhead">work authorization</div>
-    ${selectField('id-workAuth-status', 'status', workAuth.status, IDENTITY_OPTIONS['workAuth.status'],
-      'used when a form asks for work authorization as a dropdown rather than yes/no.')}
-    ${checkboxRow('id-workAuth-authorizedUS', 'authorized to work in the us', workAuth.authorizedUS)}
-    ${checkboxRow('id-workAuth-needsSponsorship', 'needs sponsorship now', workAuth.needsSponsorship)}
-    ${checkboxRow('id-workAuth-needsFutureSponsorship', 'will need sponsorship in the future', workAuth.needsFutureSponsorship)}
-    ${checkboxRow('id-workAuth-over18', '18 or older', workAuth.over18)}
-
-    <div class="settings-subhead">eeo (optional — used only where a form asks)</div>
-    <div class="settings-hint" style="margin:-4px 0 12px">
-      these are the standard us categories employers report against (eeo-1 for race,
-      vevraa for veteran status, form cc-305 for disability), so the wording here matches
-      what greenhouse, lever and ashby actually show. leave a field on
-      <strong>— not set —</strong> to skip it: the filler then picks a
-      &ldquo;decline&rdquo; option if the form offers one, and otherwise leaves the
-      question alone.
+    <div class="jf-band"><h3>contact</h3><p>what the filler types into every application</p></div>
+    <div class="jf-form">
+      <div class="jf-frow">
+        <div class="jf-flabel"><span class="jf-legend">name</span></div>
+        <div class="jf-ffield jf-ffield--group">
+          ${fitem('id-contact-firstName', 'first name', contact.firstName)}
+          ${fitem('id-contact-lastName', 'last name', contact.lastName)}
+        </div>
+      </div>
+      ${textField('id-contact-pronouns', 'pronouns', contact.pronouns)}
+      ${textField('id-contact-email', 'email', contact.email, 'email')}
+      ${textField('id-contact-phone', 'phone', contact.phone, 'tel')}
+      ${textField('id-contact-city', 'city', contact.city)}
+      ${textField('id-contact-state', 'state', contact.state)}
+      ${textField('id-contact-country', 'country', contact.country)}
+      <div class="jf-frow">
+        <div class="jf-flabel">
+          <label for="id-contact-location">location (as shown on applications)</label>
+          <p class="jf-help">city, state and country are stored separately above and used when a form splits them.</p>
+        </div>
+        <div class="jf-ffield"><input class="jf-input" type="text" id="id-contact-location" value="${esc(contact.location ?? '')}"></div>
+      </div>
     </div>
-    ${selectField('id-eeo-gender', 'gender', eeo.gender, IDENTITY_OPTIONS['eeo.gender'])}
-    ${selectField('id-eeo-hispanicLatino', 'are you hispanic or latino?', eeo.hispanicLatino, IDENTITY_OPTIONS['eeo.hispanicLatino'],
-      'asked as its own question on most forms, separately from race.')}
-    ${selectField('id-eeo-race', 'race', eeo.race, IDENTITY_OPTIONS['eeo.race'])}
-    ${selectField('id-eeo-veteran', 'veteran status', eeo.veteran, IDENTITY_OPTIONS['eeo.veteran'])}
-    ${selectField('id-eeo-disability', 'disability status', eeo.disability, IDENTITY_OPTIONS['eeo.disability'])}
-    ${selectField('id-eeo-sexualOrientation', 'sexual orientation', eeo.sexualOrientation, IDENTITY_OPTIONS['eeo.sexualOrientation'],
-      'not a federally standardised set — these are the options ats forms commonly offer.')}
 
-    <div class="settings-subhead">canned answers</div>
-    ${textField('id-answers-salaryExpectation', 'salary expectation', answers.salaryExpectation)}
-    ${textField('id-answers-startDate', 'start date availability', answers.startDate)}
-    ${selectField('id-answers-willingToRelocate', 'willing to relocate', answers.willingToRelocate, IDENTITY_OPTIONS['answers.willingToRelocate'])}
-    ${textField('id-answers-howDidYouHear', 'how did you hear about us', answers.howDidYouHear)}
+    <div class="jf-band"><h3>links</h3></div>
+    <div class="jf-form">
+      <div class="jf-frow">
+        <div class="jf-flabel"><span class="jf-legend">profile links</span></div>
+        <div class="jf-ffield jf-ffield--group">
+          ${fitem('id-links-linkedin', 'linkedin', links.linkedin, 'url')}
+          ${fitem('id-links-github', 'github', links.github, 'url')}
+          ${fitem('id-links-portfolio', 'portfolio', links.portfolio, 'url')}
+        </div>
+      </div>
+    </div>
 
-    <div class="settings-actions">
-      <button id="identitySaveBtn" class="primary" onclick="saveIdentity()">save identity & eeo</button>
-      <span class="settings-hint" id="identitySaveError"></span>
-    </div>`;
+    <div class="jf-band"><h3>work authorization</h3></div>
+    <div class="jf-form">
+      ${selectField('id-workAuth-status', 'status', workAuth.status, IDENTITY_OPTIONS['workAuth.status'],
+        'used when a form asks for work authorization as a dropdown rather than yes/no.')}
+      <div class="jf-frow">
+        <div class="jf-flabel"><span class="jf-legend">authorization flags</span></div>
+        <div class="jf-ffield">
+          ${checkboxRow('id-workAuth-authorizedUS', 'authorized to work in the us', workAuth.authorizedUS)}
+          ${checkboxRow('id-workAuth-needsSponsorship', 'needs sponsorship now', workAuth.needsSponsorship)}
+          ${checkboxRow('id-workAuth-needsFutureSponsorship', 'will need sponsorship in the future', workAuth.needsFutureSponsorship)}
+          ${checkboxRow('id-workAuth-over18', '18 or older', workAuth.over18)}
+        </div>
+      </div>
+    </div>
+
+    <div class="jf-band"><h3>eeo</h3><p>optional — used only where a form asks</p></div>
+    <div class="jf-form">
+      <div class="jf-frow">
+        <div class="jf-flabel"><span class="jf-legend">about these options</span></div>
+        <div class="jf-ffield"><p class="jf-help">
+          these are the standard us categories employers report against (eeo-1 for race,
+          vevraa for veteran status, form cc-305 for disability), so the wording here matches
+          what greenhouse, lever and ashby actually show. leave a field on
+          <strong>— not set —</strong> to skip it: the filler then picks a
+          &ldquo;decline&rdquo; option if the form offers one, and otherwise leaves the
+          question alone.
+        </p></div>
+      </div>
+      <div class="jf-frow">
+        <div class="jf-flabel">
+          <span class="jf-legend">gender · hispanic or latino</span>
+          <p class="jf-help">asked as separate questions on most forms, hispanic/latino separately from race.</p>
+        </div>
+        <div class="jf-ffield jf-ffield--group">
+          ${fitemSelect('id-eeo-gender', 'gender', eeo.gender, IDENTITY_OPTIONS['eeo.gender'])}
+          ${fitemSelect('id-eeo-hispanicLatino', 'are you hispanic or latino?', eeo.hispanicLatino, IDENTITY_OPTIONS['eeo.hispanicLatino'])}
+        </div>
+      </div>
+      ${selectField('id-eeo-race', 'race', eeo.race, IDENTITY_OPTIONS['eeo.race'])}
+      <div class="jf-frow">
+        <div class="jf-flabel"><span class="jf-legend">veteran · disability status</span></div>
+        <div class="jf-ffield jf-ffield--group">
+          ${fitemSelect('id-eeo-veteran', 'veteran status', eeo.veteran, IDENTITY_OPTIONS['eeo.veteran'])}
+          ${fitemSelect('id-eeo-disability', 'disability status', eeo.disability, IDENTITY_OPTIONS['eeo.disability'])}
+        </div>
+      </div>
+      ${selectField('id-eeo-sexualOrientation', 'sexual orientation', eeo.sexualOrientation, IDENTITY_OPTIONS['eeo.sexualOrientation'],
+        'not a federally standardised set — these are the options ats forms commonly offer.')}
+    </div>
+
+    <div class="jf-band"><h3>canned answers</h3></div>
+    <div class="jf-form">
+      <div class="jf-frow">
+        <div class="jf-flabel"><span class="jf-legend">short answers</span></div>
+        <div class="jf-ffield jf-ffield--group">
+          ${fitem('id-answers-salaryExpectation', 'salary expectation', answers.salaryExpectation)}
+          ${fitem('id-answers-startDate', 'start date availability', answers.startDate)}
+          ${fitemSelect('id-answers-willingToRelocate', 'willing to relocate', answers.willingToRelocate, IDENTITY_OPTIONS['answers.willingToRelocate'])}
+          ${fitem('id-answers-howDidYouHear', 'how did you hear about us', answers.howDidYouHear)}
+        </div>
+      </div>
+    </div>
+
+    <div class="jf-saverow">
+      <button class="jf-btn jf-btn--primary" type="button" id="identitySaveBtn">save identity &amp; eeo</button>
+      <p class="jf-help">written to profile.local.json. the resume-derived sections are never touched.</p>
+    </div>
+    <div id="identitySaveError"></div>`;
 }
 
 // The single place the form is translated into the endpoint's shape: reads
@@ -2387,6 +2462,12 @@ function readIdentityForm() {
   };
 }
 
+function showIdentitySaveError(msg) {
+  const errorEl = document.getElementById('identitySaveError');
+  if (!errorEl) return;
+  errorEl.innerHTML = `<div class="jf-notice"><svg aria-hidden="true"><use href="#i-alert"/></svg>${esc(`couldn't save — ${msg}`)}</div>`;
+}
+
 async function saveIdentity() {
   const body = readIdentityForm();
   try {
@@ -2395,28 +2476,24 @@ async function saveIdentity() {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
     });
-    const errorEl = document.getElementById('identitySaveError');
     if (!resp.ok) {
       const respBody = await resp.json().catch(() => ({}));
-      if (errorEl) {
-        errorEl.innerHTML = esc(`couldn't save — ${respBody.error || `HTTP ${resp.status}`}`);
-        errorEl.classList.add('rule-error');
-      }
+      showIdentitySaveError(respBody.error || `HTTP ${resp.status}`);
       return;
     }
-    if (errorEl) {
-      errorEl.textContent = '';
-      errorEl.classList.remove('rule-error');
-    }
+    const errorEl = document.getElementById('identitySaveError');
+    if (errorEl) errorEl.innerHTML = '';
     await loadIdentity();
   } catch (e) {
-    const errorEl = document.getElementById('identitySaveError');
-    if (errorEl) {
-      errorEl.innerHTML = esc(`couldn't save — ${String(e?.message || e)}`);
-      errorEl.classList.add('rule-error');
-    }
+    showIdentitySaveError(String(e?.message || e));
   }
 }
+
+// Single click, no narrowing arm — same reasoning as the profile save above:
+// each identity/EEO field is independently overwritten, not narrowed.
+document.getElementById('settingsIdentityBody').addEventListener('click', (e) => {
+  if (e.target.closest('#identitySaveBtn')) saveIdentity();
+});
 
 // Tab navigation: one visible group at a time, persisted in the URL hash so a
 // reload (or a bookmarked #runs) lands where the operator left off. All sections stay in

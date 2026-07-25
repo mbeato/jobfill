@@ -13,14 +13,6 @@
   .muted { color: #999; font-size: 12px; }
   a { color: #1565c0; text-decoration: none; }
   h2 { font-size: 16px; font-weight: 600; line-height: 1.2; margin-top: 32px; }
-  .answer-block { background: #fff8dc; padding: 8px; overflow: hidden; }
-  textarea.answer-edit { width: 100%; box-sizing: border-box; border: 1px solid transparent; padding: 8px; background: #fff8dc; }
-  textarea.answer-edit:focus { border-color: #ccc; }
-  .clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-  .versions-toggle { color: #1565c0; cursor: pointer; }
-  .pin-btn.pinned { color: #2e7d32; font-weight: 600; }
-  .pin-btn { color: #999; cursor: pointer; }
-  .delete-btn { color: #d32f2f; cursor: pointer; }
   .s-verify, .s-needs_manual, .s-error { color: #e65100; }
   .s-didnt_stick { color: #d32f2f; font-weight: 600; }
   .s-not_found, .s-stale { color: #999; }
@@ -569,6 +561,19 @@
 .jf-scope .jf-kv > dt{color:var(--jf-ink-3);border-right:var(--jf-hair) solid var(--jf-rule)}
 .jf-scope .jf-kv > dd{color:var(--jf-ink-2);overflow:hidden;text-overflow:ellipsis}
 
+/* one stacked, independently-actionable row inside a .jf-panel -- the answer
+   library's older-versions disclosure (plan 06) is the one surface that needs
+   free-text + its own actions per item, rather than a snapshot or a kv list. */
+.jf-scope .jf-panel-row{
+  display:flex;align-items:flex-start;gap:var(--jf-s4);
+  padding-block:var(--jf-s3);
+  border-bottom:var(--jf-hair) solid var(--jf-rule);
+}
+.jf-scope .jf-panel-row:last-child{border-bottom:0}
+.jf-scope .jf-panel-row .jf-prose{flex:1 1 auto;min-width:0;margin:0}
+.jf-scope .jf-panel-row .jf-sub{flex:none;margin-top:0}
+.jf-scope .jf-panel-row .jf-acts{flex:none}
+
 /* past 1280px there is room to spend, and the criterion is what it gets
    spent on. :root override, not a .jf-scope rule (D-03's four-exception
    allowlist) — inert until a ported panel references --jf-col-decision,
@@ -741,9 +746,38 @@
       </table>
     </div>
   </div>
-  <div id="library" data-tab="library">
-    <h2>answer library</h2>
-    <div id="libraryBody"></div>
+  <div id="library" data-tab="library" class="jf-scope">
+    <div class="jf-toolbar">
+      <div class="jf-count">
+        <span class="jf-count-n" id="lCountN">0</span>
+        <span class="jf-count-t">
+          <h2>answer library</h2>
+          <p id="lCountSub"></p>
+        </span>
+      </div>
+    </div>
+    <div class="jf-gridwrap">
+      <table class="jf-grid" id="lGrid">
+        <caption class="jf-sr">answer library: essay answers banked from filled forms</caption>
+        <colgroup>
+          <col style="width:var(--jf-gutter-w)"><col style="width:20rem"><col><col style="width:9rem"><col style="width:12rem">
+        </colgroup>
+        <thead>
+          <tr>
+            <th scope="col" class="jf-gut">#</th>
+            <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-text"/></svg>question</span></th>
+            <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-text"/></svg>answer</span></th>
+            <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-date"/></svg>captured</span></th>
+            <th scope="col"><span class="jf-th">actions</span></th>
+          </tr>
+        </thead>
+        <tbody id="libraryBody"></tbody>
+      </table>
+    </div>
+    <div class="jf-empty" id="lEmpty" hidden>
+      <p>no answers banked yet</p>
+      <p>capture answers from the popup after filling a form with essay questions.</p>
+    </div>
   </div>
   <div id="failures" data-tab="failures">
     <h2>widget failures</h2>
@@ -1034,65 +1068,64 @@ function tailorStateLine(tailorState, tailorMessage) {
   return '';
 }
 
+let libraryGroups = [];
+
 async function loadLibrary() {
-  const groups = await (await fetch('/answers')).json();
-  renderLibrary(groups);
+  libraryGroups = await (await fetch('/answers')).json();
+  renderLibrary(libraryGroups);
 }
 
+// Each version keeps its OWN pin/delete actions (item 76), independent of the
+// parent answer's -- both dispatch through the same shared library.delete
+// armed action, keyed on the version's own id, never the group's best.id.
 function renderVersionRow(v) {
   return `
-    <div style="padding-left: 4px; margin-top: 6px;">
-      <div class="muted clamp-3">${esc(v.answer)}</div>
-      <div class="muted">${(v.created_at || '').slice(0, 10)}
-        <span class="pin-btn ${v.pinned ? 'pinned' : ''}" onclick="patchAnswer(${v.id}, {pinned: ${v.pinned ? 0 : 1}})">${v.pinned ? 'pinned' : 'pin'}</span>
-        · <span class="delete-btn" onclick="deleteAnswer(${v.id})">delete</span>
-      </div>
+    <div class="jf-panel-row">
+      <p class="jf-prose">${esc(v.answer)}</p>
+      <span class="jf-sub">${esc((v.created_at || '').slice(0, 10))}</span>
+      <span class="jf-acts">
+        <button class="jf-btn jf-btn--quiet" type="button" aria-pressed="${v.pinned ? 'true' : 'false'}" onclick="patchAnswer(${v.id}, {pinned: ${v.pinned ? 0 : 1}})"><svg aria-hidden="true"><use href="#i-pin"/></svg>${v.pinned ? 'pinned' : 'pin'}</button>
+        <button class="jf-btn jf-btn--quiet jf-armable" type="button" data-armed="confirm?" data-resting="delete" data-jf-action="library.delete" data-jf-id="${v.id}"><svg aria-hidden="true"><use href="#i-x"/></svg>delete</button>
+      </span>
     </div>`;
 }
 
+// D-04: render every group. No slice, no cap, no pagination, no virtualisation.
 function renderLibrary(groups) {
-  const body = document.getElementById('libraryBody');
-  if (!groups.length) {
-    body.innerHTML = `
-      <div class="muted">no answers banked yet</div>
-      <div class="muted" style="font-size: 12px">capture answers from the popup after filling a form with essay questions.</div>`;
+  document.getElementById('lCountN').textContent = String(groups.length);
+  const pinnedCount = groups.filter(g => g.best.pinned).length;
+  const versionedCount = groups.filter(g => g.versions.length > 0).length;
+  document.getElementById('lCountSub').textContent =
+    `banked answers · ${pinnedCount} pinned · ${versionedCount} with older versions`;
+  const empty = groups.length === 0;
+  document.getElementById('lEmpty').hidden = !empty;
+  document.getElementById('lGrid').hidden = empty;
+  if (empty) {
+    document.getElementById('libraryBody').innerHTML = '';
     return;
   }
-  body.innerHTML = `
-    <table>
-      <thead><tr><th>question</th><th>answer</th><th>captured</th><th>actions</th></tr></thead>
-      <tbody>
-        ${groups.map(g => {
-          const best = g.best;
-          return `
-            <tr>
-              <td style="text-overflow: ellipsis; white-space: nowrap; overflow: hidden; max-width: 280px">${esc(g.question)}</td>
-              <td><textarea class="answer-edit" rows="4" onchange="patchAnswer(${best.id}, {answer: this.value})">${esc(best.answer)}</textarea></td>
-              <td>
-                <div class="muted">${(best.created_at || '').slice(0, 10)}</div>
-                ${g.versions.length ? `
-                  <div class="versions-toggle" onclick="toggleVersions(${best.id})">${g.versions.length} older version${g.versions.length === 1 ? '' : 's'} <span id="varrow-${best.id}">▾</span></div>
-                  <div id="versions-${best.id}" style="display:none">
-                    ${g.versions.map(renderVersionRow).join('')}
-                  </div>
-                ` : ''}
-              </td>
-              <td>
-                <span class="pin-btn ${best.pinned ? 'pinned' : ''}" onclick="patchAnswer(${best.id}, {pinned: ${best.pinned ? 0 : 1}})">${best.pinned ? 'pinned' : 'pin'}</span>
-                · <span class="delete-btn" onclick="deleteAnswer(${best.id})">delete</span>
-              </td>
-            </tr>`;
-        }).join('')}
-      </tbody>
-    </table>`;
-}
-
-function toggleVersions(id) {
-  const body = document.getElementById(`versions-${id}`);
-  const arrow = document.getElementById(`varrow-${id}`);
-  const expanded = body.style.display !== 'none';
-  body.style.display = expanded ? 'none' : 'block';
-  arrow.textContent = expanded ? '▾' : '▴';
+  document.getElementById('libraryBody').innerHTML = groups.map((g, i) => {
+    const best = g.best;
+    const hasVersions = g.versions.length > 0;
+    const main = `
+      <tr class="jf-row">
+        <td class="jf-gut">${i + 1}</td>
+        <td title="${esc(g.question)}">${esc(g.question)}</td>
+        <td><label class="jf-sr" for="ans-${best.id}">answer for: ${esc(g.question)}</label>
+          <textarea class="jf-inline" id="ans-${best.id}" rows="3" onchange="patchAnswer(${best.id}, {answer: this.value})">${esc(best.answer)}</textarea></td>
+        <td>${esc((best.created_at || '').slice(0, 10))}${hasVersions ? `<span class="jf-sub"><button class="jf-disc" type="button" aria-expanded="false" aria-controls="lv-${best.id}"><svg aria-hidden="true"><use href="#i-chev"/></svg>${g.versions.length} older version${g.versions.length === 1 ? '' : 's'}</button></span>` : ''}</td>
+        <td class="jf-acts-cell"><span class="jf-acts">
+          <button class="jf-btn jf-btn--quiet" type="button" aria-pressed="${best.pinned ? 'true' : 'false'}" onclick="patchAnswer(${best.id}, {pinned: ${best.pinned ? 0 : 1}})"><svg aria-hidden="true"><use href="#i-pin"/></svg>${best.pinned ? 'pinned' : 'pin'}</button>
+          <button class="jf-btn jf-btn--quiet jf-armable" type="button" data-armed="confirm?" data-resting="delete" data-jf-action="library.delete" data-jf-id="${best.id}"><svg aria-hidden="true"><use href="#i-x"/></svg>delete</button>
+        </span></td>
+      </tr>`;
+    const detail = hasVersions ? `
+      <tr class="jf-detailrow" id="lv-${best.id}" hidden><td colspan="5"><div class="jf-panel">
+        <p class="jf-panel-h">older versions · ${esc(g.question)}</p>
+        ${g.versions.map(renderVersionRow).join('')}
+      </div></td></tr>` : '';
+    return main + detail;
+  }).join('');
 }
 
 async function patchAnswer(id, body) {
@@ -1104,8 +1137,11 @@ async function patchAnswer(id, body) {
   loadLibrary();
 }
 
+// Deliberate change 3 of 3 (19-UI-SPEC Safety Contracts §2): the native browser
+// confirmation dialog dies in the Playwright runner's browser, so this destructive
+// act arms instead -- dispatched via JF_ACTIONS['library.delete'] on the shared
+// .jf-armable listener's second click (plan 01). This is now just DELETE, then reload.
 async function deleteAnswer(id) {
-  if (!confirm("delete this answer? this can't be undone")) return;
   await fetch(`/answers/${id}`, { method: 'DELETE' });
   loadLibrary();
 }
@@ -1558,8 +1594,8 @@ function renderPostings(rows) {
     </table>`;
 }
 
-// Additive/promotive override (D-16) — no confirm() dialog, matching the
-// non-destructive "mark reviewed" button. Reloads first so the two re-renders
+// Additive/promotive override (D-16) — no native confirmation dialog, matching
+// the non-destructive "mark reviewed" button. Reloads first so the two re-renders
 // don't wipe an inserted notice (mirrors triggerFill's reload-then-notify order).
 async function queueReject(id) {
   const resp = await (await fetch(`/postings/${id}/promote`, { method: 'POST' })).json();
@@ -2807,8 +2843,8 @@ document.addEventListener('click', (e) => {
 });
 
 /* ── two-click armed confirm ──────────────────────────────────────────────
-   Native confirm() dies in the Playwright runner's browser, so destructive
-   acts arm instead. Zero layout shift: the armed label is always SHORTER than
+   The native browser confirmation dialog dies in the Playwright runner's
+   browser, so destructive acts arm instead. Zero layout shift: the armed label is always SHORTER than
    the resting label and the width is pinned before the swap. The armed state
    signals by INVERTING ink, never by color: this system owns no red, and
    inversion survives both colour-blindness and forced-colors. A hairline
@@ -2900,5 +2936,20 @@ JF_STATUS.applications = () => ({
   filter,
   sort: 'sorted by <b>most recent</b>',
 });
+
+// Plan 06: the answer library's one armed action, registered here for the same
+// JF_ACTIONS-must-exist-first reason as plans 02/04's registrations above --
+// deliberate change 3 of 3 (19-UI-SPEC Safety Contracts §2), replacing the last
+// native confirmation dialog in the product. Version rows dispatch through this
+// same action keyed on their own id (item 76), never the parent group's best.id.
+JF_ACTIONS['library.delete'] = (id) => deleteAnswer(Number(id));
+JF_STATUS.library = () => ({
+  n: libraryGroups.length,
+  unit: 'answers',
+  filterLabel: 'filter',
+  filter: 'all',
+  sort: 'sorted by <b>most recent</b>',
+});
+
 </script>
 </body>

@@ -4,6 +4,7 @@
 // style: never throw, never call the network/LLM, worst case survives to the next stage.
 
 import type { PostingRow } from './postings';
+import type { BoardRow } from './boards';
 
 // D-13 decision_reason codes, kept as literal constants (mirrors failures.ts's
 // VALID_STATUSES allowlist-enum style).
@@ -11,6 +12,10 @@ const REASON_TITLE = 'rules:title';
 const REASON_LOCATION = 'rules:location';
 const REASON_STALE = 'rules:stale';
 const REASON_YOE = 'rules:yoe';
+// D-12: its own code and dashboard bucket — a new board suppressing ~400
+// postings should read as exactly that, not lumped into the generic `stale`
+// bucket, which reports "too old" from a completely different clock.
+const REASON_BOARD_GRACE = 'rules:board-grace';
 
 // All regexes below are linear (no nested quantifiers) to stay ReDoS-safe (T-10-05):
 // title/location/JD text are untrusted third-party strings.
@@ -64,6 +69,57 @@ const INDEX_DATE_SOURCES = new Set(['simplify', 'getro']);
 // and the window is typically closing.
 const MAX_STALE_DAYS_INDEXED = 7;
 
+// Phase 17 D-02: the first-seen aging cutoff for sources whose posted_at carries
+// zero age information (see FIRST_SEEN_SOURCES below). Its own constant, NOT
+// shared with MAX_STALE_DAYS (2) or MAX_STALE_DAYS_INDEXED (7): with
+// LLM_CAP() = 100 against a ~2,000-row FIFO backlog, a 2-day cutoff would
+// auto-reject postings because the LLM budget ran out before reaching them,
+// not because they are actually old. 7 days tracks the same application-window
+// research cited above for MAX_STALE_DAYS_INDEXED. Exported (unlike the two
+// existing caps) because Phase 18's CFG-01 exposes it as a user-editable setting.
+export const MAX_FIRST_SEEN_DAYS = 7;
+
+// D-01: the sources whose posted_at carries zero age information, so
+// postings.created_at (when jobfill first staged the row) is their only honest
+// freshness clock. Exactly these two:
+//   - greenhouse: posted_at is job.updated_at, a MODIFICATION time that an edit
+//     pushes forward — carries no age information (see INDEX_DATE_SOURCES above).
+//   - yc: posted_at is NULL on every row.
+// jobright is excluded: posted_at_trusted is true and it is already capped at
+// MAX_STALE_DAYS. simplify/getro are excluded: their index date is a genuine,
+// strictly-stricter lower bound than a first-seen cap could be, so they must
+// not gain a second, weaker clock on top of MAX_STALE_DAYS_INDEXED.
+const FIRST_SEEN_SOURCES = new Set(['greenhouse', 'yc']);
+
+// D-09: boards are harvested DURING a sweep but first polled on the NEXT
+// sweep, so the grace window has to span harvest→next-poll regardless of time
+// of day. Live evidence: all 427 auto-added boards have first_seen_at within
+// one minute of each other, and their postings were staged by a LATER sweep.
+// 24h would fall just short of that first poll for a board added late in the
+// day and let its whole backlog through — exactly the failure FILT-07 exists
+// to prevent. 72h was rejected as discarding two extra days of genuinely-new
+// postings. Named explicitly in HOURS (not days, unlike every other cap in
+// this file) to avoid a silent 24x unit-ambiguity bug. Exported for Phase
+// 18's CFG-01.
+export const GRACE_WINDOW_HOURS = 48;
+
+// SQLite writes datetime('now') as 'YYYY-MM-DD HH:MM:SS' — UTC but with no zone
+// designator. A bare Date.parse on that string resolves it as LOCAL time,
+// introducing a whole-timezone-offset error. This helper detects the SQLite
+// shape and normalizes it to an explicit UTC ISO string before parsing;
+// anything else (e.g. a real ISO-8601 string from a third-party API) falls
+// back to plain Date.parse unchanged. Used identically by the first-seen aging
+// check below and by classifyBoardGrace — the one case PATTERNS.md permits a
+// shared helper in this file, since both read the same SQLite-format columns
+// (postings.created_at, boards.first_seen_at).
+function parseStoredTs(value: unknown): number {
+  const s = String(value ?? '');
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(s)) {
+    return Date.parse(`${s.replace(' ', 'T')}Z`);
+  }
+  return Date.parse(s);
+}
+
 // Captures a leading integer immediately before "year(s)"/"yr(s)" (optionally with a
 // trailing "+"), which covers plain ("3 years"), plus ("5+ years"), and
 // minimum/at-least phrasing ("minimum 3 years") without a separate pattern.
@@ -103,6 +159,92 @@ export function classifyMetadata(posting: PostingRow): { reject: boolean; reason
           return { reject: true, reason: REASON_STALE };
         }
       }
+    }
+
+    // D-01/D-04: first-seen aging for sources whose posted_at carries no age
+    // information — postings.created_at (when jobfill first staged the row) is
+    // the only honest clock available. Fires across the whole to-decide
+    // backlog, including postings the LLM never reached: a posting held
+    // MAX_FIRST_SEEN_DAYS without evaluation is stale by the time it would be
+    // evaluated, so backlog GC is the intended behavior, not a side effect.
+    if (FIRST_SEEN_SOURCES.has(String(posting?.source ?? ''))) {
+      const createdTs = parseStoredTs(posting?.created_at);
+      if (!Number.isNaN(createdTs)) {
+        const ageDays = (Date.now() - createdTs) / (1000 * 60 * 60 * 24);
+        if (ageDays > MAX_FIRST_SEEN_DAYS) {
+          return { reject: true, reason: REASON_STALE };
+        }
+      }
+    }
+
+    // D-03: greenhouse's posted_at (= job.updated_at) is a lower bound on age
+    // in exactly one direction. updated_at >= posted_at always, so an OLD
+    // updated_at is honest proof the listing is at least that old — but a
+    // RECENT updated_at proves nothing (an edit pushes it forward) and must
+    // never be treated as evidence of freshness. The value is used only in
+    // the direction where it is provably true, never the reverse (Phase 9
+    // D-07, no fabricated dates). posted_at here is a real ISO-8601 string
+    // from the Greenhouse API, not the SQLite format, so plain Date.parse
+    // applies (not parseStoredTs).
+    if (String(posting?.source ?? '') === 'greenhouse' && posting?.posted_at) {
+      const updatedTs = Date.parse(posting.posted_at);
+      if (!Number.isNaN(updatedTs)) {
+        const ageDays = (Date.now() - updatedTs) / (1000 * 60 * 60 * 24);
+        if (ageDays > MAX_FIRST_SEEN_DAYS) {
+          return { reject: true, reason: REASON_STALE };
+        }
+      }
+    }
+
+    return { reject: false };
+  } catch {
+    return { reject: false };
+  }
+}
+
+// D-13: a separate pure classifier, called as its own step in decide.ts's loop
+// before classifyMetadata. The board is injected by the caller (batch-loaded
+// once per sweep via a Map, per D-13) rather than queried here — this
+// function stays db-free, pure, and never-throwing, exactly like
+// classifyMetadata/classifyYoe above.
+//
+// D-08: both operands (posting.created_at, board.first_seen_at) are write-once
+// stored timestamps — postings.created_at is absent from upsertPosting's ON
+// CONFLICT SET list, and boards.first_seen_at is preserved by upsertBoard's ON
+// CONFLICT per Phase 16 D-02. That is what makes a posting's grace verdict
+// fixed forever: it never flips on re-examination, never depends on when this
+// function happens to run, and degrades correctly when a sweep is skipped.
+// This function therefore contains NO Date.now(), NO new Date(), and NO
+// database access.
+export function classifyBoardGrace(
+  posting: PostingRow,
+  board: BoardRow | null,
+): { reject: boolean; reason?: string } {
+  try {
+    // D-11: fail open on a posting→board join miss. A posting whose
+    // (source, company) matched no board row proceeds under normal
+    // first-seen aging rather than being suppressed — a handful of extra
+    // postings reaching the LLM is far cheaper than silently suppressing a
+    // live board.
+    if (!board) return { reject: false };
+
+    const boardSeen = parseStoredTs(board?.first_seen_at);
+    const postingCreated = parseStoredTs(posting?.created_at);
+    if (Number.isNaN(boardSeen) || Number.isNaN(postingCreated)) return { reject: false };
+
+    const deltaHours = (postingCreated - boardSeen) / (1000 * 60 * 60);
+
+    // The deltaHours >= 0 lower bound is required, not optional. D-08's
+    // predicate is "the posting was first staged WITHIN the window of the
+    // board's own first-seen, i.e. it arrived in the same batch as the board
+    // itself." A negative delta means the posting was staged BEFORE the
+    // board row existed, so it demonstrably did not arrive with the board —
+    // this happens when an already-polled token is later re-discovered by a
+    // harvest and gains a board row after its postings were staged. Without
+    // this guard, a bare `deltaHours < GRACE_WINDOW_HOURS` would permanently
+    // reject every posting that predates its board row.
+    if (deltaHours >= 0 && deltaHours < GRACE_WINDOW_HOURS) {
+      return { reject: true, reason: REASON_BOARD_GRACE };
     }
 
     return { reject: false };

@@ -1,6 +1,7 @@
 import { test, expect } from 'bun:test';
-import { classifyMetadata, classifyYoe } from './filter';
+import { classifyMetadata, classifyYoe, classifyBoardGrace } from './filter';
 import type { PostingRow } from './postings';
+import type { BoardRow } from './boards';
 
 function mkPosting(overrides: Partial<PostingRow> = {}): PostingRow {
   return {
@@ -24,6 +25,31 @@ function mkPosting(overrides: Partial<PostingRow> = {}): PostingRow {
 
 function daysAgo(n: number): string {
   return new Date(Date.now() - n * 24 * 60 * 60 * 1000).toISOString();
+}
+
+// SQLite stores datetime('now') as 'YYYY-MM-DD HH:MM:SS' (UTC, no zone
+// designator) — a bare Date.parse on that shape resolves it as LOCAL time.
+// Tests for postings.created_at / boards.first_seen_at MUST use this format
+// (not the ISO-8601 `daysAgo` above) so a regression to bare Date.parse in the
+// implementation is caught.
+function sqlDaysAgo(n: number): string {
+  return new Date(Date.now() - n * 24 * 60 * 60 * 1000).toISOString().slice(0, 19).replace('T', ' ');
+}
+
+function mkBoard(overrides: Partial<BoardRow> = {}): BoardRow {
+  return {
+    id: 1,
+    ats: 'greenhouse',
+    token: 'acme',
+    source_of_discovery: 'simplify',
+    first_seen_at: '2026-07-24 20:52:27',
+    last_ok_at: null,
+    dead_since: null,
+    consecutive_failures: 0,
+    created_at: '2026-07-24 20:52:27',
+    updated_at: '2026-07-24 20:52:27',
+    ...overrides,
+  };
 }
 
 // --- Title (D-04) ---
@@ -212,14 +238,17 @@ test('classifyMetadata applies the index-date cap to getro as well', () => {
   expect(result).toEqual({ reject: true, reason: 'rules:stale' });
 });
 
-test('greenhouse is NOT index-dated: a very old untrusted modification date must not be rejected', () => {
+test('greenhouse is NOT index-dated via INDEX_DATE_SOURCES/MAX_STALE_DAYS_INDEXED (a different path from D-03)', () => {
   // D-07: greenhouse's posted_at is job.updated_at, a MODIFICATION time that
-  // moves forward on every edit. It carries no age information, so capping on
-  // it would reject postings for not having been edited recently. Guards
-  // against the tempting-but-wrong `posted_at_trusted === false` keying, which
-  // would sweep in ~14k greenhouse rows.
+  // moves forward on every edit, so it must never be keyed on the tempting-but-
+  // wrong `posted_at_trusted === false` INDEX_DATE_SOURCES path (that would
+  // sweep in ~14k greenhouse rows). It is NOT in INDEX_DATE_SOURCES and never
+  // will be. Phase 17 D-03 separately (and correctly) rejects an old
+  // updated_at as an honest lower bound on age via its own dedicated check —
+  // see the D-03 lower-bound tests below, which is why this 400-day-old
+  // posted_at now IS rejected, just not via the INDEX_DATE_SOURCES path.
   const result = classifyMetadata(mkPosting({ source: 'greenhouse', posted_at: daysAgo(400), posted_at_trusted: false }));
-  expect(result.reject).toBe(false);
+  expect(result).toEqual({ reject: true, reason: 'rules:stale' });
 });
 
 test('the trusted 2-day cap is unchanged and still stricter than the index-date cap', () => {
@@ -229,4 +258,185 @@ test('the trusted 2-day cap is unchanged and still stricter than the index-date 
   const indexed = classifyMetadata(mkPosting({ source: 'simplify', posted_at: daysAgo(5), posted_at_trusted: false }));
   expect(trusted).toEqual({ reject: true, reason: 'rules:stale' });
   expect(indexed.reject).toBe(false);
+});
+
+// --- First-seen aging (FILT-06, D-01/D-02/D-04) ------------------------------
+// greenhouse and yc postings carry zero age information in posted_at, so
+// postings.created_at (when jobfill first staged the row) is their only clock.
+
+test('classifyMetadata rejects a greenhouse posting whose created_at is 8 days old as rules:stale', () => {
+  const result = classifyMetadata(mkPosting({ source: 'greenhouse', created_at: sqlDaysAgo(8) }));
+  expect(result).toEqual({ reject: true, reason: 'rules:stale' });
+});
+
+test('classifyMetadata survives a greenhouse posting whose created_at is 6 days old', () => {
+  const result = classifyMetadata(mkPosting({ source: 'greenhouse', created_at: sqlDaysAgo(6) }));
+  expect(result.reject).toBe(false);
+});
+
+test('classifyMetadata rejects a yc posting whose created_at is 8 days old, posted_at null, as rules:stale', () => {
+  const result = classifyMetadata(mkPosting({ source: 'yc', created_at: sqlDaysAgo(8), posted_at: null }));
+  expect(result).toEqual({ reject: true, reason: 'rules:stale' });
+});
+
+test('classifyMetadata survives a yc posting whose created_at is 1 day old, posted_at null', () => {
+  const result = classifyMetadata(mkPosting({ source: 'yc', created_at: sqlDaysAgo(1), posted_at: null }));
+  expect(result.reject).toBe(false);
+});
+
+test('classifyMetadata does not add a first-seen clock to simplify (index cap governs)', () => {
+  const result = classifyMetadata(
+    mkPosting({ source: 'simplify', created_at: sqlDaysAgo(30), posted_at: daysAgo(3), posted_at_trusted: false }),
+  );
+  expect(result.reject).toBe(false);
+});
+
+test('classifyMetadata still applies the existing MAX_STALE_DAYS_INDEXED path to getro unchanged', () => {
+  const result = classifyMetadata(
+    mkPosting({ source: 'getro', created_at: sqlDaysAgo(30), posted_at: daysAgo(30), posted_at_trusted: false }),
+  );
+  expect(result).toEqual({ reject: true, reason: 'rules:stale' });
+});
+
+test('classifyMetadata still applies the existing MAX_STALE_DAYS path to jobright unchanged', () => {
+  const result = classifyMetadata(
+    mkPosting({ source: 'jobright', posted_at_trusted: true, posted_at: daysAgo(5), created_at: sqlDaysAgo(0) }),
+  );
+  expect(result).toEqual({ reject: true, reason: 'rules:stale' });
+});
+
+test('classifyMetadata boundary: a SQLite-format created_at that would flip if parsed as local time', () => {
+  // A timestamp exactly at the MAX_FIRST_SEEN_DAYS boundary in UTC. If
+  // implementation regressed to a bare Date.parse (which resolves the SQLite
+  // shape as LOCAL time), this machine's offset would flip the verdict.
+  const justUnder = sqlDaysAgo(6.9);
+  const result = classifyMetadata(mkPosting({ source: 'greenhouse', created_at: justUnder }));
+  expect(result.reject).toBe(false);
+});
+
+// --- Greenhouse updated_at lower bound (FILT-06, D-03) -----------------------
+// updated_at >= posted_at always: an OLD updated_at is an honest lower bound
+// on age, but a RECENT one proves nothing and must never signal freshness.
+
+test('classifyMetadata rejects a greenhouse posting with an old updated_at even when created_at is fresh (D-03 lower bound)', () => {
+  const result = classifyMetadata(
+    mkPosting({ source: 'greenhouse', created_at: sqlDaysAgo(0), posted_at: daysAgo(30) }),
+  );
+  expect(result).toEqual({ reject: true, reason: 'rules:stale' });
+});
+
+test('classifyMetadata does NOT treat a recent greenhouse updated_at as evidence of freshness', () => {
+  // created_at 1 hour ago (fresh by first-seen), posted_at (updated_at) 2 days
+  // ago — a recent updated_at proves nothing and must not be used either way.
+  const result = classifyMetadata(
+    mkPosting({ source: 'greenhouse', created_at: sqlDaysAgo(1 / 24), posted_at: daysAgo(2) }),
+  );
+  expect(result.reject).toBe(false);
+});
+
+test('classifyMetadata survives a greenhouse posting with created_at fresh and posted_at null', () => {
+  const result = classifyMetadata(mkPosting({ source: 'greenhouse', created_at: sqlDaysAgo(1 / 24), posted_at: null }));
+  expect(result.reject).toBe(false);
+});
+
+test('classifyMetadata survives an unparseable greenhouse created_at without throwing', () => {
+  expect(() => classifyMetadata(mkPosting({ source: 'greenhouse', created_at: 'not-a-date' }))).not.toThrow();
+  const result = classifyMetadata(mkPosting({ source: 'greenhouse', created_at: 'not-a-date' }));
+  expect(result.reject).toBe(false);
+});
+
+test('classifyMetadata survives an absent greenhouse created_at field without throwing', () => {
+  const posting = mkPosting({ source: 'greenhouse' });
+  delete (posting as Partial<PostingRow>).created_at;
+  expect(() => classifyMetadata(posting)).not.toThrow();
+  expect(classifyMetadata(posting).reject).toBe(false);
+});
+
+test('classifyMetadata still checks title before the first-seen/stale rules', () => {
+  const result = classifyMetadata(
+    mkPosting({ source: 'greenhouse', title: 'Senior Software Engineer', created_at: sqlDaysAgo(8) }),
+  );
+  expect(result).toEqual({ reject: true, reason: 'rules:title' });
+});
+
+// --- classifyBoardGrace (FILT-07, D-08/D-09/D-11/D-13) -----------------------
+// FS = board.first_seen_at fixed at '2026-07-24 20:52:27' in every case below.
+
+const FS = '2026-07-24 20:52:27';
+
+test('classifyBoardGrace rejects a posting staged ~0h after board.first_seen_at', () => {
+  const board = mkBoard({ first_seen_at: FS });
+  const posting = mkPosting({ created_at: '2026-07-24 20:53:10' });
+  expect(classifyBoardGrace(posting, board)).toEqual({ reject: true, reason: 'rules:board-grace' });
+});
+
+test('classifyBoardGrace rejects a posting staged ~23h after board.first_seen_at', () => {
+  const board = mkBoard({ first_seen_at: FS });
+  const posting = mkPosting({ created_at: '2026-07-25 20:00:00' });
+  expect(classifyBoardGrace(posting, board)).toEqual({ reject: true, reason: 'rules:board-grace' });
+});
+
+test('classifyBoardGrace rejects a posting staged ~47h after board.first_seen_at (inside window)', () => {
+  const board = mkBoard({ first_seen_at: FS });
+  const posting = mkPosting({ created_at: '2026-07-26 20:00:00' });
+  expect(classifyBoardGrace(posting, board)).toEqual({ reject: true, reason: 'rules:board-grace' });
+});
+
+test('classifyBoardGrace survives a posting staged ~48.1h after board.first_seen_at (just outside window)', () => {
+  const board = mkBoard({ first_seen_at: FS });
+  const posting = mkPosting({ created_at: '2026-07-26 21:00:00' });
+  expect(classifyBoardGrace(posting, board)).toEqual({ reject: false });
+});
+
+test('classifyBoardGrace survives a posting staged far beyond the grace window', () => {
+  const board = mkBoard({ first_seen_at: FS });
+  const posting = mkPosting({ created_at: '2026-07-30 12:00:00' });
+  expect(classifyBoardGrace(posting, board)).toEqual({ reject: false });
+});
+
+test('classifyBoardGrace survives a posting staged BEFORE the board row existed (negative delta)', () => {
+  const board = mkBoard({ first_seen_at: FS });
+  const posting = mkPosting({ created_at: '2026-07-22 06:04:43' });
+  expect(classifyBoardGrace(posting, board)).toEqual({ reject: false });
+});
+
+test('classifyBoardGrace fails open when board is null (D-11)', () => {
+  const posting = mkPosting({ created_at: FS });
+  expect(classifyBoardGrace(posting, null)).toEqual({ reject: false });
+});
+
+test('classifyBoardGrace fails open on a garbage board.first_seen_at', () => {
+  const board = mkBoard({ first_seen_at: 'garbage' });
+  const posting = mkPosting({ created_at: FS });
+  expect(classifyBoardGrace(posting, board)).toEqual({ reject: false });
+});
+
+test('classifyBoardGrace fails open on an empty or undefined posting.created_at', () => {
+  const board = mkBoard({ first_seen_at: FS });
+  expect(classifyBoardGrace(mkPosting({ created_at: '' }), board)).toEqual({ reject: false });
+  const posting = mkPosting();
+  delete (posting as Partial<PostingRow>).created_at;
+  expect(classifyBoardGrace(posting, board)).toEqual({ reject: false });
+});
+
+test('classifyBoardGrace never throws on a frozen/exotic object missing fields entirely', () => {
+  const weird = Object.freeze({}) as unknown as PostingRow;
+  expect(() => classifyBoardGrace(weird, mkBoard())).not.toThrow();
+  expect(classifyBoardGrace(weird, mkBoard())).toEqual({ reject: false });
+  const weirdBoard = Object.freeze({}) as unknown as BoardRow;
+  expect(() => classifyBoardGrace(mkPosting(), weirdBoard)).not.toThrow();
+  expect(classifyBoardGrace(mkPosting(), weirdBoard)).toEqual({ reject: false });
+});
+
+test('classifyBoardGrace is wall-clock independent: identical inputs give an identical verdict across calls', () => {
+  const board = mkBoard({ first_seen_at: FS });
+  // created_at is years in the past relative to "now" — if the function ever
+  // read Date.now()/new Date(), this would behave differently than a
+  // recently-staged posting. It must not: the verdict depends only on the
+  // fixed delta between the two stored timestamps.
+  const posting = mkPosting({ created_at: '2026-07-24 20:53:10' });
+  const first = classifyBoardGrace(posting, board);
+  const second = classifyBoardGrace(posting, board);
+  expect(first).toEqual({ reject: true, reason: 'rules:board-grace' });
+  expect(second).toEqual(first);
 });

@@ -571,7 +571,7 @@
   <div id="settings" data-tab="settings">
     <div id="settingsCriteriaBody" class="jf-scope"></div>
     <h2>relevance profile</h2>
-    <div id="settingsProfileBody"></div>
+    <div id="settingsProfileBody" class="jf-scope"></div>
     <h2>identity &amp; eeo</h2>
     <div id="settingsIdentityBody"></div>
   </div>
@@ -2028,49 +2028,56 @@ const MAX_PROFILE_CHARS = 4000;
 
 async function loadProfileText() {
   const body = document.getElementById('settingsProfileBody');
-  body.innerHTML = `<div class="muted">loading relevance profile…</div>`;
+  body.innerHTML = `<div class="jf-empty"><p>loading…</p><p>fetching the relevance profile.</p></div>`;
   try {
     const resp = await fetch('/settings/profile');
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const { profile } = await resp.json();
     renderProfileText(profile);
   } catch (e) {
-    body.innerHTML = `<div class="muted" onclick="loadProfileText()">couldn't load relevance profile — click to retry</div>`;
+    body.innerHTML = `<div class="jf-notice" onclick="loadProfileText()" style="cursor:pointer"><svg aria-hidden="true"><use href="#i-alert"/></svg>couldn't load relevance profile · click to retry</div>`;
   }
 }
 
 function renderProfileText(text) {
   const body = document.getElementById('settingsProfileBody');
   body.innerHTML = `
-    <div class="settings-hint">describe the roles, seniority, and locations you're targeting — the relevance check reads this prose for every posting that passes the rules above.</div>
-    <div class="settings-field profile">
-      <textarea id="profileText" oninput="refreshProfileCount()">${esc(text)}</textarea>
-      <div class="settings-count" id="profileCount"></div>
+    <div class="jf-band"><h3>relevance profile</h3><p>prose the relevance check reads for every posting that passes the rules above</p></div>
+    <div class="jf-form">
+      <div class="jf-frow">
+        <div class="jf-flabel">
+          <label for="profileText">target roles, seniority and locations</label>
+          <p class="jf-help">describe the roles, seniority, and locations you're targeting — written for a model, not a recruiter.</p>
+        </div>
+        <div class="jf-ffield">
+          <textarea class="jf-input jf-prose-input" id="profileText" rows="8" aria-describedby="profileCount">${esc(text)}</textarea>
+          <p class="jf-count-live" id="profileCount" role="status"></p>
+        </div>
+      </div>
     </div>
-    <div class="settings-actions">
-      <button id="profileSaveBtn" class="primary" onclick="saveProfileText()">save relevance profile</button>
-      <span class="settings-hint" id="profileSaveError"></span>
-    </div>`;
+    <div class="jf-saverow">
+      <button class="jf-btn jf-btn--primary" type="button" id="saveProfile">save relevance profile</button>
+      <p class="jf-help">free-form prose is never a narrowing change, so this saves on one click.</p>
+    </div>
+    <div id="profileSaveError"></div>`;
   refreshProfileCount();
 }
 
 function refreshProfileCount() {
   const textarea = document.getElementById('profileText');
   const countEl = document.getElementById('profileCount');
-  const saveBtn = document.getElementById('profileSaveBtn');
+  const saveBtn = document.getElementById('saveProfile');
   if (!textarea || !countEl) return;
   const len = textarea.value.length;
+  const max = MAX_PROFILE_CHARS.toLocaleString();
   if (textarea.value.trim().length === 0) {
     countEl.textContent = "the relevance profile can't be empty — describe target roles so the relevance check has something to judge against";
-    countEl.classList.add('rule-error');
     if (saveBtn) saveBtn.disabled = true;
   } else if (len > MAX_PROFILE_CHARS) {
-    countEl.textContent = `too long — trim to 4,000 characters (currently ${len})`;
-    countEl.classList.add('rule-error');
+    countEl.textContent = `too long — trim to ${max} characters (currently ${len})`;
     if (saveBtn) saveBtn.disabled = true;
   } else {
-    countEl.textContent = `${len} / 4,000 characters`;
-    countEl.classList.remove('rule-error');
+    countEl.textContent = `${len} / ${max} characters`;
     if (saveBtn) saveBtn.disabled = false;
   }
 }
@@ -2078,7 +2085,14 @@ function refreshProfileCount() {
 // Plain single click, no narrowing arm: free-form prose steering an already
 // precision-biased LLM judgment has no clean binary more-or-less-restrictive
 // signal the way a flat term list does, and its failure mode is a worse LLM
-// verdict rather than a hard-coded permanent rejection.
+// verdict rather than a hard-coded permanent rejection. This button
+// deliberately never carries .jf-armable and never gets a data-jf-action.
+function showProfileSaveError(msg) {
+  const errorEl = document.getElementById('profileSaveError');
+  if (!errorEl) return;
+  errorEl.innerHTML = `<div class="jf-notice"><svg aria-hidden="true"><use href="#i-alert"/></svg>${esc(`couldn't save — ${msg}`)}</div>`;
+}
+
 async function saveProfileText() {
   const textarea = document.getElementById('profileText');
   if (!textarea) return;
@@ -2088,28 +2102,29 @@ async function saveProfileText() {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ profile: textarea.value }),
     });
-    const errorEl = document.getElementById('profileSaveError');
     if (!resp.ok) {
       const respBody = await resp.json().catch(() => ({}));
-      if (errorEl) {
-        errorEl.innerHTML = esc(`couldn't save — ${respBody.error || `HTTP ${resp.status}`}`);
-        errorEl.classList.add('rule-error');
-      }
+      showProfileSaveError(respBody.error || `HTTP ${resp.status}`);
       return;
     }
-    if (errorEl) {
-      errorEl.textContent = '';
-      errorEl.classList.remove('rule-error');
-    }
+    const errorEl = document.getElementById('profileSaveError');
+    if (errorEl) errorEl.innerHTML = '';
     await loadProfileText();
   } catch (e) {
-    const errorEl = document.getElementById('profileSaveError');
-    if (errorEl) {
-      errorEl.innerHTML = esc(`couldn't save — ${String(e?.message || e)}`);
-      errorEl.classList.add('rule-error');
-    }
+    showProfileSaveError(String(e?.message || e));
   }
 }
+
+// Live recompute on every keystroke, no network call — mirrors the criteria
+// band's delegated-listener pattern rather than an inline oninput. The save
+// button's single-click path is the plain click listener below; there is no
+// armed second-click path for this band (item 103).
+document.getElementById('settingsProfileBody').addEventListener('input', (e) => {
+  if (e.target.id === 'profileText') refreshProfileCount();
+});
+document.getElementById('settingsProfileBody').addEventListener('click', (e) => {
+  if (e.target.closest('#saveProfile')) saveProfileText();
+});
 
 // -----------------------------------------------------------------------
 // Settings tab — identity & EEO form (CFG-02, D-11). Renders exactly the

@@ -4,6 +4,7 @@
 // style: never throw, never call the network/LLM, worst case survives to the next stage.
 
 import type { PostingRow } from './postings';
+import type { BoardRow } from './boards';
 
 // D-13 decision_reason codes, kept as literal constants (mirrors failures.ts's
 // VALID_STATUSES allowlist-enum style).
@@ -11,6 +12,10 @@ const REASON_TITLE = 'rules:title';
 const REASON_LOCATION = 'rules:location';
 const REASON_STALE = 'rules:stale';
 const REASON_YOE = 'rules:yoe';
+// D-12: its own code and dashboard bucket — a new board suppressing ~400
+// postings should read as exactly that, not lumped into the generic `stale`
+// bucket, which reports "too old" from a completely different clock.
+const REASON_BOARD_GRACE = 'rules:board-grace';
 
 // All regexes below are linear (no nested quantifiers) to stay ReDoS-safe (T-10-05):
 // title/location/JD text are untrusted third-party strings.
@@ -85,6 +90,18 @@ export const MAX_FIRST_SEEN_DAYS = 7;
 // strictly-stricter lower bound than a first-seen cap could be, so they must
 // not gain a second, weaker clock on top of MAX_STALE_DAYS_INDEXED.
 const FIRST_SEEN_SOURCES = new Set(['greenhouse', 'yc']);
+
+// D-09: boards are harvested DURING a sweep but first polled on the NEXT
+// sweep, so the grace window has to span harvest→next-poll regardless of time
+// of day. Live evidence: all 427 auto-added boards have first_seen_at within
+// one minute of each other, and their postings were staged by a LATER sweep.
+// 24h would fall just short of that first poll for a board added late in the
+// day and let its whole backlog through — exactly the failure FILT-07 exists
+// to prevent. 72h was rejected as discarding two extra days of genuinely-new
+// postings. Named explicitly in HOURS (not days, unlike every other cap in
+// this file) to avoid a silent 24x unit-ambiguity bug. Exported for Phase
+// 18's CFG-01.
+export const GRACE_WINDOW_HOURS = 48;
 
 // SQLite writes datetime('now') as 'YYYY-MM-DD HH:MM:SS' — UTC but with no zone
 // designator. A bare Date.parse on that string resolves it as LOCAL time,
@@ -177,6 +194,57 @@ export function classifyMetadata(posting: PostingRow): { reject: boolean; reason
           return { reject: true, reason: REASON_STALE };
         }
       }
+    }
+
+    return { reject: false };
+  } catch {
+    return { reject: false };
+  }
+}
+
+// D-13: a separate pure classifier, called as its own step in decide.ts's loop
+// before classifyMetadata. The board is injected by the caller (batch-loaded
+// once per sweep via a Map, per D-13) rather than queried here — this
+// function stays db-free, pure, and never-throwing, exactly like
+// classifyMetadata/classifyYoe above.
+//
+// D-08: both operands (posting.created_at, board.first_seen_at) are write-once
+// stored timestamps — postings.created_at is absent from upsertPosting's ON
+// CONFLICT SET list, and boards.first_seen_at is preserved by upsertBoard's ON
+// CONFLICT per Phase 16 D-02. That is what makes a posting's grace verdict
+// fixed forever: it never flips on re-examination, never depends on when this
+// function happens to run, and degrades correctly when a sweep is skipped.
+// This function therefore contains NO Date.now(), NO new Date(), and NO
+// database access.
+export function classifyBoardGrace(
+  posting: PostingRow,
+  board: BoardRow | null,
+): { reject: boolean; reason?: string } {
+  try {
+    // D-11: fail open on a posting→board join miss. A posting whose
+    // (source, company) matched no board row proceeds under normal
+    // first-seen aging rather than being suppressed — a handful of extra
+    // postings reaching the LLM is far cheaper than silently suppressing a
+    // live board.
+    if (!board) return { reject: false };
+
+    const boardSeen = parseStoredTs(board?.first_seen_at);
+    const postingCreated = parseStoredTs(posting?.created_at);
+    if (Number.isNaN(boardSeen) || Number.isNaN(postingCreated)) return { reject: false };
+
+    const deltaHours = (postingCreated - boardSeen) / (1000 * 60 * 60);
+
+    // The deltaHours >= 0 lower bound is required, not optional. D-08's
+    // predicate is "the posting was first staged WITHIN the window of the
+    // board's own first-seen, i.e. it arrived in the same batch as the board
+    // itself." A negative delta means the posting was staged BEFORE the
+    // board row existed, so it demonstrably did not arrive with the board —
+    // this happens when an already-polled token is later re-discovered by a
+    // harvest and gains a board row after its postings were staged. Without
+    // this guard, a bare `deltaHours < GRACE_WINDOW_HOURS` would permanently
+    // reject every posting that predates its board row.
+    if (deltaHours >= 0 && deltaHours < GRACE_WINDOW_HOURS) {
+      return { reject: true, reason: REASON_BOARD_GRACE };
     }
 
     return { reject: false };

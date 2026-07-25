@@ -1,6 +1,7 @@
 import { test, expect } from 'bun:test';
-import { classifyMetadata, classifyYoe } from './filter';
+import { classifyMetadata, classifyYoe, classifyBoardGrace } from './filter';
 import type { PostingRow } from './postings';
+import type { BoardRow } from './boards';
 
 function mkPosting(overrides: Partial<PostingRow> = {}): PostingRow {
   return {
@@ -33,6 +34,22 @@ function daysAgo(n: number): string {
 // implementation is caught.
 function sqlDaysAgo(n: number): string {
   return new Date(Date.now() - n * 24 * 60 * 60 * 1000).toISOString().slice(0, 19).replace('T', ' ');
+}
+
+function mkBoard(overrides: Partial<BoardRow> = {}): BoardRow {
+  return {
+    id: 1,
+    ats: 'greenhouse',
+    token: 'acme',
+    source_of_discovery: 'simplify',
+    first_seen_at: '2026-07-24 20:52:27',
+    last_ok_at: null,
+    dead_since: null,
+    consecutive_failures: 0,
+    created_at: '2026-07-24 20:52:27',
+    updated_at: '2026-07-24 20:52:27',
+    ...overrides,
+  };
 }
 
 // --- Title (D-04) ---
@@ -340,4 +357,86 @@ test('classifyMetadata still checks title before the first-seen/stale rules', ()
     mkPosting({ source: 'greenhouse', title: 'Senior Software Engineer', created_at: sqlDaysAgo(8) }),
   );
   expect(result).toEqual({ reject: true, reason: 'rules:title' });
+});
+
+// --- classifyBoardGrace (FILT-07, D-08/D-09/D-11/D-13) -----------------------
+// FS = board.first_seen_at fixed at '2026-07-24 20:52:27' in every case below.
+
+const FS = '2026-07-24 20:52:27';
+
+test('classifyBoardGrace rejects a posting staged ~0h after board.first_seen_at', () => {
+  const board = mkBoard({ first_seen_at: FS });
+  const posting = mkPosting({ created_at: '2026-07-24 20:53:10' });
+  expect(classifyBoardGrace(posting, board)).toEqual({ reject: true, reason: 'rules:board-grace' });
+});
+
+test('classifyBoardGrace rejects a posting staged ~23h after board.first_seen_at', () => {
+  const board = mkBoard({ first_seen_at: FS });
+  const posting = mkPosting({ created_at: '2026-07-25 20:00:00' });
+  expect(classifyBoardGrace(posting, board)).toEqual({ reject: true, reason: 'rules:board-grace' });
+});
+
+test('classifyBoardGrace rejects a posting staged ~47h after board.first_seen_at (inside window)', () => {
+  const board = mkBoard({ first_seen_at: FS });
+  const posting = mkPosting({ created_at: '2026-07-26 20:00:00' });
+  expect(classifyBoardGrace(posting, board)).toEqual({ reject: true, reason: 'rules:board-grace' });
+});
+
+test('classifyBoardGrace survives a posting staged ~48.1h after board.first_seen_at (just outside window)', () => {
+  const board = mkBoard({ first_seen_at: FS });
+  const posting = mkPosting({ created_at: '2026-07-26 21:00:00' });
+  expect(classifyBoardGrace(posting, board)).toEqual({ reject: false });
+});
+
+test('classifyBoardGrace survives a posting staged far beyond the grace window', () => {
+  const board = mkBoard({ first_seen_at: FS });
+  const posting = mkPosting({ created_at: '2026-07-30 12:00:00' });
+  expect(classifyBoardGrace(posting, board)).toEqual({ reject: false });
+});
+
+test('classifyBoardGrace survives a posting staged BEFORE the board row existed (negative delta)', () => {
+  const board = mkBoard({ first_seen_at: FS });
+  const posting = mkPosting({ created_at: '2026-07-22 06:04:43' });
+  expect(classifyBoardGrace(posting, board)).toEqual({ reject: false });
+});
+
+test('classifyBoardGrace fails open when board is null (D-11)', () => {
+  const posting = mkPosting({ created_at: FS });
+  expect(classifyBoardGrace(posting, null)).toEqual({ reject: false });
+});
+
+test('classifyBoardGrace fails open on a garbage board.first_seen_at', () => {
+  const board = mkBoard({ first_seen_at: 'garbage' });
+  const posting = mkPosting({ created_at: FS });
+  expect(classifyBoardGrace(posting, board)).toEqual({ reject: false });
+});
+
+test('classifyBoardGrace fails open on an empty or undefined posting.created_at', () => {
+  const board = mkBoard({ first_seen_at: FS });
+  expect(classifyBoardGrace(mkPosting({ created_at: '' }), board)).toEqual({ reject: false });
+  const posting = mkPosting();
+  delete (posting as Partial<PostingRow>).created_at;
+  expect(classifyBoardGrace(posting, board)).toEqual({ reject: false });
+});
+
+test('classifyBoardGrace never throws on a frozen/exotic object missing fields entirely', () => {
+  const weird = Object.freeze({}) as unknown as PostingRow;
+  expect(() => classifyBoardGrace(weird, mkBoard())).not.toThrow();
+  expect(classifyBoardGrace(weird, mkBoard())).toEqual({ reject: false });
+  const weirdBoard = Object.freeze({}) as unknown as BoardRow;
+  expect(() => classifyBoardGrace(mkPosting(), weirdBoard)).not.toThrow();
+  expect(classifyBoardGrace(mkPosting(), weirdBoard)).toEqual({ reject: false });
+});
+
+test('classifyBoardGrace is wall-clock independent: identical inputs give an identical verdict across calls', () => {
+  const board = mkBoard({ first_seen_at: FS });
+  // created_at is years in the past relative to "now" — if the function ever
+  // read Date.now()/new Date(), this would behave differently than a
+  // recently-staged posting. It must not: the verdict depends only on the
+  // fixed delta between the two stored timestamps.
+  const posting = mkPosting({ created_at: '2026-07-24 20:53:10' });
+  const first = classifyBoardGrace(posting, board);
+  const second = classifyBoardGrace(posting, board);
+  expect(first).toEqual({ reject: true, reason: 'rules:board-grace' });
+  expect(second).toEqual(first);
 });

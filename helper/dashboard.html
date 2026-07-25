@@ -553,8 +553,7 @@
     <div id="failuresBody"></div>
   </div>
   <div id="settings" data-tab="settings">
-    <h2>search criteria</h2>
-    <div id="settingsCriteriaBody"></div>
+    <div id="settingsCriteriaBody" class="jf-scope"></div>
     <h2>relevance profile</h2>
     <div id="settingsProfileBody"></div>
     <h2>identity &amp; eeo</h2>
@@ -1600,10 +1599,81 @@ function toggleBatchDetail(id) {
 // Settings tab — search criteria editor (CFG-01, D-08). Editing lives in the
 // dashboard because only the helper can write jobfill.db; the extension
 // cannot. See 18-UI-SPEC.md "Surface 1 — Search Criteria Editor".
+//
+// Ported to the jf-* design system (Phase 19 plan 02, D-01): every visual
+// rule lives under .jf-scope on #settingsCriteriaBody; behaviour is
+// unchanged in this task (WR-01 and the armed-save dispatch land in plan
+// 02's task 3). See 19-UI-SPEC.md's Safety / State Contracts for the
+// fail-open and armed-confirm rules this surface is safety-critical for.
 // -----------------------------------------------------------------------
 
 const CRITERIA_TERM_FIELDS = ['seniorityTerms', 'nonEngineeringTerms', 'locationTerms', 'workModeOnlyTerms'];
 const CRITERIA_CAP_FIELDS = ['maxStaleDays', 'maxStaleDaysIndexed', 'maxFirstSeenDays'];
+
+// The dom-id / endpoint-field-key / live-state-row-id mapping for the four
+// term-list rules, plus their exact fail-open off-copy (19-UI-SPEC.md §
+// Safety Contracts §1, verbatim) and on-copy (from the reference).
+const TERM_FIELDS = [
+  { id: 'crit-seniority', field: 'seniorityTerms', state: 'state-seniority',
+    off: 'no title is rejected for seniority wording',
+    on: 'titles matching any of these are rejected' },
+  { id: 'crit-nonEng', field: 'nonEngineeringTerms', state: 'state-nonEng',
+    off: 'no title is rejected as non-engineering',
+    on: 'titles matching any of these are rejected' },
+  { id: 'crit-location', field: 'locationTerms', state: 'state-location',
+    off: 'location filtering is off · every posting reaches the relevance check wherever it is based',
+    on: 'a posting is rejected only when its location matches none of these' },
+  { id: 'crit-workmode', field: 'workModeOnlyTerms', state: 'state-workmode',
+    off: 'no location value is treated as mode-only noise',
+    on: 'these exact values are ignored as locations' },
+];
+
+function termsOf(id) {
+  return document.getElementById(id).value.split('\n').map((s) => s.trim()).filter(Boolean);
+}
+function termCount() {
+  return TERM_FIELDS.reduce((n, f) => n + termsOf(f.id).length, 0);
+}
+
+// FAIL-OPEN COPY (18-CONTEXT.md D-06, 19-UI-SPEC.md Safety Contracts §1). An
+// empty list DISABLES the rule. It renders neutral: ink, sunken paper, a
+// hairline "rule off" tag — the system owns no error color, so this row is
+// structurally incapable of reading as an alarm, and "off" always precedes
+// what that means so "rejects everything" is never a reachable reading.
+function renderTermState(f) {
+  const terms = termsOf(f.id);
+  const el = document.getElementById(f.state);
+  if (!terms.length) {
+    el.innerHTML = `<span class="jf-tag">rule off</span>` +
+      `<span>0 terms</span><span class="jf-state-note">${esc(f.off)}</span>`;
+  } else {
+    el.innerHTML = `<span class="jf-tag">${terms.length} terms</span>` +
+      `<span class="jf-state-note">${esc(f.on)}</span>`;
+  }
+}
+
+function renderYoeState() {
+  const raw = document.getElementById('cap-yoe').value.trim();
+  document.getElementById('state-yoe').innerHTML = raw === ''
+    ? `<span class="jf-tag">rule off</span><span class="jf-state-note">no cap · postings are not filtered by years-of-experience wording</span>`
+    : `<span class="jf-tag">cap ${esc(raw)}</span><span class="jf-state-note">postings mentioning more than ${esc(raw)} years of experience are rejected</span>`;
+}
+
+function renderSummary() {
+  const n = (id) => termsOf(id).length;
+  const off = (count) => count === 0 ? ' (off)' : '';
+  const yoe = document.getElementById('cap-yoe').value.trim();
+  document.getElementById('ruleSummary').textContent =
+    `seniority       ${n('crit-seniority')} terms${off(n('crit-seniority'))}\n` +
+    `non-engineering ${n('crit-nonEng')} terms${off(n('crit-nonEng'))}\n` +
+    `location        ${n('crit-location')} terms${off(n('crit-location'))}\n` +
+    `work-mode       ${n('crit-workmode')} terms${off(n('crit-workmode'))}\n` +
+    `staff/lead      ${document.getElementById('crit-builtins').checked ? 'on' : 'off'}\n` +
+    `age caps        ${document.getElementById('cap-stale').value} / ${document.getElementById('cap-indexed').value} / ${document.getElementById('cap-firstseen').value} days\n` +
+    `yoe cap         ${yoe === '' ? 'none (off)' : yoe + ' years'}`;
+  document.getElementById('sCountN').textContent = String(termCount());
+  document.getElementById('sCountSub').textContent = 'filter terms active across 4 rules';
+}
 
 // The last object received from the server — the narrowing-check baseline,
 // replaced only by a successful load or save, never by a keystroke.
@@ -1611,73 +1681,135 @@ let criteriaSnapshot = null;
 
 async function loadSettings() {
   const body = document.getElementById('settingsCriteriaBody');
-  body.innerHTML = `<div class="muted">loading search criteria…</div>`;
+  body.innerHTML = `<div class="jf-empty"><p>loading…</p><p>fetching search criteria from the database.</p></div>`;
   try {
     const resp = await fetch('/settings/criteria');
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     criteriaSnapshot = await resp.json();
     renderCriteria(criteriaSnapshot);
   } catch (e) {
-    body.innerHTML = `<div class="muted" onclick="loadSettings()">couldn't load search criteria — click to retry</div>`;
+    body.innerHTML = `<div class="jf-notice" onclick="loadSettings()" style="cursor:pointer"><svg aria-hidden="true"><use href="#i-alert"/></svg>couldn't load search criteria · click to retry</div>`;
   }
 }
 
 function renderCriteria(c) {
   const body = document.getElementById('settingsCriteriaBody');
   body.innerHTML = `
-    <div class="settings-field">
-      <label for="crit-seniorityTerms">reject titles containing (seniority)</label>
-      <textarea id="crit-seniorityTerms" placeholder="senior&#10;principal&#10;sr.&#10;vp&#10;director&#10;head of" oninput="refreshCriteriaHints()">${esc(c.seniorityTerms.join('\n'))}</textarea>
-      <div class="settings-hint" id="hint-seniorityTerms"></div>
+    <div class="jf-toolbar">
+      <div class="jf-count">
+        <span class="jf-count-n" id="sCountN">0</span>
+        <span class="jf-count-t">
+          <h2>search criteria</h2>
+          <p id="sCountSub">filter terms active across 4 rules</p>
+        </span>
+      </div>
     </div>
-    <div class="settings-field">
-      <label for="crit-nonEngineeringTerms">reject titles containing (non-engineering)</label>
-      <textarea id="crit-nonEngineeringTerms" placeholder="product manager&#10;designer&#10;sales&#10;recruiter&#10;marketing" oninput="refreshCriteriaHints()">${esc(c.nonEngineeringTerms.join('\n'))}</textarea>
-      <div class="settings-hint" id="hint-nonEngineeringTerms"></div>
+
+    <div class="jf-band"><h3>search criteria</h3><p>the rules that permanently reject a posting</p></div>
+    <div class="jf-form">
+      <div class="jf-frow">
+        <div class="jf-flabel">
+          <label for="crit-seniority">reject titles containing (seniority)</label>
+          <p class="jf-help">one term per line. matched anywhere in the title.</p>
+        </div>
+        <div class="jf-ffield">
+          <textarea class="jf-input jf-term" id="crit-seniority" rows="6" data-rule="seniority" aria-describedby="state-seniority" spellcheck="false">${esc(c.seniorityTerms.join('\n'))}</textarea>
+          <p class="jf-state" id="state-seniority" role="status"></p>
+        </div>
+      </div>
+
+      <div class="jf-frow">
+        <div class="jf-flabel">
+          <label for="crit-nonEng">reject titles containing (non-engineering)</label>
+          <p class="jf-help">one term per line. keeps the queue to engineering roles.</p>
+        </div>
+        <div class="jf-ffield">
+          <textarea class="jf-input jf-term" id="crit-nonEng" rows="6" data-rule="non-engineering" aria-describedby="state-nonEng" spellcheck="false">${esc(c.nonEngineeringTerms.join('\n'))}</textarea>
+          <p class="jf-state" id="state-nonEng" role="status"></p>
+        </div>
+      </div>
+
+      <div class="jf-frow">
+        <div class="jf-flabel">
+          <label for="crit-location">accept locations containing</label>
+          <p class="jf-help">a posting is rejected only when its location matches none of these.</p>
+        </div>
+        <div class="jf-ffield">
+          <textarea class="jf-input jf-term" id="crit-location" rows="6" data-rule="location" aria-describedby="state-location" spellcheck="false">${esc(c.locationTerms.join('\n'))}</textarea>
+          <p class="jf-state" id="state-location" role="status"></p>
+        </div>
+      </div>
+
+      <div class="jf-frow">
+        <div class="jf-flabel">
+          <label for="crit-workmode">ignore these exact location values</label>
+          <p class="jf-help">matched only when the ENTIRE location field is exactly one of these, so "hybrid" will not match "hybrid, nyc".</p>
+        </div>
+        <div class="jf-ffield">
+          <textarea class="jf-input jf-term" id="crit-workmode" rows="5" data-rule="work-mode-neutral" aria-describedby="state-workmode" spellcheck="false">${esc(c.workModeOnlyTerms.join('\n'))}</textarea>
+          <p class="jf-state" id="state-workmode" role="status"></p>
+        </div>
+      </div>
+
+      <div class="jf-frow">
+        <div class="jf-flabel">
+          <span class="jf-legend">built-in staff/lead heuristics</span>
+          <p class="jf-help">on by default. rejects titles like "staff software engineer" while letting "member of technical staff" through. this logic lives in code and cannot be edited here, only turned off.</p>
+        </div>
+        <div class="jf-ffield">
+          <div class="jf-checkrow">
+            <input class="jf-check" type="checkbox" id="crit-builtins" ${c.staffLeadBuiltins ? 'checked' : ''}>
+            <label for="crit-builtins">reject staff and lead engineering titles automatically</label>
+          </div>
+        </div>
+      </div>
     </div>
-    <div class="settings-field">
-      <label for="crit-locationTerms">accept locations containing</label>
-      <textarea id="crit-locationTerms" placeholder="new york&#10;nyc&#10;san francisco&#10;remote&#10;united states" oninput="refreshCriteriaHints()">${esc(c.locationTerms.join('\n'))}</textarea>
-      <div class="settings-hint" id="hint-locationTerms"></div>
+
+    <div class="jf-band"><h3>posting age limits</h3><p>rejected as stale before the relevance check runs</p></div>
+    <div class="jf-form">
+      <div class="jf-frow">
+        <div class="jf-flabel">
+          <label for="cap-stale">max age, trusted date (days)</label>
+          <p class="jf-help">sources that publish a real posting date.</p>
+        </div>
+        <div class="jf-ffield"><span><input class="jf-input jf-input--num" type="number" id="cap-stale" min="1" max="365" value="${esc(String(c.maxStaleDays))}" inputmode="numeric"> <span class="jf-count-live" aria-hidden="true">days</span></span></div>
+      </div>
+      <div class="jf-frow">
+        <div class="jf-flabel">
+          <label for="cap-indexed">max age, index-only sources (days)</label>
+          <p class="jf-help">aggregators such as Simplify and Getro, where the date is the index date.</p>
+        </div>
+        <div class="jf-ffield"><span><input class="jf-input jf-input--num" type="number" id="cap-indexed" min="1" max="365" value="${esc(String(c.maxStaleDaysIndexed))}" inputmode="numeric"> <span class="jf-count-live" aria-hidden="true">days</span></span></div>
+      </div>
+      <div class="jf-frow">
+        <div class="jf-flabel">
+          <label for="cap-firstseen">max time since first seen (days)</label>
+          <p class="jf-help">for Greenhouse and YC, where jobfill's own first sighting is the clock.</p>
+        </div>
+        <div class="jf-ffield"><span><input class="jf-input jf-input--num" type="number" id="cap-firstseen" min="1" max="365" value="${esc(String(c.maxFirstSeenDays))}" inputmode="numeric"> <span class="jf-count-live" aria-hidden="true">days</span></span></div>
+      </div>
+      <div class="jf-frow">
+        <div class="jf-flabel">
+          <label for="cap-yoe">years-of-experience cap (years)</label>
+          <p class="jf-help">leave blank for no cap.</p>
+        </div>
+        <div class="jf-ffield">
+          <span><input class="jf-input jf-input--num" type="number" id="cap-yoe" min="0" max="50" value="${c.yoeThreshold === null ? '' : esc(String(c.yoeThreshold))}" placeholder="no cap" inputmode="numeric" aria-describedby="state-yoe"> <span class="jf-count-live" aria-hidden="true">years</span></span>
+          <p class="jf-state" id="state-yoe" role="status"></p>
+        </div>
+      </div>
     </div>
-    <div class="settings-field">
-      <label for="crit-workModeOnlyTerms">ignore these exact location values (not a real location)</label>
-      <div class="settings-hint">matched only when the ENTIRE location field is exactly one of these — e.g. "hybrid" won't match "hybrid, nyc".</div>
-      <textarea id="crit-workModeOnlyTerms" placeholder="hybrid&#10;in-office&#10;on-site&#10;full-time&#10;part-time&#10;contract&#10;flexible" oninput="refreshCriteriaHints()">${esc(c.workModeOnlyTerms.join('\n'))}</textarea>
-      <div class="settings-hint" id="hint-workModeOnlyTerms"></div>
+
+    <div class="jf-summary">
+      <p class="jf-summary-h">live rule set · what the next sweep will apply</p>
+      <p class="jf-summary-b" id="ruleSummary"></p>
     </div>
-    <div class="settings-checkbox-row">
-      <input type="checkbox" id="crit-staffLeadBuiltins" ${c.staffLeadBuiltins ? 'checked' : ''} onchange="refreshCriteriaHints()">
-      <label for="crit-staffLeadBuiltins" style="margin-bottom:0">reject staff/lead engineering titles automatically (built-in, not editable)</label>
+    <div class="jf-saverow">
+      <button class="jf-btn jf-btn--primary" type="button" id="criteriaSaveBtn" onclick="saveCriteria()">save search criteria</button>
+      <p class="jf-help">narrowing a rule asks for a second click, because a posting rejected by the next sweep is rejected permanently.</p>
     </div>
-    <div class="settings-hint" style="margin-top:-8px; margin-bottom:16px">on by default. rejects titles like "staff software engineer" while letting "member of technical staff" through — this logic lives in code and can't be edited here, only turned off.</div>
-    <div class="settings-subhead">posting age limits</div>
-    <div class="settings-field">
-      <label for="crit-maxStaleDays">max age for postings with a trusted date (days)</label>
-      <input type="number" id="crit-maxStaleDays" min="1" max="365" value="${c.maxStaleDays}" oninput="refreshCriteriaHints()">
-      <div class="settings-hint" id="hint-maxStaleDays"></div>
-    </div>
-    <div class="settings-field">
-      <label for="crit-maxStaleDaysIndexed">max age for index-only sources like Simplify/Getro (days)</label>
-      <input type="number" id="crit-maxStaleDaysIndexed" min="1" max="365" value="${c.maxStaleDaysIndexed}" oninput="refreshCriteriaHints()">
-      <div class="settings-hint" id="hint-maxStaleDaysIndexed"></div>
-    </div>
-    <div class="settings-field">
-      <label for="crit-maxFirstSeenDays">max time since jobfill first saw a posting from Greenhouse/YC (days)</label>
-      <input type="number" id="crit-maxFirstSeenDays" min="1" max="365" value="${c.maxFirstSeenDays}" oninput="refreshCriteriaHints()">
-      <div class="settings-hint" id="hint-maxFirstSeenDays"></div>
-    </div>
-    <div class="settings-hint" style="margin-top:-12px; margin-bottom:16px">postings older than these limits are rejected as stale before reaching the relevance check.</div>
-    <div class="settings-field">
-      <label for="crit-yoeThreshold">reject postings requiring more than this many years of experience</label>
-      <input type="number" id="crit-yoeThreshold" min="0" max="50" placeholder="no cap" value="${c.yoeThreshold === null ? '' : c.yoeThreshold}" oninput="refreshCriteriaHints()">
-      <div class="settings-hint" id="hint-yoeThreshold"></div>
-    </div>
-    <div class="settings-summary" id="criteriaSummary"></div>
-    <div class="settings-actions">
-      <button id="criteriaSaveBtn" class="primary" onclick="saveCriteria()">save search criteria</button>
-      <span class="settings-hint" id="criteriaSaveError"></span>
-    </div>`;
+    <div id="criteriaSaveError"></div>`;
+
   refreshCriteriaHints();
 }
 
@@ -1686,69 +1818,38 @@ function renderCriteria(c) {
 // user typed.
 function readCriteriaForm() {
   const termList = (id) => document.getElementById(id).value.split('\n').map((s) => s.trim()).filter(Boolean);
-  const yoeRaw = document.getElementById('crit-yoeThreshold').value;
+  const yoeRaw = document.getElementById('cap-yoe').value;
   return {
-    seniorityTerms: termList('crit-seniorityTerms'),
-    nonEngineeringTerms: termList('crit-nonEngineeringTerms'),
-    locationTerms: termList('crit-locationTerms'),
-    workModeOnlyTerms: termList('crit-workModeOnlyTerms'),
-    staffLeadBuiltins: document.getElementById('crit-staffLeadBuiltins').checked,
-    maxStaleDays: Number(document.getElementById('crit-maxStaleDays').value),
-    maxStaleDaysIndexed: Number(document.getElementById('crit-maxStaleDaysIndexed').value),
-    maxFirstSeenDays: Number(document.getElementById('crit-maxFirstSeenDays').value),
+    seniorityTerms: termList('crit-seniority'),
+    nonEngineeringTerms: termList('crit-nonEng'),
+    locationTerms: termList('crit-location'),
+    workModeOnlyTerms: termList('crit-workmode'),
+    staffLeadBuiltins: document.getElementById('crit-builtins').checked,
+    maxStaleDays: Number(document.getElementById('cap-stale').value),
+    maxStaleDaysIndexed: Number(document.getElementById('cap-indexed').value),
+    maxFirstSeenDays: Number(document.getElementById('cap-firstseen').value),
     yoeThreshold: yoeRaw === '' ? null : Number(yoeRaw),
   };
 }
 
-// refreshCriteriaHints recomputes hint/summary/validation text from
+// refreshCriteriaHints recomputes the live state rows, the summary panel,
+// the mega numeral, and validation/button-disabled state from
 // readCriteriaForm() with no network call and no debounce — wired to every
-// field's oninput/onchange and called once after render so the form is
-// correct before any interaction.
+// field's input/change (via the delegated listener below) and called once
+// after render so the form is correct before any interaction.
 function refreshCriteriaHints() {
   const c = readCriteriaForm();
 
-  const setHint = (fieldId, text, isError = false) => {
-    const el = document.getElementById(`hint-${fieldId}`);
-    if (!el) return;
-    el.innerHTML = esc(text);
-    el.classList.toggle('rule-error', isError);
-  };
-
-  setHint('seniorityTerms', c.seniorityTerms.length
-    ? `${c.seniorityTerms.length} terms · titles matching any of these are rejected`
-    : `0 terms · this rule is off — no title is rejected for seniority wording`);
-  setHint('nonEngineeringTerms', c.nonEngineeringTerms.length
-    ? `${c.nonEngineeringTerms.length} terms · titles matching any of these are rejected`
-    : `0 terms · this rule is off — no title is rejected as non-engineering`);
-  setHint('locationTerms', c.locationTerms.length
-    ? `${c.locationTerms.length} terms · a posting is rejected only if its location matches none of these`
-    : `0 terms · location filtering is off — every posting reaches the relevance check regardless of where it's based`);
-  setHint('workModeOnlyTerms', c.workModeOnlyTerms.length
-    ? `${c.workModeOnlyTerms.length} terms`
-    : `0 terms · this rule is off — no location value is treated as mode-only noise`);
-  setHint('yoeThreshold', c.yoeThreshold === null
-    ? `no cap set · postings aren't filtered by years-of-experience wording`
-    : `postings mentioning more than ${c.yoeThreshold} years of experience are rejected`);
-  setHint('maxStaleDays', '');
-  setHint('maxStaleDaysIndexed', '');
-  setHint('maxFirstSeenDays', '');
-
-  const summary = document.getElementById('criteriaSummary');
-  if (summary) {
-    summary.textContent = `active rules — seniority: ${c.seniorityTerms.length} terms · non-engineering: ${c.nonEngineeringTerms.length} terms · location: ${c.locationTerms.length} terms${c.locationTerms.length === 0 ? ' (off)' : ''} · work-mode-neutral: ${c.workModeOnlyTerms.length} terms · staff/lead heuristics: ${c.staffLeadBuiltins ? 'on' : 'off'} · age caps: ${c.maxStaleDays}/${c.maxStaleDaysIndexed}/${c.maxFirstSeenDays} days · yoe cap: ${c.yoeThreshold === null ? 'none' : c.yoeThreshold}`;
-  }
+  TERM_FIELDS.forEach(renderTermState);
+  renderYoeState();
+  renderSummary();
 
   // Belt-and-braces client-side validation (T-18-07-02): the real boundary
   // is the server's identical validateCriteria; this only disables the
-  // button and shows the message inline before a request is ever sent.
+  // button before a request is ever sent.
   const criteriaSaveBtn = document.getElementById('criteriaSaveBtn');
   const violation = validateCriteriaForm(c);
-  if (violation) {
-    setHint(violation.field, violation.message, true);
-    criteriaSaveBtn.disabled = true;
-  } else {
-    criteriaSaveBtn.disabled = false;
-  }
+  criteriaSaveBtn.disabled = !!violation;
 
   // Keep the save button's resting label in sync with the narrowing state so
   // the user sees "save — narrows criteria" before they click, rather than
@@ -1758,6 +1859,16 @@ function refreshCriteriaHints() {
     criteriaSaveBtn.textContent = isNarrowing(c, criteriaSnapshot) ? 'save — narrows criteria' : 'save search criteria';
   }
 }
+
+// Live recompute on every field edit — no debounce, no network call —
+// replacing the 9 inline oninput/onchange attributes the previous markup
+// carried (4 term textareas + 4 cap/yoe number inputs + 1 checkbox).
+document.getElementById('settingsCriteriaBody').addEventListener('input', (e) => {
+  if (e.target.matches('.jf-term, #cap-yoe, #cap-stale, #cap-indexed, #cap-firstseen')) refreshCriteriaHints();
+});
+document.getElementById('settingsCriteriaBody').addEventListener('change', (e) => {
+  if (e.target.id === 'crit-builtins') refreshCriteriaHints();
+});
 
 // isNarrowing implements the UI contract's four conditions: these are exactly
 // the changes that can cause a previously-surviving posting to be

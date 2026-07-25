@@ -1221,9 +1221,14 @@ document.getElementById('qChips').addEventListener('click', (e) => {
 // Actionability sort: what the operator should touch first floats to the top; submitted is
 // history and sinks to the bottom, visually receded (.jf-row--done).
 const QUEUE_ORDER = { reviewed: 0, filled: 1, filling: 2, queued: 3, failed: 4, submitted: 5 };
-function visibleQueueRows() {
-  if (!queueRows.length) return [];
-  return queueRows
+// Defaults to the live queueRows for JF_STATUS.queue's out-of-render-cycle reads, but
+// renderQueue(rows) below always passes its OWN rows argument through explicitly --
+// renderQueue must stay a pure function of its argument (no fetch, no write) so a
+// console-injected fixture array (UI-04 verification) renders without touching queueRows
+// or the database.
+function visibleQueueRows(rows = queueRows) {
+  if (!rows.length) return [];
+  return rows
     .filter(r => queueFilter === 'all' || r.status === queueFilter)
     .slice()
     .sort((a, b) => (QUEUE_ORDER[a.status] ?? 9) - (QUEUE_ORDER[b.status] ?? 9)
@@ -1315,7 +1320,7 @@ function renderQueue(rows) {
   // A row skipped two runs ago and absent from the latest run shows no badge.
   const latestBatch = batchRows.find(r => r.status !== 'running' && r.detail);
   const skippedThisBatch = new Map((latestBatch?.detail?.skipped || []).map(s => [s.queueId, s.reason]));
-  const shown = visibleQueueRows();
+  const shown = visibleQueueRows(rows);
 
   // Two DISTINCT empty states (item 8): no rows in the queue at all vs rows exist but
   // the active filter matches none of them. Collapsing them into one is feature loss.

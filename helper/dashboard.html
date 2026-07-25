@@ -13,13 +13,6 @@
   .muted { color: #999; font-size: 12px; }
   a { color: #1565c0; text-decoration: none; }
   h2 { font-size: 16px; font-weight: 600; line-height: 1.2; margin-top: 32px; }
-  .s-verify, .s-needs_manual, .s-error { color: #e65100; }
-  .s-didnt_stick { color: #d32f2f; font-weight: 600; }
-  .s-not_found, .s-stale { color: #999; }
-  .s-partial { color: #e65100; }
-  .s-frame_error { color: #e65100; }
-  .failure-toggle { color: #1565c0; cursor: pointer; }
-  .snapshot { background: #f5f5f5; padding: 8px; max-height: 160px; overflow: auto; font-family: ui-monospace, monospace; font-size: 12px; line-height: 1.4; }
   .s-queued { color: #999; } .s-filling { color: #e65100; } .s-filled { color: #2e7d32; }
   .s-failed { color: #d32f2f; } .s-reviewed { color: #1565c0; } .s-submitted { color: #2e7d32; font-weight: 600; }
   .d-queued { color: #2e7d32; }
@@ -779,9 +772,40 @@
       <p>capture answers from the popup after filling a form with essay questions.</p>
     </div>
   </div>
-  <div id="failures" data-tab="failures">
-    <h2>widget failures</h2>
-    <div id="failuresBody"></div>
+  <div id="failures" data-tab="failures" class="jf-scope">
+    <div class="jf-toolbar">
+      <div class="jf-count">
+        <span class="jf-count-n" id="fCountN">0</span>
+        <span class="jf-count-t">
+          <h2>widget failures</h2>
+          <p>fields the filler could not land · captured automatically</p>
+        </span>
+      </div>
+    </div>
+    <div class="jf-gridwrap">
+      <table class="jf-grid" id="fGrid">
+        <caption class="jf-sr">widget failures: fields where the autofill could not set a value</caption>
+        <colgroup>
+          <col style="width:var(--jf-gutter-w)"><col style="width:6.5rem"><col style="width:var(--jf-col-page)"><col>
+          <col style="width:var(--jf-col-decision)"><col style="width:8rem">
+        </colgroup>
+        <thead>
+          <tr>
+            <th scope="col" class="jf-gut">#</th>
+            <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-date"/></svg>date</span></th>
+            <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-link"/></svg>page</span></th>
+            <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-text"/></svg>field</span></th>
+            <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-enum"/></svg>status · criterion</span></th>
+            <th scope="col"><span class="jf-th">details</span></th>
+          </tr>
+        </thead>
+        <tbody id="failuresBody"></tbody>
+      </table>
+    </div>
+    <div class="jf-empty" id="fEmpty" hidden>
+      <p>no widget failures captured yet</p>
+      <p>failures are captured automatically while filling — nothing to review until a combobox or custom widget misfires.</p>
+    </div>
   </div>
   <div id="settings" data-tab="settings" class="jf-scope">
     <div id="settingsCriteriaBody"></div>
@@ -1146,9 +1170,11 @@ async function deleteAnswer(id) {
   loadLibrary();
 }
 
+let failureRows = [];
+
 async function loadFailures() {
-  const rows = await (await fetch('/failures')).json();
-  renderFailures(rows);
+  failureRows = await (await fetch('/failures')).json();
+  renderFailures(failureRows);
 }
 
 function hostnameOf(url) {
@@ -1163,58 +1189,81 @@ function hostnameOf(url) {
 // unknown status must never reach the class attribute (stored-XSS sink).
 const FAILURE_STATUSES = ['verify', 'needs_manual', 'error', 'didnt_stick', 'not_found', 'stale'];
 
-function renderFailures(rows) {
-  const body = document.getElementById('failuresBody');
-  if (!rows.length) {
-    body.innerHTML = `
-      <div class="muted">no widget failures captured yet</div>
-      <div class="muted" style="font-size: 12px">failures are captured automatically while filling — nothing to review until a combobox or custom widget misfires.</div>`;
-    return;
+// The signature move's criterion string — derived ONLY from data already on the
+// row, never invented. No widget_kind means no criterion at all rather than a
+// fabricated one; the "no option matched" clause only fires when the row's own
+// data actually supports the claim (a combobox with observed options and no
+// mapped value), mirroring queueCriterion/appCriterion's same discipline.
+function failureCriterion(r) {
+  if (!r.widget_kind) return null;
+  let crit = `widget:${r.widget_kind}`;
+  const optionsSeen = Array.isArray(r.options_seen) ? r.options_seen : [];
+  if (r.widget_kind === 'combobox' && optionsSeen.length > 0 && !r.mapped_value) {
+    crit += ' · no option matched';
   }
-  body.innerHTML = `
-    <table>
-      <thead><tr><th>date</th><th>page</th><th>field</th><th>status</th><th>details</th></tr></thead>
-      <tbody>
-        ${rows.map(r => {
-          const optionsSeen = Array.isArray(r.options_seen) ? r.options_seen : [];
-          const isCombobox = r.widget_kind === 'combobox';
-          const shown = optionsSeen.slice(0, 20);
-          const more = optionsSeen.length > 20 ? ` +${optionsSeen.length - 20} more` : '';
-          const ariaText = r.list_resolved_via_aria === null ? 'unknown' : (r.list_resolved_via_aria ? 'yes' : 'no');
-          const statusClass = FAILURE_STATUSES.includes(r.status) ? `s-${r.status}` : 'muted';
-          // WR-01: stored urls are untrusted — only emit an anchor for http(s) schemes.
-          const safeUrl = /^https?:\/\//i.test(r.url) ? r.url : '';
-          return `
-            <tr>
-              <td class="muted">${(r.created_at || '').slice(0, 10)}</td>
-              <td style="text-overflow: ellipsis; white-space: nowrap; overflow: hidden; max-width: 280px">
-                ${safeUrl ? `<a href="${esc(safeUrl)}" target="_blank">${esc(hostnameOf(safeUrl))}</a>` : esc(hostnameOf(r.url))}
-              </td>
-              <td>${esc(r.field_label)}${r.widget_kind ? `<span class="muted"> · ${esc(r.widget_kind)}</span>` : ''}</td>
-              <td><span class="${statusClass}">${esc(r.status)}</span></td>
-              <td>
-                <div class="failure-toggle" onclick="toggleFailureDetails(${r.id})">details <span id="farrow-${r.id}">▾</span></div>
-                <div id="fdetails-${r.id}" style="display:none; padding-left: 4px">
-                  <div class="muted clamp-3">${esc(r.mapped_value)}</div>
-                  <pre class="snapshot">${esc(r.outer_html)}</pre>
-                  ${isCombobox ? `
-                    <div class="muted">options seen (${optionsSeen.length}): ${esc(shown.join(', '))}${esc(more)}</div>
-                    <div class="muted">list resolved via aria-controls/aria-owns: ${ariaText}</div>
-                  ` : ''}
-                </div>
-              </td>
-            </tr>`;
-        }).join('')}
-      </tbody>
-    </table>`;
+  return crit;
 }
 
-function toggleFailureDetails(id) {
-  const body = document.getElementById(`fdetails-${id}`);
-  const arrow = document.getElementById(`farrow-${id}`);
-  const expanded = body.style.display !== 'none';
-  body.style.display = expanded ? 'none' : 'block';
-  arrow.textContent = expanded ? '▾' : '▴';
+const FAILURE_VOCAB = { attn: new Set(['needs_manual', 'error', 'didnt_stick']), done: new Set(['stale', 'not_found']) };
+// verdictHtml (plan 01) always renders a .jf-crit span; a widget_kind-less row has
+// no derivable criterion at all (mirrors queueVerdictHtml's same wrapper need).
+function failureVerdictHtml(status, crit) {
+  if (crit === null) {
+    const cls = FAILURE_VOCAB.attn.has(status) ? ' jf-verdict--attn' : FAILURE_VOCAB.done.has(status) ? ' jf-verdict--muted' : '';
+    return `<span class="jf-cell-decision"><span class="jf-verdict${cls}">${esc(status)}</span></span>`;
+  }
+  return verdictHtml(status, crit, FAILURE_VOCAB);
+}
+
+// D-04: render every row. No slice, no cap, no pagination, no virtualisation.
+// (helper/dashboard.html:1145/:1699-equivalent diagnostic caps inside a single
+// row's detail — options-seen capped at 20 below — are pre-existing behaviour
+// this D-04 rule does not govern; see this plan's preserve-legacy-caps note.)
+function renderFailures(rows) {
+  document.getElementById('fCountN').textContent = String(rows.length);
+  const empty = rows.length === 0;
+  document.getElementById('fEmpty').hidden = !empty;
+  document.getElementById('fGrid').hidden = empty;
+  if (empty) {
+    document.getElementById('failuresBody').innerHTML = '';
+    return;
+  }
+  document.getElementById('failuresBody').innerHTML = rows.map((r, i) => {
+    const status = FAILURE_STATUSES.includes(r.status) ? r.status : 'unknown';
+    const crit = failureCriterion(r);
+    const attn = FAILURE_VOCAB.attn.has(status);
+    const optionsSeen = Array.isArray(r.options_seen) ? r.options_seen : [];
+    const isCombobox = r.widget_kind === 'combobox';
+    // Legacy cap, preserved verbatim (not a D-04 violation — a diagnostic detail
+    // list, not row rendering): helper/dashboard.html:1145 pre-port.
+    const shown = optionsSeen.slice(0, 20);
+    const more = optionsSeen.length > 20 ? ` +${optionsSeen.length - 20} more` : '';
+    const ariaText = r.list_resolved_via_aria === null ? 'unknown' : (r.list_resolved_via_aria ? 'yes' : 'no');
+    // WR-01: stored urls are untrusted — only emit an anchor for http(s) schemes.
+    const safeUrl = /^https?:\/\//i.test(r.url) ? r.url : '';
+    const main = `
+      <tr class="jf-row${attn ? ' jf-row--attn' : ''}">
+        <td class="jf-gut">${i + 1}</td>
+        <td>${esc((r.created_at || '').slice(0, 10))}</td>
+        <td>${safeUrl ? `<a href="${esc(safeUrl)}" target="_blank">${esc(hostnameOf(safeUrl))}</a>` : esc(hostnameOf(r.url))}</td>
+        <td>${esc(r.field_label)}${r.widget_kind ? `<span class="jf-sub">${esc(r.widget_kind)}</span>` : ''}</td>
+        <td class="jf-decision-cell">${failureVerdictHtml(status, crit)}</td>
+        <td><button class="jf-disc" type="button" aria-expanded="false" aria-controls="fl-${r.id}"><svg aria-hidden="true"><use href="#i-chev"/></svg>details</button></td>
+      </tr>`;
+    const detail = `
+      <tr class="jf-detailrow" id="fl-${r.id}" hidden><td colspan="6"><div class="jf-panel">
+        <p class="jf-panel-h">captured widget</p>
+        <pre class="jf-snapshot">${esc(r.outer_html)}</pre>
+        <dl class="jf-kv">
+          <dt>mapped value</dt><dd>${esc(r.mapped_value)}</dd>
+          ${isCombobox ? `
+            <dt>options seen (${optionsSeen.length})</dt><dd>${esc(shown.join(', '))}${esc(more)}</dd>
+            <dt>list via aria</dt><dd>${esc(ariaText)}</dd>
+          ` : ''}
+        </dl>
+      </div></td></tr>`;
+    return main + detail;
+  }).join('');
 }
 
 // Queue statuses are allowlisted at render — the store is untrusted (POST/PATCH body),
@@ -2951,5 +3000,15 @@ JF_STATUS.library = () => ({
   sort: 'sorted by <b>most recent</b>',
 });
 
+// Plan 06: widget failures' status-bar fact for plan 09's syncStatusBar (inert
+// until then) -- lives here for the same JF_STATUS-must-exist-first reason as
+// every registration above.
+JF_STATUS.failures = () => ({
+  n: failureRows.length,
+  unit: 'rows',
+  filterLabel: 'filter',
+  filter: 'all',
+  sort: 'sorted by <b>most recent</b>',
+});
 </script>
 </body>

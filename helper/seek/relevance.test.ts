@@ -1,6 +1,15 @@
 import { test, expect } from 'bun:test';
+import { Database } from 'bun:sqlite';
 import { scoreRelevance, loadProfileSummary, DEFAULT_PROFILE_SUMMARY } from './relevance';
+import { createSeekMetaTable } from './meta';
+import { saveRelevanceProfile } from './criteria';
 import type { PostingRow } from './postings';
+
+function makeDb(): Database {
+  const db = new Database(':memory:');
+  createSeekMetaTable(db);
+  return db;
+}
 
 function makePostingRow(overrides: Partial<PostingRow> = {}): PostingRow {
   return {
@@ -63,14 +72,23 @@ test('scoreRelevance slices an overlong reason to 500 chars', async () => {
   expect(result.reason.length).toBe(500);
 });
 
-test('loadProfileSummary returns the seek.profile.md text when present', async () => {
-  const text = await loadProfileSummary();
-  expect(text.length).toBeGreaterThan(0);
-  expect(text).toContain('Target roles');
+test('loadProfileSummary returns the stored relevance_profile row text when present', async () => {
+  const db = makeDb();
+  saveRelevanceProfile(db, 'Target roles: backend engineer.');
+  const text = await loadProfileSummary(db);
+  expect(text).toBe('Target roles: backend engineer.');
 });
 
-test('loadProfileSummary returns DEFAULT_PROFILE_SUMMARY when the file is missing/unreadable', async () => {
-  const text = await loadProfileSummary('/nonexistent/path/seek.profile.md');
+test('loadProfileSummary returns DEFAULT_PROFILE_SUMMARY when no row exists', async () => {
+  const db = makeDb();
+  const text = await loadProfileSummary(db);
+  expect(text).toBe(DEFAULT_PROFILE_SUMMARY);
+});
+
+test('loadProfileSummary returns DEFAULT_PROFILE_SUMMARY when the stored row is empty/whitespace', async () => {
+  const db = makeDb();
+  saveRelevanceProfile(db, '   \n  ');
+  const text = await loadProfileSummary(db);
   expect(text).toBe(DEFAULT_PROFILE_SUMMARY);
 });
 

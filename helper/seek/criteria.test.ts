@@ -12,7 +12,10 @@ import {
   toCriteria,
   validateCriteria,
   MAX_PROFILE_CHARS,
+  SEED_CRITERIA,
 } from './criteria';
+import { classifyMetadata, classifyYoe } from './filter';
+import type { PostingRow } from './postings';
 
 function makeDb(): Database {
   const db = new Database(':memory:');
@@ -126,4 +129,147 @@ test('compileTerms whole mode matches only the full string, not a substring', ()
   const re = compileTerms(['hybrid'], 'whole');
   expect(re!.test('hybrid')).toBe(true);
   expect(re!.test('hybrid, nyc')).toBe(false);
+});
+
+// --- D-13: SEED_CRITERIA reproduces the pre-phase classifier verdicts ---
+//
+// A failure in this group means the live install's next sweep would filter
+// differently than its last one. Because rejection is permanent (Phase 9
+// D-14 — upsertPosting's ON CONFLICT omits decision/decision_reason/
+// decided_at, so a re-discovery upsert never revives a rejected row), the
+// correct response to a failure here is to FIX SEED_CRITERIA, never to
+// update the expectation.
+
+function mkPosting(overrides: Partial<PostingRow> = {}): PostingRow {
+  return {
+    id: 1,
+    url: 'https://example.com/job',
+    url_key: 'example.com/job',
+    company: 'Acme',
+    title: 'Software Engineer',
+    location: '',
+    source: 'greenhouse',
+    posted_at: null,
+    posted_at_trusted: false,
+    login_gated: false,
+    not_fillable: false,
+    low_confidence: false,
+    fetched_at: new Date().toISOString(),
+    created_at: new Date().toISOString(),
+    ...overrides,
+  };
+}
+
+function daysAgo(n: number): string {
+  return new Date(Date.now() - n * 24 * 60 * 60 * 1000).toISOString();
+}
+
+// SQLite writes datetime('now') as 'YYYY-MM-DD HH:MM:SS' (UTC, no zone
+// designator); filter.ts's parseStoredTs relies on that exact shape for the
+// first-seen-aging clock, so greenhouse's created_at cases must use it.
+function sqlDaysAgo(n: number): string {
+  return new Date(Date.now() - n * 24 * 60 * 60 * 1000).toISOString().slice(0, 19).replace('T', ' ');
+}
+
+const seedCompiled = compileCriteria(SEED_CRITERIA);
+
+interface EquivalenceCase {
+  name: string;
+  posting: Partial<PostingRow>;
+  expectReject: boolean;
+  expectReason?: string;
+}
+
+const equivalenceCases: EquivalenceCase[] = [
+  // --- Title reject: bare seniority terms (ex-BARE_SENIORITY_RE) ---
+  { name: 'title "Senior Software Engineer" rejects', posting: { title: 'Senior Software Engineer' }, expectReject: true, expectReason: 'rules:title' },
+  { name: 'title "Sr. Engineer" rejects', posting: { title: 'Sr. Engineer' }, expectReject: true, expectReason: 'rules:title' },
+  { name: 'title "Sr Engineer" rejects', posting: { title: 'Sr Engineer' }, expectReject: true, expectReason: 'rules:title' },
+  { name: 'title "VP of Engineering" rejects', posting: { title: 'VP of Engineering' }, expectReject: true, expectReason: 'rules:title' },
+  { name: 'title "Head of Product" rejects', posting: { title: 'Head of Product' }, expectReject: true, expectReason: 'rules:title' },
+  { name: 'title "Principal Engineer" rejects', posting: { title: 'Principal Engineer' }, expectReject: true, expectReason: 'rules:title' },
+  // --- Title reject: staff/lead builtins (D-04, staffLeadBuiltins: true) ---
+  { name: 'title "Staff Software Engineer" rejects', posting: { title: 'Staff Software Engineer' }, expectReject: true, expectReason: 'rules:title' },
+  { name: 'title "Engineering Lead" rejects', posting: { title: 'Engineering Lead' }, expectReject: true, expectReason: 'rules:title' },
+  // --- Title survives: adjacency nuance and non-seniority markers ---
+  { name: 'title "Member of Technical Staff" survives', posting: { title: 'Member of Technical Staff' }, expectReject: false },
+  { name: 'title "Founding Engineer" survives', posting: { title: 'Founding Engineer' }, expectReject: false },
+  { name: 'title "Software Engineer" survives', posting: { title: 'Software Engineer' }, expectReject: false },
+  // --- Title reject: non-engineering terms (ex-NON_ENGINEERING_RE) ---
+  { name: 'title "Product Manager" rejects', posting: { title: 'Product Manager' }, expectReject: true, expectReason: 'rules:title' },
+  { name: 'title "Account Executive" rejects', posting: { title: 'Account Executive' }, expectReject: true, expectReason: 'rules:title' },
+  { name: 'title "Customer Success Manager" rejects', posting: { title: 'Customer Success Manager' }, expectReject: true, expectReason: 'rules:title' },
+
+  // --- Locations that survive: NY/SF/US-generic/remote (ex-NY_RE/SF_RE/US_GENERIC_RE/REMOTE_RE) ---
+  { name: 'location "New York, NY" survives', posting: { location: 'New York, NY' }, expectReject: false },
+  { name: 'location "NYC" survives', posting: { location: 'NYC' }, expectReject: false },
+  { name: 'location "San Francisco, CA" survives', posting: { location: 'San Francisco, CA' }, expectReject: false },
+  { name: 'location "SF" survives', posting: { location: 'SF' }, expectReject: false },
+  { name: 'location "United States" survives', posting: { location: 'United States' }, expectReject: false },
+  { name: 'location "USA" survives', posting: { location: 'USA' }, expectReject: false },
+  { name: 'location "Remote" survives', posting: { location: 'Remote' }, expectReject: false },
+  { name: 'location "Remote, U.S." survives', posting: { location: 'Remote, U.S.' }, expectReject: false },
+  { name: 'location "" (empty, rule not applicable) survives', posting: { location: '' }, expectReject: false },
+  // Isolates the 'u.s.' term specifically — no other seeded location term
+  // matches this string (unlike "Remote, U.S." above, which independently
+  // survives via the 'remote' term and so would NOT go red if 'u.s.' were
+  // dropped). This is the case the deliberate-corruption demonstration below
+  // actually exercises.
+  { name: 'location "Chicago, U.S." survives via the u.s. term alone', posting: { location: 'Chicago, U.S.' }, expectReject: false },
+
+  // --- Locations that reject: no accepted term present ---
+  { name: 'location "Berlin, Germany" rejects', posting: { location: 'Berlin, Germany' }, expectReject: true, expectReason: 'rules:location' },
+  { name: 'location "London, UK" rejects', posting: { location: 'London, UK' }, expectReject: true, expectReason: 'rules:location' },
+  { name: 'location "Toronto, Canada" rejects', posting: { location: 'Toronto, Canada' }, expectReject: true, expectReason: 'rules:location' },
+
+  // --- Work-mode-only noise (ex-WORK_MODE_ONLY_RE): ambiguous, not a hard reject ---
+  { name: 'location "hybrid" survives (work-mode noise)', posting: { location: 'hybrid' }, expectReject: false },
+  { name: 'location "in-office" survives (work-mode noise)', posting: { location: 'in-office' }, expectReject: false },
+  { name: 'location "Full-Time" survives (work-mode noise)', posting: { location: 'Full-Time' }, expectReject: false },
+
+  // --- Staleness: three independent clocks (maxStaleDays=2, maxStaleDaysIndexed=7, maxFirstSeenDays=7) ---
+  {
+    name: 'jobright posting with a trusted posted_at 5 days ago rejects (maxStaleDays=2)',
+    posting: { source: 'jobright', posted_at: daysAgo(5), posted_at_trusted: true },
+    expectReject: true,
+    expectReason: 'rules:stale',
+  },
+  {
+    name: 'getro posting with an untrusted posted_at 10 days ago rejects (maxStaleDaysIndexed=7)',
+    posting: { source: 'getro', posted_at: daysAgo(10), posted_at_trusted: false },
+    expectReject: true,
+    expectReason: 'rules:stale',
+  },
+  {
+    name: 'greenhouse posting with created_at 10 days ago rejects (maxFirstSeenDays=7)',
+    posting: { source: 'greenhouse', created_at: sqlDaysAgo(10), posted_at: null },
+    expectReject: true,
+    expectReason: 'rules:stale',
+  },
+  {
+    name: 'greenhouse posting with created_at 1 day ago and no posted_at survives',
+    posting: { source: 'greenhouse', created_at: sqlDaysAgo(1), posted_at: null },
+    expectReject: false,
+  },
+];
+
+for (const c of equivalenceCases) {
+  test(`D-13: SEED_CRITERIA reproduces the pre-phase verdict — ${c.name}`, () => {
+    const result = classifyMetadata(mkPosting(c.posting), seedCompiled);
+    expect(result.reject).toBe(c.expectReject);
+    if (c.expectReason) {
+      expect(result.reason).toBe(c.expectReason);
+    }
+  });
+}
+
+test('D-13: SEED_CRITERIA (yoeThreshold=1) rejects "requires 3 years of experience"', () => {
+  const result = classifyYoe('requires 3 years of experience', compileCriteria(SEED_CRITERIA));
+  expect(result.reject).toBe(true);
+  expect(result.reason).toBe('rules:yoe');
+});
+
+test('D-13: defaultCriteria() (yoeThreshold unset) does NOT reject the same JD text — the seed-vs-default divergence made observable at the classifier', () => {
+  const result = classifyYoe('requires 3 years of experience', compileCriteria(defaultCriteria()));
+  expect(result.reject).toBe(false);
 });

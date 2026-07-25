@@ -22,6 +22,7 @@ import { fetchAshby } from './seek/ashby';
 import { fetchHNPostings } from './seek/hn';
 import { createBoardsTable, upsertBoard, recordBoardResult, resolveEffectiveTokens, listAllBoards } from './seek/boards';
 import { createSeekMetaTable } from './seek/meta';
+import { seedCriteriaOnce } from './seek/criteria';
 import { fetchSimplify } from './seek/simplify';
 import { fetchGetro } from './seek/getro';
 import { harvestYcDirectory } from './seek/ycdir';
@@ -221,6 +222,10 @@ db.run(`UPDATE applications SET status_changed_at = created_at WHERE status_chan
 
 // D-15 last-sweep summary store: a tiny key/value table, one JSON row.
 createSeekMetaTable(db);
+// D-13: second seed call site — the settings tab is reachable as soon as the
+// helper is up, so without this a save made before the first post-deploy
+// sweep would be overwritten by the sweep's own seed call.
+seedCriteriaOnce(db);
 
 // RESEARCH Pattern 5: any sweeps row still 'running' when the process starts
 // back up can only mean the prior process crashed mid-sweep — flip it to

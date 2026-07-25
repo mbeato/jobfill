@@ -3,6 +3,7 @@ import { Database } from 'bun:sqlite';
 import { createPostingsTable, upsertPosting, listPostings } from './postings';
 import { createBoardsTable, upsertBoard, recordBoardResult, resolveEffectiveTokens, SEED_BACKFILL_FIRST_SEEN } from './boards';
 import { createSeekMetaTable, readSeekMeta, writeSeekMeta } from './meta';
+import { readCriteria, saveCriteria, defaultCriteria, CRITERIA_SEED_KEY } from './criteria';
 import { runSweep } from './sweep';
 import type { NormalizedPosting, SeekConfig } from './types';
 import type { SweepDeps } from './sweep';
@@ -603,4 +604,26 @@ test('sources disabled in config still have their tokens synced into boards (con
     expect(b.token).toBe('acme');
     expect(b.source_of_discovery).toBe('seed');
   }
+});
+
+// --- D-13 criteria seed gate, mirroring the board-gate pair above ---
+
+test('a fresh runSweep sets the criteria_seed_v1 gate and seeds today\'s YoE threshold', async () => {
+  const db = makeDb();
+  const config = baseConfig();
+  await runSweep(db, config, baseDeps());
+
+  expect(readSeekMeta(db, CRITERIA_SEED_KEY)).not.toBeNull();
+  expect(readCriteria(db).yoeThreshold).toBe(1);
+});
+
+test('a second runSweep on the same DB does not re-seed and leaves a value saved in between intact', async () => {
+  const db = makeDb();
+  const config = baseConfig();
+  await runSweep(db, config, baseDeps());
+
+  saveCriteria(db, { ...defaultCriteria(), yoeThreshold: 4 });
+  await runSweep(db, config, baseDeps());
+
+  expect(readCriteria(db).yoeThreshold).toBe(4);
 });

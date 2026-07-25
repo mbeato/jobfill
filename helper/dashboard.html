@@ -93,6 +93,33 @@
   .queue-actions button.armed { background: #1565c0; color: #fff; border-color: #1565c0; font-weight: 600; }
   .queue-actions button.q-remove.armed { background: #d32f2f; border-color: #d32f2f; }
   .q-empty { padding: 16px 0; }
+
+  /* Settings tab (D-08, CFG-01). .settings-actions button is a byte-for-byte
+     copy of the existing .queue-actions button rule, matching this file's
+     repeated-per-section convention rather than introducing a shared class.
+     .settings-actions button.armed is deliberately red (#d32f2f) where
+     .queue-actions button.armed is blue, because here the armed state guards
+     a narrowing filter change (destructive: a permanently rejected posting). */
+  .settings-section { margin-bottom: 32px; }
+  .settings-subhead { font-size: 14px; font-weight: 600; margin: 20px 0 8px; color: #555; }
+  .settings-field { margin-bottom: 16px; }
+  .settings-field label { display: block; font-weight: 600; margin-bottom: 4px; }
+  .settings-field textarea, .settings-field input[type=text], .settings-field input[type=email],
+  .settings-field input[type=tel], .settings-field input[type=url], .settings-field input[type=number] {
+    width: 100%; box-sizing: border-box; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px;
+    font: 14px/1.5 system-ui, sans-serif;
+  }
+  .settings-field textarea { min-height: 100px; }
+  .settings-field.profile textarea { min-height: 180px; }
+  .settings-hint { font-size: 12px; color: #999; margin-top: 4px; }
+  .settings-hint.rule-error { color: #d32f2f; }
+  .settings-count { font-size: 12px; color: #999; }
+  .settings-summary { background: #f5f5f5; padding: 10px 12px; border-radius: 4px; font-size: 12px; color: #555; margin: 12px 0; }
+  .settings-checkbox-row { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+  .settings-actions button { margin-right: 8px; padding: 4px 10px; cursor: pointer; border: 1px solid #ccc; background: #fff; border-radius: 4px; }
+  .settings-actions button.primary { border-color: #1565c0; color: #1565c0; font-weight: 600; }
+  .settings-actions button.primary:hover { background: #1565c0; color: #fff; }
+  .settings-actions button.armed { background: #d32f2f; color: #fff; border-color: #d32f2f; font-weight: 600; }
 </style>
 <body>
   <h1>jobfill tracker</h1>
@@ -102,6 +129,7 @@
     <button onclick="setTab('applications')" data-tabbtn="applications">applications</button>
     <button onclick="setTab('library')" data-tabbtn="library">library</button>
     <button onclick="setTab('failures')" data-tabbtn="failures">failures</button>
+    <button onclick="setTab('settings')" data-tabbtn="settings">settings</button>
   </nav>
   <div id="queue" data-tab="queue">
     <h2>posting queue</h2>
@@ -141,6 +169,10 @@
   <div id="failures" data-tab="failures">
     <h2>widget failures</h2>
     <div id="failuresBody"></div>
+  </div>
+  <div id="settings" data-tab="settings">
+    <h2>search criteria</h2>
+    <div id="settingsCriteriaBody"></div>
   </div>
 <script>
 const STATUSES = ['unsubmitted', 'applied', 'replied', 'interviewing', 'offer', 'rejected'];
@@ -1178,10 +1210,153 @@ function toggleBatchDetail(id) {
   arrow.textContent = expanded ? '▾' : '▴';
 }
 
+// -----------------------------------------------------------------------
+// Settings tab — search criteria editor (CFG-01, D-08). Editing lives in the
+// dashboard because only the helper can write jobfill.db; the extension
+// cannot. See 18-UI-SPEC.md "Surface 1 — Search Criteria Editor".
+// -----------------------------------------------------------------------
+
+const CRITERIA_TERM_FIELDS = ['seniorityTerms', 'nonEngineeringTerms', 'locationTerms', 'workModeOnlyTerms'];
+const CRITERIA_CAP_FIELDS = ['maxStaleDays', 'maxStaleDaysIndexed', 'maxFirstSeenDays'];
+
+// The last object received from the server — the narrowing-check baseline,
+// replaced only by a successful load or save, never by a keystroke.
+let criteriaSnapshot = null;
+
+async function loadSettings() {
+  const body = document.getElementById('settingsCriteriaBody');
+  body.innerHTML = `<div class="muted">loading search criteria…</div>`;
+  try {
+    const resp = await fetch('/settings/criteria');
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    criteriaSnapshot = await resp.json();
+    renderCriteria(criteriaSnapshot);
+  } catch (e) {
+    body.innerHTML = `<div class="muted" onclick="loadSettings()">couldn't load search criteria — click to retry</div>`;
+  }
+}
+
+function renderCriteria(c) {
+  const body = document.getElementById('settingsCriteriaBody');
+  body.innerHTML = `
+    <div class="settings-field">
+      <label for="crit-seniorityTerms">reject titles containing (seniority)</label>
+      <textarea id="crit-seniorityTerms" placeholder="senior&#10;principal&#10;sr.&#10;vp&#10;director&#10;head of" oninput="refreshCriteriaHints()">${esc(c.seniorityTerms.join('\n'))}</textarea>
+      <div class="settings-hint" id="hint-seniorityTerms"></div>
+    </div>
+    <div class="settings-field">
+      <label for="crit-nonEngineeringTerms">reject titles containing (non-engineering)</label>
+      <textarea id="crit-nonEngineeringTerms" placeholder="product manager&#10;designer&#10;sales&#10;recruiter&#10;marketing" oninput="refreshCriteriaHints()">${esc(c.nonEngineeringTerms.join('\n'))}</textarea>
+      <div class="settings-hint" id="hint-nonEngineeringTerms"></div>
+    </div>
+    <div class="settings-field">
+      <label for="crit-locationTerms">accept locations containing</label>
+      <textarea id="crit-locationTerms" placeholder="new york&#10;nyc&#10;san francisco&#10;remote&#10;united states" oninput="refreshCriteriaHints()">${esc(c.locationTerms.join('\n'))}</textarea>
+      <div class="settings-hint" id="hint-locationTerms"></div>
+    </div>
+    <div class="settings-field">
+      <label for="crit-workModeOnlyTerms">ignore these exact location values (not a real location)</label>
+      <div class="settings-hint">matched only when the ENTIRE location field is exactly one of these — e.g. "hybrid" won't match "hybrid, nyc".</div>
+      <textarea id="crit-workModeOnlyTerms" placeholder="hybrid&#10;in-office&#10;on-site&#10;full-time&#10;part-time&#10;contract&#10;flexible" oninput="refreshCriteriaHints()">${esc(c.workModeOnlyTerms.join('\n'))}</textarea>
+      <div class="settings-hint" id="hint-workModeOnlyTerms"></div>
+    </div>
+    <div class="settings-checkbox-row">
+      <input type="checkbox" id="crit-staffLeadBuiltins" ${c.staffLeadBuiltins ? 'checked' : ''} onchange="refreshCriteriaHints()">
+      <label for="crit-staffLeadBuiltins" style="margin-bottom:0">reject staff/lead engineering titles automatically (built-in, not editable)</label>
+    </div>
+    <div class="settings-hint" style="margin-top:-8px; margin-bottom:16px">on by default. rejects titles like "staff software engineer" while letting "member of technical staff" through — this logic lives in code and can't be edited here, only turned off.</div>
+    <div class="settings-subhead">posting age limits</div>
+    <div class="settings-field">
+      <label for="crit-maxStaleDays">max age for postings with a trusted date (days)</label>
+      <input type="number" id="crit-maxStaleDays" min="1" max="365" value="${c.maxStaleDays}" oninput="refreshCriteriaHints()">
+      <div class="settings-hint" id="hint-maxStaleDays"></div>
+    </div>
+    <div class="settings-field">
+      <label for="crit-maxStaleDaysIndexed">max age for index-only sources like Simplify/Getro (days)</label>
+      <input type="number" id="crit-maxStaleDaysIndexed" min="1" max="365" value="${c.maxStaleDaysIndexed}" oninput="refreshCriteriaHints()">
+      <div class="settings-hint" id="hint-maxStaleDaysIndexed"></div>
+    </div>
+    <div class="settings-field">
+      <label for="crit-maxFirstSeenDays">max time since jobfill first saw a posting from Greenhouse/YC (days)</label>
+      <input type="number" id="crit-maxFirstSeenDays" min="1" max="365" value="${c.maxFirstSeenDays}" oninput="refreshCriteriaHints()">
+      <div class="settings-hint" id="hint-maxFirstSeenDays"></div>
+    </div>
+    <div class="settings-hint" style="margin-top:-12px; margin-bottom:16px">postings older than these limits are rejected as stale before reaching the relevance check.</div>
+    <div class="settings-field">
+      <label for="crit-yoeThreshold">reject postings requiring more than this many years of experience</label>
+      <input type="number" id="crit-yoeThreshold" min="0" max="50" placeholder="no cap" value="${c.yoeThreshold === null ? '' : c.yoeThreshold}" oninput="refreshCriteriaHints()">
+      <div class="settings-hint" id="hint-yoeThreshold"></div>
+    </div>
+    <div class="settings-summary" id="criteriaSummary"></div>
+    <div class="settings-actions">
+      <button id="criteriaSaveBtn" class="primary" onclick="saveCriteria()">save search criteria</button>
+      <span class="settings-hint" id="criteriaSaveError"></span>
+    </div>`;
+  refreshCriteriaHints();
+}
+
+// The single place the form is translated into the endpoint's shape, so the
+// summary, the validation and the save can never disagree about what the
+// user typed.
+function readCriteriaForm() {
+  const termList = (id) => document.getElementById(id).value.split('\n').map((s) => s.trim()).filter(Boolean);
+  const yoeRaw = document.getElementById('crit-yoeThreshold').value;
+  return {
+    seniorityTerms: termList('crit-seniorityTerms'),
+    nonEngineeringTerms: termList('crit-nonEngineeringTerms'),
+    locationTerms: termList('crit-locationTerms'),
+    workModeOnlyTerms: termList('crit-workModeOnlyTerms'),
+    staffLeadBuiltins: document.getElementById('crit-staffLeadBuiltins').checked,
+    maxStaleDays: Number(document.getElementById('crit-maxStaleDays').value),
+    maxStaleDaysIndexed: Number(document.getElementById('crit-maxStaleDaysIndexed').value),
+    maxFirstSeenDays: Number(document.getElementById('crit-maxFirstSeenDays').value),
+    yoeThreshold: yoeRaw === '' ? null : Number(yoeRaw),
+  };
+}
+
+// refreshCriteriaHints recomputes hint/summary/validation text from
+// readCriteriaForm() with no network call and no debounce — wired to every
+// field's oninput/onchange and called once after render so the form is
+// correct before any interaction.
+function refreshCriteriaHints() {
+  const c = readCriteriaForm();
+
+  const setHint = (fieldId, text, isError = false) => {
+    const el = document.getElementById(`hint-${fieldId}`);
+    if (!el) return;
+    el.innerHTML = esc(text);
+    el.classList.toggle('rule-error', isError);
+  };
+
+  setHint('seniorityTerms', c.seniorityTerms.length
+    ? `${c.seniorityTerms.length} terms · titles matching any of these are rejected`
+    : `0 terms · this rule is off — no title is rejected for seniority wording`);
+  setHint('nonEngineeringTerms', c.nonEngineeringTerms.length
+    ? `${c.nonEngineeringTerms.length} terms · titles matching any of these are rejected`
+    : `0 terms · this rule is off — no title is rejected as non-engineering`);
+  setHint('locationTerms', c.locationTerms.length
+    ? `${c.locationTerms.length} terms · a posting is rejected only if its location matches none of these`
+    : `0 terms · location filtering is off — every posting reaches the relevance check regardless of where it's based`);
+  setHint('workModeOnlyTerms', c.workModeOnlyTerms.length
+    ? `${c.workModeOnlyTerms.length} terms`
+    : `0 terms · this rule is off — no location value is treated as mode-only noise`);
+  setHint('yoeThreshold', c.yoeThreshold === null
+    ? `no cap set · postings aren't filtered by years-of-experience wording`
+    : `postings mentioning more than ${c.yoeThreshold} years of experience are rejected`);
+  setHint('maxStaleDays', '');
+  setHint('maxStaleDaysIndexed', '');
+  setHint('maxFirstSeenDays', '');
+
+  const summary = document.getElementById('criteriaSummary');
+  if (summary) {
+    summary.textContent = `active rules — seniority: ${c.seniorityTerms.length} terms · non-engineering: ${c.nonEngineeringTerms.length} terms · location: ${c.locationTerms.length} terms${c.locationTerms.length === 0 ? ' (off)' : ''} · work-mode-neutral: ${c.workModeOnlyTerms.length} terms · staff/lead heuristics: ${c.staffLeadBuiltins ? 'on' : 'off'} · age caps: ${c.maxStaleDays}/${c.maxStaleDaysIndexed}/${c.maxFirstSeenDays} days · yoe cap: ${c.yoeThreshold === null ? 'none' : c.yoeThreshold}`;
+  }
+}
+
 // Tab navigation: one visible group at a time, persisted in the URL hash so a
 // reload (or a bookmarked #runs) lands where the operator left off. All sections stay in
 // the DOM and keep loading/rendering as before — tabs only control visibility.
-const TABS = ['queue', 'runs', 'applications', 'library', 'failures'];
+const TABS = ['queue', 'runs', 'applications', 'library', 'failures', 'settings'];
 function setTab(name) {
   if (!TABS.includes(name)) name = 'queue';
   for (const el of document.querySelectorAll('[data-tab]')) {
@@ -1201,5 +1376,6 @@ loadQueue();
 loadPostings();
 loadSweeps();
 loadBatch();
+loadSettings();
 </script>
 </body>

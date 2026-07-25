@@ -1,6 +1,7 @@
 import type { Database } from 'bun:sqlite';
 import type { PostingRow } from './postings';
 import type { QueueRow } from '../queue';
+import type { BoardRow } from './boards';
 import { JD_FETCHABLE_SOURCES } from './jd-fetch';
 
 // The filter -> promote orchestrator (D-01 two-stage, D-08 held, D-12 cap,
@@ -26,6 +27,7 @@ export function LLM_CAP(): number {
 
 export interface DecideDeps {
   classifyMetadata: (posting: PostingRow) => { reject: boolean; reason?: string };
+  classifyBoardGrace: (posting: PostingRow, board: BoardRow | null) => { reject: boolean; reason?: string };
   classifyYoe: (jdText: string) => { reject: boolean; reason?: string };
   fetchJD: (posting: PostingRow, fetchImpl?: typeof fetch) => Promise<string>;
   scoreRelevance: (
@@ -38,6 +40,7 @@ export interface DecideDeps {
   promotePosting: (db: Database, posting: PostingRow) => { promoted: boolean; queueRow?: QueueRow; reason?: string };
   recordDecision: (db: Database, id: number, decision: string, reason: string) => PostingRow | null;
   listPostingsToDecide: (db: Database, limit?: number) => PostingRow[];
+  listAllBoards: (db: Database) => BoardRow[];
 }
 
 export interface FilterCounts {
@@ -48,7 +51,7 @@ export interface FilterCounts {
   held: number;
   deduped: number;
   unscored: number;
-  byCriterion: { title: number; location: number; stale: number; yoe: number; llm: number };
+  byCriterion: { title: number; location: number; stale: number; yoe: number; llm: number; grace: number };
 }
 
 // Maps a `rules:<x>` / `llm:not-relevant` decision_reason prefix onto its
@@ -72,6 +75,14 @@ export async function runFilterPromote(db: Database, deps: DecideDeps): Promise<
   const profile = await deps.loadProfileSummary();
   const postings = deps.listPostingsToDecide(db);
 
+  // D-13: boards are loaded once per sweep, mirroring the single up-front
+  // listPostingsToDecide call above — no per-posting query on the hot path.
+  // Keyed exact-case (mirrors boards.UNIQUE(ats, token)'s own case-sensitive
+  // uniqueness): lower-casing here would turn WR-01's harmless "no grace"
+  // fail-open into a wrong suppression, the strictly worse failure.
+  const boards = deps.listAllBoards(db);
+  const boardByKey = new Map<string, BoardRow>(boards.map(b => [`${b.ats}:${b.token}`, b]));
+
   const counts: FilterCounts = {
     toDecide: postings.length,
     rulesRejected: 0,
@@ -80,12 +91,31 @@ export async function runFilterPromote(db: Database, deps: DecideDeps): Promise<
     held: 0,
     deduped: 0,
     unscored: 0,
-    byCriterion: { title: 0, location: 0, stale: 0, yoe: 0, llm: 0 },
+    byCriterion: { title: 0, location: 0, stale: 0, yoe: 0, llm: 0, grace: 0 },
   };
 
   let llmCalls = 0;
 
   for (const p of postings) {
+    // D-13: grace runs as its own step before classifyMetadata. D-11 fail-open
+    // on a join miss: `?? null` covers Map.get's `undefined` so a posting whose
+    // (source, company) matches no board row proceeds to classifyMetadata
+    // instead of being suppressed.
+    const board = boardByKey.get(`${p.source}:${p.company}`) ?? null;
+    const grace = deps.classifyBoardGrace(p, board);
+    if (grace.reject) {
+      // D-07/D-14: this rejection is permanent and never reconsidered, because
+      // upsertPosting's ON CONFLICT deliberately omits decision/decision_reason/
+      // decided_at. Accepted cost (D-07): a genuinely fresh posting on a
+      // brand-new board is discarded, since a first poll cannot distinguish a
+      // 3-hour-old listing from a 2-year-old one — bounded to one poll per
+      // board by the 48-hour window.
+      deps.recordDecision(db, p.id, 'rejected', grace.reason ?? 'rules:board-grace');
+      counts.rulesRejected++;
+      counts.byCriterion.grace++;
+      continue;
+    }
+
     const meta = deps.classifyMetadata(p);
     if (meta.reject) {
       deps.recordDecision(db, p.id, 'rejected', meta.reason ?? 'rules:unknown');

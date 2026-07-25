@@ -4,12 +4,15 @@ import { createPostingsTable, upsertPosting, recordDecision, listPostingsToDecid
 import { createQueueTable } from '../queue';
 import { promotePosting } from './promote';
 import { runFilterPromote, LLM_CAP, type DecideDeps } from './decide';
+import { createBoardsTable, upsertBoard } from './boards';
+import { classifyBoardGrace } from './filter';
 import type { NormalizedPosting } from './types';
 
 function makeDb(): Database {
   const db = new Database(':memory:');
   createPostingsTable(db);
   createQueueTable(db);
+  createBoardsTable(db);
   // Minimal mirror of helper/server.ts's applications table (promotePosting's
   // tracker dedupe scan needs it to exist).
   db.run(`CREATE TABLE applications (
@@ -40,6 +43,7 @@ function posting(overrides: Partial<NormalizedPosting> = {}): NormalizedPosting 
 function baseDeps(overrides: Partial<DecideDeps> = {}): DecideDeps {
   return {
     classifyMetadata: () => ({ reject: false }),
+    classifyBoardGrace: () => ({ reject: false }),
     classifyYoe: () => ({ reject: false }),
     fetchJD: async () => 'some jd text',
     scoreRelevance: async () => ({ relevant: true, reason: 'matches profile' }),
@@ -47,6 +51,7 @@ function baseDeps(overrides: Partial<DecideDeps> = {}): DecideDeps {
     promotePosting,
     recordDecision,
     listPostingsToDecide,
+    listAllBoards: () => [],
     ...overrides,
   };
 }
@@ -412,6 +417,157 @@ test('getro posting is also routed to metadata-only scoring', async () => {
   expect(seenJd).toBe('');
   expect(counts.held).toBe(0);
   expect(counts.queued).toBe(1);
+});
+
+// --- Phase 17 D-13: grace step, batch board load, and the grace bucket -----
+
+test('grace reject: posting staged within 48h of its board first_seen_at is rejected as rules:board-grace, buckets under grace not stale, and short-circuits before classifyMetadata/fetchJD/scoreRelevance', async () => {
+  const db = makeDb();
+  const board = upsertBoard(db, { ats: 'greenhouse', token: 'acme', source_of_discovery: 'seed' })!;
+  db.query(`UPDATE boards SET first_seen_at = datetime('now', '-2 hours') WHERE id = ?`).run(board.id);
+  const row = upsertPosting(db, posting({ company: 'acme' }))!;
+
+  let metaCalls = 0;
+  let fetchCalls = 0;
+  let scoreCalls = 0;
+  const deps = baseDeps({
+    classifyBoardGrace,
+    listAllBoards: db2 => (db2 === db ? [board] : []),
+    classifyMetadata: () => {
+      metaCalls++;
+      return { reject: false };
+    },
+    fetchJD: async () => {
+      fetchCalls++;
+      return 'jd';
+    },
+    scoreRelevance: async () => {
+      scoreCalls++;
+      return { relevant: true, reason: 'x' };
+    },
+  });
+
+  const counts = await runFilterPromote(db, deps);
+
+  expect(metaCalls).toBe(0);
+  expect(fetchCalls).toBe(0);
+  expect(scoreCalls).toBe(0);
+  expect(counts.rulesRejected).toBe(1);
+  expect(counts.byCriterion.grace).toBe(1);
+  expect(counts.byCriterion.stale).toBe(0);
+  const stored = db.query('SELECT decision, decision_reason FROM postings WHERE id = ?').get(row.id) as {
+    decision: string;
+    decision_reason: string;
+  };
+  expect(stored.decision).toBe('rejected');
+  expect(stored.decision_reason).toBe('rules:board-grace');
+});
+
+test('listAllBoards is invoked exactly once per runFilterPromote call regardless of posting count (D-13, no per-posting query)', async () => {
+  const db = makeDb();
+  upsertPosting(db, posting({ url: 'https://boards.greenhouse.io/acme/jobs/1' }))!;
+  upsertPosting(db, posting({ url: 'https://boards.greenhouse.io/acme/jobs/2' }))!;
+  upsertPosting(db, posting({ url: 'https://boards.greenhouse.io/acme/jobs/3' }))!;
+
+  let listAllBoardsCalls = 0;
+  const deps = baseDeps({
+    listAllBoards: () => {
+      listAllBoardsCalls++;
+      return [];
+    },
+  });
+
+  await runFilterPromote(db, deps);
+
+  expect(listAllBoardsCalls).toBe(1);
+});
+
+test('join miss: a posting whose (source, company) matches no board row receives null as the board argument and proceeds to classifyMetadata rather than being grace-rejected', async () => {
+  const db = makeDb();
+  const row = upsertPosting(db, posting({ company: 'unmatched-token' }))!;
+
+  let seenBoard: unknown = 'unset';
+  let metaCalls = 0;
+  const deps = baseDeps({
+    classifyBoardGrace: (_p, board) => {
+      seenBoard = board;
+      return { reject: false };
+    },
+    classifyMetadata: () => {
+      metaCalls++;
+      return { reject: false };
+    },
+  });
+
+  const counts = await runFilterPromote(db, deps);
+
+  expect(seenBoard).toBeNull();
+  expect(metaCalls).toBeGreaterThan(0);
+  expect(counts.byCriterion.grace).toBe(0);
+  const stored = db.query('SELECT decision FROM postings WHERE id = ?').get(row.id) as { decision: string | null };
+  expect(stored.decision).not.toBe('rejected');
+});
+
+test('a simplify posting (human-readable company, no matching board) proceeds normally; counts.byCriterion.grace stays 0', async () => {
+  const db = makeDb();
+  upsertPosting(
+    db,
+    posting({ source: 'simplify', posted_at_trusted: false, company: 'Acme Inc', url: 'https://jobs.smartrecruiters.com/acme/1' }),
+  )!;
+
+  const deps = baseDeps({ classifyBoardGrace });
+
+  const counts = await runFilterPromote(db, deps);
+
+  expect(counts.byCriterion.grace).toBe(0);
+});
+
+test('D-04: with SEEK_LLM_CAP=0, a classifyMetadata rules:stale rejection is counted even though the LLM stage is never reached', async () => {
+  process.env.SEEK_LLM_CAP = '0';
+  const db = makeDb();
+  upsertPosting(db, posting())!;
+
+  const deps = baseDeps({
+    classifyMetadata: () => ({ reject: true, reason: 'rules:stale' }),
+  });
+
+  const counts = await runFilterPromote(db, deps);
+
+  expect(counts.byCriterion.stale).toBe(1);
+  expect(counts.unscored).toBe(0);
+});
+
+test('D-07 finality: a grace-rejected posting re-upserted by a later sweep keeps decision rejected and reason rules:board-grace', async () => {
+  const db = makeDb();
+  const board = upsertBoard(db, { ats: 'greenhouse', token: 'acme', source_of_discovery: 'seed' })!;
+  db.query(`UPDATE boards SET first_seen_at = datetime('now', '-2 hours') WHERE id = ?`).run(board.id);
+  const row = upsertPosting(db, posting({ company: 'acme' }))!;
+
+  const deps = baseDeps({
+    classifyBoardGrace,
+    listAllBoards: () => [board],
+  });
+  await runFilterPromote(db, deps);
+
+  // Re-discovery upsert (same url_key) — upsertPosting's ON CONFLICT omits
+  // decision/decision_reason/decided_at, so the prior verdict must survive.
+  upsertPosting(db, posting({ company: 'acme' }))!;
+
+  const stored = db.query('SELECT decision, decision_reason FROM postings WHERE id = ?').get(row.id) as {
+    decision: string;
+    decision_reason: string;
+  };
+  expect(stored.decision).toBe('rejected');
+  expect(stored.decision_reason).toBe('rules:board-grace');
+});
+
+test('counts.byCriterion.grace is present and 0 on a sweep with no grace rejections', async () => {
+  const db = makeDb();
+  upsertPosting(db, posting())!;
+
+  const counts = await runFilterPromote(db, baseDeps());
+
+  expect(counts.byCriterion.grace).toBe(0);
 });
 
 test('a JD-fetchable source keeps held-for-retry semantics: a transient greenhouse failure is NOT metadata-only', async () => {

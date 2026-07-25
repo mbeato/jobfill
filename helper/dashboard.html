@@ -1846,10 +1846,17 @@ function refreshCriteriaHints() {
 
   // Belt-and-braces client-side validation (T-18-07-02): the real boundary
   // is the server's identical validateCriteria; this only disables the
-  // button before a request is ever sent.
+  // button and surfaces the message inline — amber, never red, per
+  // 19-UI-SPEC.md Safety Contracts §2 — before a request is ever sent.
   const criteriaSaveBtn = document.getElementById('criteriaSaveBtn');
+  const errorEl = document.getElementById('criteriaSaveError');
   const violation = validateCriteriaForm(c);
   criteriaSaveBtn.disabled = !!violation;
+  if (errorEl) {
+    errorEl.innerHTML = violation
+      ? `<div class="jf-notice"><svg aria-hidden="true"><use href="#i-alert"/></svg>${esc(violation.message)}</div>`
+      : '';
+  }
 
   // Keep the save button's resting label AND its armable-ness in sync with
   // the narrowing state so the user sees "save — narrows criteria" and gets

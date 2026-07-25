@@ -2,6 +2,7 @@ import type { Database } from 'bun:sqlite';
 import type { PostingRow } from './postings';
 import type { QueueRow } from '../queue';
 import type { BoardRow } from './boards';
+import type { CompiledCriteria } from './criteria';
 import { JD_FETCHABLE_SOURCES } from './jd-fetch';
 
 // The filter -> promote orchestrator (D-01 two-stage, D-08 held, D-12 cap,
@@ -26,9 +27,10 @@ export function LLM_CAP(): number {
 }
 
 export interface DecideDeps {
-  classifyMetadata: (posting: PostingRow) => { reject: boolean; reason?: string };
+  loadCriteria: (db: Database) => CompiledCriteria;
+  classifyMetadata: (posting: PostingRow, criteria: CompiledCriteria) => { reject: boolean; reason?: string };
   classifyBoardGrace: (posting: PostingRow, board: BoardRow | null) => { reject: boolean; reason?: string };
-  classifyYoe: (jdText: string) => { reject: boolean; reason?: string };
+  classifyYoe: (jdText: string, criteria: CompiledCriteria) => { reject: boolean; reason?: string };
   fetchJD: (posting: PostingRow, fetchImpl?: typeof fetch) => Promise<string>;
   scoreRelevance: (
     profileSummary: string,
@@ -36,7 +38,7 @@ export interface DecideDeps {
     posting: PostingRow,
     mapImpl?: (prompt: string, schema: object) => Promise<unknown>,
   ) => Promise<{ relevant: boolean; reason: string }>;
-  loadProfileSummary: (path?: string) => Promise<string>;
+  loadProfileSummary: (db: Database) => Promise<string>;
   promotePosting: (db: Database, posting: PostingRow) => { promoted: boolean; queueRow?: QueueRow; reason?: string };
   recordDecision: (db: Database, id: number, decision: string, reason: string) => PostingRow | null;
   listPostingsToDecide: (db: Database, limit?: number) => PostingRow[];
@@ -72,7 +74,14 @@ function criterionOf(reason: string): keyof FilterCounts['byCriterion'] | null {
  * consume.
  */
 export async function runFilterPromote(db: Database, deps: DecideDeps): Promise<FilterCounts> {
-  const profile = await deps.loadProfileSummary();
+  const profile = await deps.loadProfileSummary(db);
+  // D-05/CFG-01: criteria are loaded and compiled exactly once per sweep,
+  // mirroring the board Map load immediately below — never re-read or
+  // re-compiled per posting. This snapshot is taken here, in the prologue,
+  // so a settings save that lands mid-sweep takes effect on the NEXT sweep,
+  // not the one already in flight; this is the one place in the code where
+  // that snapshot-per-sweep semantics is observable.
+  const criteria = deps.loadCriteria(db);
   const postings = deps.listPostingsToDecide(db);
 
   // D-13: boards are loaded once per sweep, mirroring the single up-front
@@ -116,7 +125,7 @@ export async function runFilterPromote(db: Database, deps: DecideDeps): Promise<
       continue;
     }
 
-    const meta = deps.classifyMetadata(p);
+    const meta = deps.classifyMetadata(p, criteria);
     if (meta.reject) {
       deps.recordDecision(db, p.id, 'rejected', meta.reason ?? 'rules:unknown');
       counts.rulesRejected++;
@@ -163,7 +172,7 @@ export async function runFilterPromote(db: Database, deps: DecideDeps): Promise<
         continue;
       }
 
-      const yoe = deps.classifyYoe(jd);
+      const yoe = deps.classifyYoe(jd, criteria);
       if (yoe.reject) {
         deps.recordDecision(db, p.id, 'rejected', 'rules:yoe');
         counts.rulesRejected++;

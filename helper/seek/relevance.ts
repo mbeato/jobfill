@@ -1,7 +1,7 @@
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import type { Database } from 'bun:sqlite';
 import { mapViaCLI } from '../mapping';
 import type { PostingRow } from './postings';
+import { readRelevanceProfile } from './criteria';
 
 // The LLM relevance pass (D-05-D-08): the single quality gate that turns
 // "survives the rules" into "worth applying to", biased toward precision.
@@ -9,18 +9,20 @@ import type { PostingRow } from './postings';
 // untrusted scraped JD text in the prompt safe) — never add any bypass flag
 // alongside it, that would neutralize the tool-less guarantee.
 
-const HERE = dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = join(HERE, '..', '..');
-const DEFAULT_PATH = join(REPO_ROOT, 'seek.profile.md');
-
 const MAX_REASON = 500;
 
-// Safe built-in fallback (D-07) so a missing/unreadable seek.profile.md never
-// crashes filtering — precision-biased default matching the committed doc.
-export const DEFAULT_PROFILE_SUMMARY = `Target roles: software engineer, fullstack software engineer, AI/applied AI engineer, member of technical staff, founding engineer at early-stage startups (early-career only, no seniority track).
-Years of experience: 0-1 years, new-grad/junior.
-Location: New York City or San Francisco, or US-remote-friendly roles (generic "United States" counts).
-Anti-criteria: reject Senior/Staff/Principal/Lead titles, postings requiring more than 1 year of experience, non-engineering roles, and on-site roles outside New York or San Francisco with no remote option.`;
+// Safe built-in fallback (D-07/D-10) so a missing/unreadable relevance_profile
+// row never crashes filtering. Deliberately generic (D-12/D-14): the real
+// steering prose is entirely personal, so a fresh install must not ship it —
+// this is the last-resort text used only when the DB row is missing or
+// unreadable. Each line is a parenthetical instruction telling the reader
+// what to write there; the four-section structure is preserved because the
+// prompt builder below embeds this text under a "steering summary" header
+// and the structure is what makes the LLM's job legible.
+export const DEFAULT_PROFILE_SUMMARY = `Target roles: (describe the roles you are targeting).
+Years of experience: (describe your experience level).
+Location: (describe your accepted locations, or note if you are open to remote).
+Anti-criteria: (describe titles, requirements, or locations to reject).`;
 
 export const RELEVANCE_SCHEMA = {
   type: 'object',
@@ -32,14 +34,17 @@ export const RELEVANCE_SCHEMA = {
 };
 
 /**
- * Fresh-reads seek.profile.md (the operator-editable steering doc, D-07) on every call
- * — no caching, so an edit takes effect on the next sweep with no restart.
- * Missing/unreadable file never throws; falls back to a safe committed
- * default so filtering keeps running.
+ * Fresh-reads the `relevance_profile` row from seek_meta (D-01/D-10) on every
+ * call — no caching, so an edit takes effect on the next sweep with no
+ * restart. A missing row, a whitespace-only row, or any read failure never
+ * throws; all three fall back to the safe generic DEFAULT_PROFILE_SUMMARY so
+ * filtering keeps running.
  */
-export async function loadProfileSummary(path?: string): Promise<string> {
+export async function loadProfileSummary(db: Database): Promise<string> {
   try {
-    return await Bun.file(path ?? DEFAULT_PATH).text();
+    const text = readRelevanceProfile(db);
+    if (text === null || text.trim() === '') return DEFAULT_PROFILE_SUMMARY;
+    return text;
   } catch {
     return DEFAULT_PROFILE_SUMMARY;
   }

@@ -40,8 +40,6 @@
   .snapshot { background: #f5f5f5; padding: 8px; max-height: 160px; overflow: auto; font-family: ui-monospace, monospace; font-size: 12px; line-height: 1.4; }
   .s-queued { color: #999; } .s-filling { color: #e65100; } .s-filled { color: #2e7d32; }
   .s-failed { color: #d32f2f; } .s-reviewed { color: #1565c0; } .s-submitted { color: #2e7d32; font-weight: 600; }
-  .queue-toggle { color: #1565c0; cursor: pointer; }
-  .queue-actions button { margin-right: 8px; padding: 4px 10px; cursor: pointer; border: 1px solid #ccc; background: #fff; border-radius: 4px; }
   .d-queued { color: #2e7d32; }
   .d-rejected { color: #999; }
   .d-held { color: #e65100; }
@@ -53,28 +51,6 @@
   .auth-badge { color: #d32f2f; font-weight: 600; margin: 4px 0; }
   .batch-actions button { margin-right: 8px; padding: 4px 10px; cursor: pointer; border: 1px solid #ccc; background: #fff; border-radius: 4px; }
   .batch-toggle { color: #1565c0; cursor: pointer; }
-  /* queue tracker overhaul: lifecycle chips + status pills + receded done-rows */
-  .q-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 2px; }
-  .q-chip { padding: 3px 10px; cursor: pointer; border: 1px solid #ddd; background: #fff; border-radius: 999px; font-size: 12px; color: #555; }
-  .q-chip:hover { border-color: #999; }
-  .q-chip.active { background: #222; color: #fff; border-color: #222; }
-  .q-chip .n { font-weight: 600; margin-left: 4px; }
-  .q-pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }
-  .q-pill::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-  .q-pill.s-queued { background: #f5f5f5; color: #666; }
-  .q-pill.s-filling { background: rgba(230,81,0,.08); color: #e65100; }
-  .q-pill.s-filled { background: rgba(46,125,50,.08); color: #2e7d32; }
-  .q-pill.s-reviewed { background: rgba(21,101,192,.08); color: #1565c0; }
-  .q-pill.s-failed { background: rgba(211,47,47,.07); color: #d32f2f; }
-  .q-pill.s-submitted { background: #f5f5f5; color: #666; }
-  .q-pill.s-submitted::before { content: '✓'; width: auto; height: auto; border-radius: 0; background: none; }
-  .q-row:hover td { background: #fafafa; }
-  .q-row td { padding: 10px; }
-  .q-done td { opacity: .55; }
-  .q-done:hover td { opacity: .8; }
-  .q-role a { color: #999; font-size: 12px; }
-  .q-date { white-space: nowrap; }
-  td.queue-actions { white-space: nowrap; }
   /* tab navigation: sticky header, underline tabs (distinct from filter chips) */
   .tabbar { position: sticky; top: 0; background: #fff; z-index: 10; display: flex; gap: 2px; border-bottom: 1px solid #eee; margin: 12px 0 4px; }
   .tabbar button { border: none; background: none; cursor: pointer; padding: 8px 14px; font-size: 14px; color: #777; border-bottom: 2px solid transparent; margin-bottom: -1px; }
@@ -85,14 +61,6 @@
   [data-tab] { display: none; }
   [data-tab].tab-visible { display: block; }
   [data-tab].tab-visible h2:first-child { margin-top: 16px; }
-  .queue-actions button.primary { border-color: #1565c0; color: #1565c0; font-weight: 600; }
-  .queue-actions button.primary:hover { background: #1565c0; color: #fff; }
-  .queue-actions button.q-remove { color: #d32f2f; border-color: #eee; }
-  .queue-actions button.q-remove:hover { border-color: #d32f2f; }
-  /* armed = second click commits; color signals state, width is pinned in JS */
-  .queue-actions button.armed { background: #1565c0; color: #fff; border-color: #1565c0; font-weight: 600; }
-  .queue-actions button.q-remove.armed { background: #d32f2f; border-color: #d32f2f; }
-  .q-empty { padding: 16px 0; }
 
 /* ==== jf: begin ==== */
 /* ── jf: fonts ──────────────────────────────────────────────────────────── */
@@ -1182,53 +1150,19 @@ async function triggerFill(id) {
   }
 }
 
-// Two-click arm/confirm for destructive actions (native confirm() dialogs die in
-// the runner's Playwright browser — auto-dismissed when no handler is registered).
-// Zero layout shift: the armed label is always SHORTER than the resting label and
-// the button's width is pinned before the text swap, so nothing on the row moves.
-// The armed state signals with color (CSS .armed), not length. 4s revert.
-const armState = new Map();
-function armOrConfirm(key, btnId, armedText, restingText) {
-  if (armState.has(key)) {
-    clearTimeout(armState.get(key));
-    armState.delete(key);
-    return true;
-  }
-  const btn = document.getElementById(btnId);
-  if (btn) {
-    btn.style.minWidth = `${btn.offsetWidth}px`;
-    btn.textContent = armedText;
-    btn.classList.add('armed');
-  }
-  armState.set(key, setTimeout(() => {
-    armState.delete(key);
-    const b = document.getElementById(btnId);
-    if (b) {
-      b.textContent = restingText;
-      b.classList.remove('armed');
-      b.style.minWidth = '';
-    }
-  }, 4000));
-  return false;
-}
-
-// D-02: the ONLY code path in the whole system that constructs a 'submitted' status —
-// no background/helper code sets it. Gated behind the deliberate two-click arm.
-function markSubmitted(id) {
-  const q = queueRows.find(r => r.id === id);
-  if (!q) return;
-  if (!armOrConfirm(`submit-${id}`, `submit-btn-${id}`, 'confirm?', 'mark submitted')) return;
-  patchQueue(id, { status: 'submitted' });
-}
-
-// Hard delete for rows the operator won't pursue — same arm pattern.
+// Hard delete for rows the operator won't pursue. Arming is now the button's job (the shared
+// delegated .jf-armable listener, plan 01) -- this is just DELETE, reload, then notify
+// on failure.
 async function removeFromQueue(id) {
-  if (!armOrConfirm(`remove-${id}`, `remove-btn-${id}`, 'sure?', 'remove')) return;
   const res = await fetch(`/queue/${id}`, { method: 'DELETE' });
+  // reload first: renderQueue replaces queueBody's innerHTML and would wipe the notice.
+  // The notice targets #queue (the panel root), not #queueBody -- queueBody is a <tbody>
+  // since plan 04's grid rebuild, and a <div> notice inside a <tbody> is invalid markup
+  // the parser would hoist out of the table anyway.
   await loadQueue();
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    document.getElementById('queueBody').insertAdjacentHTML('afterbegin', `<div class="muted">remove failed — ${esc(body.error || `HTTP ${res.status}`)}</div>`);
+    document.getElementById('queue').insertAdjacentHTML('afterbegin', `<div class="jf-notice"><svg aria-hidden="true"><use href="#i-alert"/></svg>remove failed — ${esc(body.error || `HTTP ${res.status}`)}</div>`);
   }
 }
 
@@ -1241,7 +1175,7 @@ async function patchQueue(id, body) {
   // reload first: renderQueue replaces queueBody's innerHTML and would wipe the notice
   await loadQueue();
   if (!res.ok) {
-    document.getElementById('queueBody').insertAdjacentHTML('afterbegin', `<div class="muted">update failed — HTTP ${Number(res.status) || 0}</div>`);
+    document.getElementById('queue').insertAdjacentHTML('afterbegin', `<div class="jf-notice"><svg aria-hidden="true"><use href="#i-alert"/></svg>update failed — HTTP ${Number(res.status) || 0}</div>`);
   }
 }
 
@@ -1359,8 +1293,9 @@ function renderQueueResults(items) {
 // Contextual action set per row status (item 10); submitted rows get no buttons --
 // they're history. The two destructive/narrowing actions carry the shared delegated
 // .jf-armable dispatcher's data attributes (plan 01), dispatched via JF_ACTIONS
-// registered below, instead of the old per-callsite armOrConfirm. `status` is the
-// CALLER's already-allowlisted value (see renderQueue), never the raw q.status.
+// registered below, instead of the old per-callsite arm helper this plan deleted.
+// `status` is the CALLER's already-allowlisted value (see renderQueue), never the
+// raw q.status.
 function queueActions(status, q) {
   if (status === 'submitted') return '';
   const parts = [];
@@ -2756,9 +2691,10 @@ loadIdentity();
    Every ported surface (plans 02-09) consumes these directly. The existing
    esc() helper above (helper/dashboard.html:404) is reused as-is -- it is
    intentionally NOT redeclared here as a const, since that would throw over
-   the live function binding and blank the page. armOrConfirm/armState above
-   stay in place; queue and settings still depend on them until plans 02 and
-   04. ──────────────────────────────────────────────────────────────────── */
+   the live function binding and blank the page. Plan 04 deleted the legacy
+   per-callsite arm/confirm mechanism (a Map keyed by string, looked up by
+   element id) -- queue and settings were its last two consumers, and both
+   now dispatch through the delegated .jf-armable listener below instead. ── */
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
@@ -2858,6 +2794,14 @@ JF_STATUS.settings = () => ({
   filter: '4 rules',
   sort: 'unsaved edits are <b>not applied</b>',
 });
+
+// Plan 04: queue's two armed actions, registered here for the same JF_ACTIONS-
+// must-exist-first reason as plan 02's registration above -- this is also where
+// the D-02 comment (originally on markSubmitted, deleted this plan) re-homes:
+// queue.submit is the ONLY code path in the whole system that constructs a
+// 'submitted' status -- no background/helper code sets it.
+JF_ACTIONS['queue.submit'] = (id) => patchQueue(Number(id), { status: 'submitted' });
+JF_ACTIONS['queue.remove'] = (id) => removeFromQueue(Number(id));
 
 // Plan 04: the queue's status-bar fact for plan 09's syncStatusBar (inert until
 // then) -- lives here, not in the queue section, for the same JF_STATUS-must-

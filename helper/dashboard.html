@@ -94,35 +94,6 @@
   .queue-actions button.q-remove.armed { background: #d32f2f; border-color: #d32f2f; }
   .q-empty { padding: 16px 0; }
 
-  /* Settings tab (D-08, CFG-01). .settings-actions button is a byte-for-byte
-     copy of the existing .queue-actions button rule, matching this file's
-     repeated-per-section convention rather than introducing a shared class.
-     .settings-actions button.armed is deliberately red (#d32f2f) where
-     .queue-actions button.armed is blue, because here the armed state guards
-     a narrowing filter change (destructive: a permanently rejected posting). */
-  .settings-section { margin-bottom: 32px; }
-  .settings-subhead { font-size: 14px; font-weight: 600; margin: 20px 0 8px; color: #555; }
-  .settings-field { margin-bottom: 16px; }
-  .settings-field label { display: block; font-weight: 600; margin-bottom: 4px; }
-  .settings-field textarea, .settings-field input[type=text], .settings-field input[type=email],
-  .settings-field input[type=tel], .settings-field input[type=url], .settings-field input[type=number],
-  .settings-field select {
-    width: 100%; box-sizing: border-box; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px;
-    font: 14px/1.5 system-ui, sans-serif;
-  }
-  .settings-field select { background: #fff; }
-  .settings-field textarea { min-height: 100px; }
-  .settings-field.profile textarea { min-height: 180px; }
-  .settings-hint { font-size: 12px; color: #999; margin-top: 4px; }
-  .settings-hint.rule-error { color: #d32f2f; }
-  .settings-count { font-size: 12px; color: #999; }
-  .settings-summary { background: #f5f5f5; padding: 10px 12px; border-radius: 4px; font-size: 12px; color: #555; margin: 12px 0; }
-  .settings-checkbox-row { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
-  .settings-actions button { margin-right: 8px; padding: 4px 10px; cursor: pointer; border: 1px solid #ccc; background: #fff; border-radius: 4px; }
-  .settings-actions button.primary { border-color: #1565c0; color: #1565c0; font-weight: 600; }
-  .settings-actions button.primary:hover { background: #1565c0; color: #fff; }
-  .settings-actions button.armed { background: #d32f2f; color: #fff; border-color: #d32f2f; font-weight: 600; }
-
 /* ==== jf: begin ==== */
 /* ── jf: fonts ──────────────────────────────────────────────────────────── */
 @font-face{font-family:'JetBrains Mono';src:url('fonts/jbmono-400.woff2') format('woff2');font-weight:400;font-style:normal;font-display:swap}
@@ -568,12 +539,10 @@
     <h2>widget failures</h2>
     <div id="failuresBody"></div>
   </div>
-  <div id="settings" data-tab="settings">
-    <div id="settingsCriteriaBody" class="jf-scope"></div>
-    <h2>relevance profile</h2>
-    <div id="settingsProfileBody" class="jf-scope"></div>
-    <h2>identity &amp; eeo</h2>
-    <div id="settingsIdentityBody" class="jf-scope"></div>
+  <div id="settings" data-tab="settings" class="jf-scope">
+    <div id="settingsCriteriaBody"></div>
+    <div id="settingsProfileBody"></div>
+    <div id="settingsIdentityBody"></div>
   </div>
 <script>
 const STATUSES = ['unsubmitted', 'applied', 'replied', 'interviewing', 'offer', 'rejected'];

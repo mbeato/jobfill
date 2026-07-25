@@ -1172,10 +1172,13 @@ async function triggerFill(id) {
   } catch (e) {
     notice = `helper unreachable — ${esc(String(e?.message || e))}`;
   }
-  // reload first: renderQueue replaces queueBody's innerHTML and would wipe the notice
+  // reload first: renderQueue replaces queueBody's innerHTML and would wipe the notice.
+  // The notice targets #queue (the panel root), not #queueBody -- queueBody is a <tbody>
+  // since plan 04's grid rebuild, and a <div> notice inside a <tbody> is invalid markup
+  // the parser would hoist out of the table anyway.
   await loadQueue();
   if (notice) {
-    document.getElementById('queueBody').insertAdjacentHTML('afterbegin', `<div class="muted">${notice}</div>`);
+    document.getElementById('queue').insertAdjacentHTML('afterbegin', `<div class="jf-notice"><svg aria-hidden="true"><use href="#i-alert"/></svg>${notice}</div>`);
   }
 }
 
@@ -1256,126 +1259,167 @@ const QUEUE_CHIPS = [
   { key: 'failed', label: 'failed' },
   { key: 'submitted', label: 'submitted' },
 ];
-function setQueueFilter(key) {
-  queueFilter = key;
-  renderQueue(queueRows);
-}
 function renderQueueChips(rows) {
-  const el = document.getElementById('queueSummary');
   const counts = {};
   for (const r of rows) counts[r.status] = (counts[r.status] || 0) + 1;
-  // Queue tab badge = the actionable morning number (ready to submit + needs review)
+  // Queue tab badge = the actionable morning number (ready to submit + needs review).
+  // The badge stays on its legacy id/class until plan 09 moves it to .jf-badge --
+  // the un-ported tab strip still needs to render it exactly as it does today.
   const actionable = (counts.reviewed || 0) + (counts.filled || 0);
   document.getElementById('tab-badge-queue').textContent = actionable || '';
-  el.innerHTML = `<div class="q-chips">${QUEUE_CHIPS
+  document.getElementById('qCountN').textContent = String(actionable);
+  document.getElementById('qCountSub').textContent = `rows need you · ${rows.length} in queue`;
+  document.getElementById('qChips').innerHTML = QUEUE_CHIPS
     .filter(c => c.key === 'all' || counts[c.key])
     .map(c => {
       const n = c.key === 'all' ? rows.length : counts[c.key];
-      return `<button class="q-chip${queueFilter === c.key ? ' active' : ''}" onclick="setQueueFilter('${c.key}')">${c.label}<span class="n">${n}</span></button>`;
-    }).join('')}</div>`;
+      return `<button class="jf-chip" type="button" aria-pressed="${queueFilter === c.key}" data-qfilter="${c.key}">${esc(c.label)}<span class="n">${n}</span></button>`;
+    }).join('');
+  return counts;
 }
+document.getElementById('qChips').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-qfilter]');
+  if (!btn) return;
+  queueFilter = btn.dataset.qfilter;
+  renderQueue(queueRows);
+});
 
 // Actionability sort: what the operator should touch first floats to the top; submitted is
-// history and sinks to the bottom, visually receded (.q-done).
+// history and sinks to the bottom, visually receded (.jf-row--done).
 const QUEUE_ORDER = { reviewed: 0, filled: 1, filling: 2, queued: 3, failed: 4, submitted: 5 };
-function renderQueue(rows) {
-  renderQueueChips(rows);
-  const body = document.getElementById('queueBody');
-  if (!rows.length) {
-    body.innerHTML = `
-      <div class="muted">no postings queued yet</div>
-      <div class="muted" style="font-size: 12px">add a posting URL from the popup, or POST it to /queue, to start the queue.</div>`;
-    return;
-  }
-  const shown = (queueFilter === 'all' ? rows : rows.filter(r => r.status === queueFilter))
+function visibleQueueRows() {
+  if (!queueRows.length) return [];
+  return queueRows
+    .filter(r => queueFilter === 'all' || r.status === queueFilter)
     .slice()
     .sort((a, b) => (QUEUE_ORDER[a.status] ?? 9) - (QUEUE_ORDER[b.status] ?? 9)
       || String(b.created_at || '').localeCompare(String(a.created_at || '')));
-  if (!shown.length) {
-    body.innerHTML = `<div class="muted q-empty">nothing here — pick another filter above.</div>`;
-    return;
+}
+
+// results_summary is a JSON STRING written by background.js (JSON.stringify of the
+// per-field results array) — never a display string. Guard the parse; on failure or
+// empty input, treat it as "no field data" rather than injecting the raw string into
+// the DOM.
+function parseQueueResults(q) {
+  let results;
+  try {
+    results = JSON.parse(q.results_summary || '{}');
+  } catch {
+    results = null;
   }
+  if (!results) return [];
+  const items = Array.isArray(results) ? results : Object.entries(results).map(([k, v]) => ({ label: k, ...(typeof v === 'object' && v ? v : { value: v }) }));
+  return items;
+}
+
+// Statuses are allowlisted at render — results_summary is untrusted, server-stored JSON
+// influenced by the LLM mapping call, so an unknown per-field status must never reach the
+// class attribute (stored-XSS sink), mirroring FAILURE_STATUSES above. Also doubles as the
+// "was this field actually filled" set for the signature move's fill:N/M criterion below --
+// a field NOT in this review-gated set counts as filled, derived only from data already on
+// the row, never invented.
+const QUEUE_REVIEW_STATUSES = new Set(['verify', 'needs_manual', 'error', 'partial', 'not_found', 'stale', 'frame_error']);
+function queueFillCounts(items) {
+  if (!items.length) return null;
+  const filled = items.filter(r => !QUEUE_REVIEW_STATUSES.has(r.status)).length;
+  return { filled, total: items.length };
+}
+
+// The signature move's criterion string — derived ONLY from data already on the row,
+// never invented. A queued row with no skip badge gets no criterion at all (the .jf-crit
+// span is simply omitted by queueVerdictHtml below), rather than fabricate one. `status`
+// is the CALLER's already-allowlisted value (see renderQueue), never the raw q.status.
+function queueCriterion(status, q, skipReason, counts) {
+  if (status === 'submitted') return 'you:submitted';
+  if (status === 'failed') return `fill:${q.error || 'unknown error'}`;
+  if (status === 'filling') return 'fill:running';
+  if (status === 'filled' || status === 'reviewed') return counts ? `fill:${counts.filled}/${counts.total}` : null;
+  if (status === 'queued') return skipReason ? `batch:${(SKIP_REASON_LABELS[skipReason] || skipReason).replace(/^skipped — /, '')}` : null;
+  return null;
+}
+// verdictHtml (plan 01) always renders a .jf-crit span; the queue is the one surface
+// where a criterion can be genuinely absent (a plain queued row), so wrap it rather
+// than fabricate a criterion just to have something to show.
+function queueVerdictHtml(status, crit) {
+  const vocab = { attn: new Set(['failed']), done: new Set(['submitted']) };
+  if (crit === null) {
+    const cls = vocab.attn.has(status) ? ' jf-verdict--attn' : vocab.done.has(status) ? ' jf-verdict--muted' : '';
+    return `<span class="jf-cell-decision"><span class="jf-verdict${cls}">${esc(status)}</span></span>`;
+  }
+  return verdictHtml(status, crit, vocab);
+}
+
+function renderQueueResults(items) {
+  return `<dl class="jf-kv">${items.map(r => {
+    const stuckNote = r.stuck === false ? ` <span class="jf-tag jf-tag--attn">didn't stick — check this field</span>` : '';
+    return `<dt>${esc(r.label || r.id || '')}</dt><dd>${esc(r.status || r.value || '')}${stuckNote}</dd>`;
+  }).join('')}</dl>`;
+}
+
+// Contextual action set per row status (item 10); submitted rows get no buttons --
+// they're history. The two destructive/narrowing actions carry the shared delegated
+// .jf-armable dispatcher's data attributes (plan 01), dispatched via JF_ACTIONS
+// registered below, instead of the old per-callsite armOrConfirm. `status` is the
+// CALLER's already-allowlisted value (see renderQueue), never the raw q.status.
+function queueActions(status, q) {
+  if (status === 'submitted') return '';
+  const parts = [];
+  if (status === 'queued' || status === 'failed') parts.push(`<button class="jf-btn jf-btn--quiet" type="button" onclick="triggerFill(${q.id})"><svg aria-hidden="true"><use href="#i-run"/></svg>fill now</button>`);
+  if (status === 'filling') parts.push(`<button class="jf-btn" type="button" disabled>fill now</button>`);
+  if (status === 'filled') parts.push(`<button class="jf-btn jf-btn--quiet" type="button" onclick="patchQueue(${q.id}, {status: 'reviewed'})">mark reviewed</button>`);
+  parts.push(`<button class="jf-btn${status === 'reviewed' ? ' jf-btn--primary' : ' jf-btn--quiet'} jf-armable" type="button" data-armed="confirm?" data-resting="mark submitted" data-jf-action="queue.submit" data-jf-id="${q.id}">mark submitted</button>`);
+  if (status !== 'filling') parts.push(`<button class="jf-btn jf-btn--quiet jf-armable" type="button" data-armed="confirm?" data-resting="remove" data-jf-action="queue.remove" data-jf-id="${q.id}" aria-label="remove ${esc(q.company)} from the queue"><svg aria-hidden="true"><use href="#i-x"/></svg>remove</button>`);
+  return `<span class="jf-acts">${parts.join('')}</span>`;
+}
+
+function renderQueue(rows) {
+  renderQueueChips(rows);
+  const noRowsAtAll = rows.length === 0;
   // D-09: skip badges — cross-reference the LATEST FINISHED batch run's skip list
   // (mirrors renderAuthBadges' rows.find(r => r.status !== 'running' && r.detail)).
   // A row skipped two runs ago and absent from the latest run shows no badge.
   const latestBatch = batchRows.find(r => r.status !== 'running' && r.detail);
   const skippedThisBatch = new Map((latestBatch?.detail?.skipped || []).map(s => [s.queueId, s.reason]));
-  body.innerHTML = `
-    <table>
-      <thead><tr><th>status</th><th>company / role</th><th>added</th><th>results</th><th>actions</th></tr></thead>
-      <tbody>
-        ${shown.map(q => {
-          const statusClass = QUEUE_STATUSES.includes(q.status) ? `s-${q.status}` : 'muted';
-          // results_summary is a JSON STRING written by background.js (JSON.stringify of the
-          // per-field results array) — never a display string. Guard the parse; on failure or
-          // empty input, render nothing rather than injecting the raw string into the DOM.
-          let results;
-          try {
-            results = JSON.parse(q.results_summary || '{}');
-          } catch {
-            results = null;
-          }
-          const resultsHtml = renderQueueResults(results);
-          // WR-01-style guard (mirrors the failures table): stored urls are untrusted —
-          // esc() does not neutralize a javascript: scheme, so only emit an anchor for http(s).
-          const safeUrl = /^https?:\/\//i.test(q.url) ? q.url : '';
-          const skipReason = q.status === 'queued' ? skippedThisBatch.get(q.id) : undefined;
-          const done = q.status === 'submitted';
-          // Contextual actions: only what makes sense for the row's lifecycle stage.
-          // 'mark submitted' stays available pre-submit (manual-apply path); submitted
-          // rows are history and get no buttons.
-          const actions = done ? '' : [
-            (q.status === 'queued' || q.status === 'failed') ? `<button onclick="triggerFill(${q.id})">Fill now</button>` : '',
-            q.status === 'filling' ? `<button disabled>Fill now</button>` : '',
-            q.status === 'filled' ? `<button onclick="patchQueue(${q.id}, {status: 'reviewed'})">mark reviewed</button>` : '',
-            `<button id="submit-btn-${q.id}" ${q.status === 'reviewed' ? 'class="primary" ' : ''}onclick="markSubmitted(${q.id})">mark submitted</button>`,
-            q.status !== 'filling' ? `<button id="remove-btn-${q.id}" class="q-remove" onclick="removeFromQueue(${q.id})">remove</button>` : '',
-          ].join('');
-          return `
-            <tr class="q-row${done ? ' q-done' : ''}">
-              <td><span class="q-pill ${statusClass}">${esc(q.status)}</span></td>
-              <td class="q-role"><strong>${esc(q.company)}</strong>${q.role ? ` · ${esc(q.role)}` : ''}
-                <div style="text-overflow: ellipsis; white-space: nowrap; overflow: hidden; max-width: 380px">
-                  ${safeUrl ? `<a href="${esc(safeUrl)}" target="_blank">${esc(safeUrl)}</a>` : `<span class="muted">${esc(q.url)}</span>`}
-                </div>
-                ${q.resume_name ? `<div class="muted">resume: <a href="/queue/${q.id}/resume" target="_blank">${esc(q.resume_name)}</a></div>` : ''}
-                ${q.status === 'failed' ? `<div class="muted">fill failed — ${esc(q.error)}. check the field results, or retry.</div>` : ''}
-                ${skipReason ? `<div class="muted">skipped last batch — ${esc((SKIP_REASON_LABELS[skipReason] || skipReason).replace(/^skipped — /, ''))}</div>` : ''}</td>
-              <td class="muted q-date">${(q.created_at || '').slice(0, 10)}</td>
-              <td>
-                <div class="muted queue-toggle" onclick="toggleQueueResults(${q.id})">results <span id="qarrow-${q.id}">▾</span></div>
-                <div id="qresults-${q.id}" style="display:none">${resultsHtml}</div>
-              </td>
-              <td class="queue-actions">${actions}</td>
-            </tr>`;
-        }).join('')}
-      </tbody>
-    </table>`;
-}
+  const shown = visibleQueueRows();
 
-// results is either a parsed per-field results object/array (JSON.parse succeeded) or
-// null (parse failed / empty) — never render the raw unparsed string.
-// Statuses are allowlisted at render — results_summary is untrusted, server-stored JSON
-// influenced by the LLM mapping call, so an unknown status must never reach the class
-// attribute (stored-XSS sink), mirroring FAILURE_STATUSES above.
-const QUEUE_REVIEW_STATUSES = new Set(['verify', 'needs_manual', 'error', 'partial', 'not_found', 'stale', 'frame_error']);
-function renderQueueResults(results) {
-  if (!results) return `<div class="muted" style="padding-left:4px">no summary</div>`;
-  const items = Array.isArray(results) ? results : Object.entries(results).map(([k, v]) => ({ label: k, ...(typeof v === 'object' && v ? v : { value: v }) }));
-  if (!items.length) return `<div class="muted" style="padding-left:4px">no summary</div>`;
-  return items.map(r => {
-    const cls = QUEUE_REVIEW_STATUSES.has(r.status) ? `s-${r.status}` : 'muted';
-    const stuckNote = r.stuck === false ? ` <span class="s-didnt_stick">didn't stick — check this field</span>` : '';
-    return `<div class="${cls}" style="padding-left:4px">${esc(r.label || r.id || '')}: ${esc(r.status || r.value || '')}${stuckNote}</div>`;
+  // Two DISTINCT empty states (item 8): no rows in the queue at all vs rows exist but
+  // the active filter matches none of them. Collapsing them into one is feature loss.
+  document.getElementById('qEmptyAll').hidden = !noRowsAtAll;
+  document.getElementById('qEmpty').hidden = noRowsAtAll || shown.length > 0;
+  document.getElementById('qGrid').hidden = noRowsAtAll || shown.length === 0;
+
+  // D-04: render every row. No slice, no cap, no pagination, no virtualisation.
+  document.getElementById('queueBody').innerHTML = shown.map((q, i) => {
+    // Allowlist the stored status BEFORE it drives any class or button branch (item 14,
+    // T-19-05): an unrecognized value falls back to the safest state ('queued', no
+    // destructive/armed actions implied) rather than reach a class attribute raw.
+    const status = QUEUE_STATUSES.includes(q.status) ? q.status : 'queued';
+    const items = parseQueueResults(q);
+    const fillCounts = queueFillCounts(items);
+    const skipReason = status === 'queued' ? skippedThisBatch.get(q.id) : undefined;
+    const crit = queueCriterion(status, q, skipReason, fillCounts);
+    const done = status === 'submitted';
+    const attn = status === 'failed';
+    // Safe-URL guard (mirrors the failures table): stored urls are untrusted -- esc()
+    // does not neutralize a javascript: scheme, so only emit an anchor for http(s).
+    const safeUrl = /^https?:\/\//i.test(q.url) ? q.url : '';
+    const main = `
+      <tr class="jf-row${done ? ' jf-row--done' : ''}${attn ? ' jf-row--attn' : ''}">
+        <td class="jf-gut">${i + 1}</td>
+        <td class="jf-decision-cell">${queueVerdictHtml(status, crit)}</td>
+        <td title="${esc(q.company)}">${esc(q.company)}</td>
+        <td title="${esc(q.role)}">${esc(q.role)}<span class="jf-sub">${safeUrl ? `<a href="${esc(safeUrl)}" target="_blank">${esc(safeUrl)}</a>` : esc(q.url)}</span>${q.resume_name ? `<span class="jf-sub">resume: <a href="/queue/${q.id}/resume" target="_blank">${esc(q.resume_name)}</a></span>` : ''}${status === 'failed' ? `<span class="jf-sub">fill failed — ${esc(q.error)}. check the field results, or retry.</span>` : ''}${skipReason ? `<span class="jf-sub">skipped last batch — ${esc((SKIP_REASON_LABELS[skipReason] || skipReason).replace(/^skipped — /, ''))}</span>` : ''}</td>
+        <td>${esc((q.created_at || '').slice(0, 10))}</td>
+        <td class="jf-num">${items.length}${items.length ? `<span class="jf-sub"><button class="jf-disc" type="button" aria-expanded="false" aria-controls="qr-${q.id}"><svg aria-hidden="true"><use href="#i-chev"/></svg>fields</button></span>` : ''}</td>
+        <td class="jf-acts-cell">${queueActions(status, q)}</td>
+      </tr>`;
+    const detail = items.length ? `
+      <tr class="jf-detailrow" id="qr-${q.id}" hidden><td colspan="7"><div class="jf-panel">
+        <p class="jf-panel-h">field results · ${esc(q.company)}</p>
+        ${renderQueueResults(items)}
+      </div></td></tr>` : '';
+    return main + detail;
   }).join('');
-}
-
-function toggleQueueResults(id) {
-  const body = document.getElementById(`qresults-${id}`);
-  const arrow = document.getElementById(`qarrow-${id}`);
-  const expanded = body.style.display !== 'none';
-  body.style.display = expanded ? 'none' : 'block';
-  arrow.textContent = expanded ? '▾' : '▴';
 }
 
 // D-15/FILT-04: seek decisions section. Two independent scopes on one screen —
@@ -2813,6 +2857,17 @@ JF_STATUS.settings = () => ({
   filterLabel: 'across',
   filter: '4 rules',
   sort: 'unsaved edits are <b>not applied</b>',
+});
+
+// Plan 04: the queue's status-bar fact for plan 09's syncStatusBar (inert until
+// then) -- lives here, not in the queue section, for the same JF_STATUS-must-
+// exist-first reason as plan 02's registration above.
+JF_STATUS.queue = () => ({
+  n: visibleQueueRows().length,
+  unit: 'rows',
+  filterLabel: 'filter',
+  filter: queueFilter,
+  sort: 'sorted by <b>actionability</b>',
 });
 </script>
 </body>

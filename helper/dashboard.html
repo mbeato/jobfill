@@ -173,6 +173,10 @@
   <div id="settings" data-tab="settings">
     <h2>search criteria</h2>
     <div id="settingsCriteriaBody"></div>
+    <h2>relevance profile</h2>
+    <div id="settingsProfileBody"></div>
+    <h2>identity &amp; eeo</h2>
+    <div id="settingsIdentityBody"></div>
   </div>
 <script>
 const STATUSES = ['unsubmitted', 'applied', 'replied', 'interviewing', 'offer', 'rejected'];
@@ -1453,6 +1457,293 @@ async function saveCriteria() {
   }
 }
 
+// -----------------------------------------------------------------------
+// Settings tab — relevance profile editor (CFG-03). The prose steering the
+// relevance LLM check, DB-backed since seek.profile.md was deleted (plan
+// 05). Mirrors loadSettings/renderCriteria's load/render shape, with a
+// plain single-click save — see saveProfileText for why no narrowing arm
+// applies to free-form prose. See 18-UI-SPEC.md "Surface 2".
+// -----------------------------------------------------------------------
+
+const MAX_PROFILE_CHARS = 4000;
+
+async function loadProfileText() {
+  const body = document.getElementById('settingsProfileBody');
+  body.innerHTML = `<div class="muted">loading relevance profile…</div>`;
+  try {
+    const resp = await fetch('/settings/profile');
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const { profile } = await resp.json();
+    renderProfileText(profile);
+  } catch (e) {
+    body.innerHTML = `<div class="muted" onclick="loadProfileText()">couldn't load relevance profile — click to retry</div>`;
+  }
+}
+
+function renderProfileText(text) {
+  const body = document.getElementById('settingsProfileBody');
+  body.innerHTML = `
+    <div class="settings-hint">describe the roles, seniority, and locations you're targeting — the relevance check reads this prose for every posting that passes the rules above.</div>
+    <div class="settings-field profile">
+      <textarea id="profileText" oninput="refreshProfileCount()">${esc(text)}</textarea>
+      <div class="settings-count" id="profileCount"></div>
+    </div>
+    <div class="settings-actions">
+      <button id="profileSaveBtn" class="primary" onclick="saveProfileText()">save relevance profile</button>
+      <span class="settings-hint" id="profileSaveError"></span>
+    </div>`;
+  refreshProfileCount();
+}
+
+function refreshProfileCount() {
+  const textarea = document.getElementById('profileText');
+  const countEl = document.getElementById('profileCount');
+  const saveBtn = document.getElementById('profileSaveBtn');
+  if (!textarea || !countEl) return;
+  const len = textarea.value.length;
+  if (textarea.value.trim().length === 0) {
+    countEl.textContent = "the relevance profile can't be empty — describe target roles so the relevance check has something to judge against";
+    countEl.classList.add('rule-error');
+    if (saveBtn) saveBtn.disabled = true;
+  } else if (len > MAX_PROFILE_CHARS) {
+    countEl.textContent = `too long — trim to 4,000 characters (currently ${len})`;
+    countEl.classList.add('rule-error');
+    if (saveBtn) saveBtn.disabled = true;
+  } else {
+    countEl.textContent = `${len} / 4,000 characters`;
+    countEl.classList.remove('rule-error');
+    if (saveBtn) saveBtn.disabled = false;
+  }
+}
+
+// Plain single click, no narrowing arm: free-form prose steering an already
+// precision-biased LLM judgment has no clean binary more-or-less-restrictive
+// signal the way a flat term list does, and its failure mode is a worse LLM
+// verdict rather than a hard-coded permanent rejection.
+async function saveProfileText() {
+  const textarea = document.getElementById('profileText');
+  if (!textarea) return;
+  try {
+    const resp = await fetch('/settings/profile', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ profile: textarea.value }),
+    });
+    const errorEl = document.getElementById('profileSaveError');
+    if (!resp.ok) {
+      const respBody = await resp.json().catch(() => ({}));
+      if (errorEl) {
+        errorEl.innerHTML = esc(`couldn't save — ${respBody.error || `HTTP ${resp.status}`}`);
+        errorEl.classList.add('rule-error');
+      }
+      return;
+    }
+    if (errorEl) {
+      errorEl.textContent = '';
+      errorEl.classList.remove('rule-error');
+    }
+    await loadProfileText();
+  } catch (e) {
+    const errorEl = document.getElementById('profileSaveError');
+    if (errorEl) {
+      errorEl.innerHTML = esc(`couldn't save — ${String(e?.message || e)}`);
+      errorEl.classList.add('rule-error');
+    }
+  }
+}
+
+// -----------------------------------------------------------------------
+// Settings tab — identity & EEO form (CFG-02, D-11). Renders exactly the
+// five hand-authored profile.local.json sections (contact/links/workAuth/
+// eeo/answers) as 27 labelled fields. The other five top-level profile
+// keys are .tex-derived (generated from the resume build, not hand-
+// authored) and MUST NEVER appear here — see 18-UI-SPEC.md "Surface 3" and
+// helper/profile-merge.ts's PROFILE_SECTIONS, the authoritative field list
+// this form mirrors name-for-name.
+// -----------------------------------------------------------------------
+
+async function loadIdentity() {
+  const body = document.getElementById('settingsIdentityBody');
+  body.innerHTML = `<div class="muted">loading profile…</div>`;
+  try {
+    const resp = await fetch('/profile');
+    if (resp.status === 404) {
+      renderIdentity({});
+      body.insertAdjacentHTML('afterbegin', `<div class="settings-hint">no profile.local.json yet — fill in what you can below and save to create it. fields left blank stay blank until you fill them in.</div>`);
+      return;
+    }
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const profile = await resp.json();
+    renderIdentity(profile);
+  } catch (e) {
+    body.innerHTML = `<div class="muted">couldn't load your profile — ${esc(String(e?.message || e))}. check helper/profile.local.json directly if this keeps happening.</div>`;
+  }
+}
+
+function renderIdentity(p) {
+  const body = document.getElementById('settingsIdentityBody');
+  const contact = p.contact || {};
+  const links = p.links || {};
+  const workAuth = p.workAuth || {};
+  const eeo = p.eeo || {};
+  const answers = p.answers || {};
+
+  const textField = (id, label, value, type = 'text') => `
+    <div class="settings-field">
+      <label for="${id}">${label}</label>
+      <input type="${type}" id="${id}" value="${esc(value ?? '')}">
+    </div>`;
+  const checkboxRow = (id, label, checked) => `
+    <div class="settings-checkbox-row">
+      <input type="checkbox" id="${id}" ${checked ? 'checked' : ''}>
+      <label for="${id}" style="margin-bottom:0">${label}</label>
+    </div>`;
+
+  body.innerHTML = `
+    <div class="settings-subhead">contact</div>
+    ${textField('id-contact-firstName', 'first name', contact.firstName)}
+    ${textField('id-contact-lastName', 'last name', contact.lastName)}
+    ${textField('id-contact-pronouns', 'pronouns', contact.pronouns)}
+    ${textField('id-contact-email', 'email', contact.email, 'email')}
+    ${textField('id-contact-phone', 'phone', contact.phone, 'tel')}
+    ${textField('id-contact-city', 'city', contact.city)}
+    ${textField('id-contact-state', 'state', contact.state)}
+    ${textField('id-contact-country', 'country', contact.country)}
+    ${textField('id-contact-location', 'location (as shown on applications)', contact.location)}
+
+    <div class="settings-subhead">links</div>
+    ${textField('id-links-linkedin', 'linkedin', links.linkedin, 'url')}
+    ${textField('id-links-github', 'github', links.github, 'url')}
+    ${textField('id-links-portfolio', 'portfolio', links.portfolio, 'url')}
+
+    <div class="settings-subhead">work authorization</div>
+    ${textField('id-workAuth-status', 'status (text, e.g. citizen / visa type)', workAuth.status)}
+    ${checkboxRow('id-workAuth-authorizedUS', 'authorized to work in the us', workAuth.authorizedUS)}
+    ${checkboxRow('id-workAuth-needsSponsorship', 'needs sponsorship now', workAuth.needsSponsorship)}
+    ${checkboxRow('id-workAuth-needsFutureSponsorship', 'will need sponsorship in the future', workAuth.needsFutureSponsorship)}
+    ${checkboxRow('id-workAuth-over18', '18 or older', workAuth.over18)}
+
+    <!-- Free text, not dropdowns: employer EEO forms use inconsistent value
+         sets, and hardcoding one taxonomy would bake in the same
+         opinions-in-source problem D-04 rejected for term lists. -->
+    <div class="settings-subhead">eeo (optional — used only where a form asks)</div>
+    <div class="settings-field">
+      <label for="id-eeo-gender">gender</label>
+      <input type="text" id="id-eeo-gender" placeholder="e.g. decline to answer" value="${esc(eeo.gender ?? '')}">
+    </div>
+    <div class="settings-field">
+      <label for="id-eeo-race">race</label>
+      <input type="text" id="id-eeo-race" placeholder="e.g. decline to answer" value="${esc(eeo.race ?? '')}">
+    </div>
+    <div class="settings-field">
+      <label for="id-eeo-veteran">veteran status</label>
+      <input type="text" id="id-eeo-veteran" placeholder="e.g. decline to answer" value="${esc(eeo.veteran ?? '')}">
+    </div>
+    <div class="settings-field">
+      <label for="id-eeo-disability">disability status</label>
+      <input type="text" id="id-eeo-disability" placeholder="e.g. decline to answer" value="${esc(eeo.disability ?? '')}">
+    </div>
+    <div class="settings-field">
+      <label for="id-eeo-hispanicLatino">hispanic or latino</label>
+      <input type="text" id="id-eeo-hispanicLatino" placeholder="e.g. decline to answer" value="${esc(eeo.hispanicLatino ?? '')}">
+    </div>
+    <div class="settings-field">
+      <label for="id-eeo-sexualOrientation">sexual orientation</label>
+      <input type="text" id="id-eeo-sexualOrientation" placeholder="e.g. decline to answer" value="${esc(eeo.sexualOrientation ?? '')}">
+    </div>
+
+    <div class="settings-subhead">canned answers</div>
+    ${textField('id-answers-salaryExpectation', 'salary expectation', answers.salaryExpectation)}
+    ${textField('id-answers-startDate', 'start date availability', answers.startDate)}
+    ${textField('id-answers-willingToRelocate', 'willing to relocate', answers.willingToRelocate)}
+    ${textField('id-answers-howDidYouHear', 'how did you hear about us', answers.howDidYouHear)}
+
+    <div class="settings-actions">
+      <button id="identitySaveBtn" class="primary" onclick="saveIdentity()">save identity & eeo</button>
+      <span class="settings-hint" id="identitySaveError"></span>
+    </div>`;
+}
+
+// The single place the form is translated into the endpoint's shape: reads
+// exactly five keys back from the DOM — never spreads a previously fetched
+// profile object into the body, or the five .tex-derived top-level keys
+// would ride along and defeat the point of the merge endpoint. Mirrors
+// readCriteriaForm's role for the criteria editor above.
+function readIdentityForm() {
+  const val = (id) => document.getElementById(id).value;
+  const checked = (id) => document.getElementById(id).checked;
+  return {
+    contact: {
+      firstName: val('id-contact-firstName'),
+      lastName: val('id-contact-lastName'),
+      pronouns: val('id-contact-pronouns'),
+      email: val('id-contact-email'),
+      phone: val('id-contact-phone'),
+      city: val('id-contact-city'),
+      state: val('id-contact-state'),
+      country: val('id-contact-country'),
+      location: val('id-contact-location'),
+    },
+    links: {
+      linkedin: val('id-links-linkedin'),
+      github: val('id-links-github'),
+      portfolio: val('id-links-portfolio'),
+    },
+    workAuth: {
+      status: val('id-workAuth-status'),
+      authorizedUS: checked('id-workAuth-authorizedUS'),
+      needsSponsorship: checked('id-workAuth-needsSponsorship'),
+      needsFutureSponsorship: checked('id-workAuth-needsFutureSponsorship'),
+      over18: checked('id-workAuth-over18'),
+    },
+    eeo: {
+      gender: val('id-eeo-gender'),
+      race: val('id-eeo-race'),
+      veteran: val('id-eeo-veteran'),
+      disability: val('id-eeo-disability'),
+      hispanicLatino: val('id-eeo-hispanicLatino'),
+      sexualOrientation: val('id-eeo-sexualOrientation'),
+    },
+    answers: {
+      salaryExpectation: val('id-answers-salaryExpectation'),
+      startDate: val('id-answers-startDate'),
+      willingToRelocate: val('id-answers-willingToRelocate'),
+      howDidYouHear: val('id-answers-howDidYouHear'),
+    },
+  };
+}
+
+async function saveIdentity() {
+  const body = readIdentityForm();
+  try {
+    const resp = await fetch('/profile', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const errorEl = document.getElementById('identitySaveError');
+    if (!resp.ok) {
+      const respBody = await resp.json().catch(() => ({}));
+      if (errorEl) {
+        errorEl.innerHTML = esc(`couldn't save — ${respBody.error || `HTTP ${resp.status}`}`);
+        errorEl.classList.add('rule-error');
+      }
+      return;
+    }
+    if (errorEl) {
+      errorEl.textContent = '';
+      errorEl.classList.remove('rule-error');
+    }
+    await loadIdentity();
+  } catch (e) {
+    const errorEl = document.getElementById('identitySaveError');
+    if (errorEl) {
+      errorEl.innerHTML = esc(`couldn't save — ${String(e?.message || e)}`);
+      errorEl.classList.add('rule-error');
+    }
+  }
+}
+
 // Tab navigation: one visible group at a time, persisted in the URL hash so a
 // reload (or a bookmarked #runs) lands where the operator left off. All sections stay in
 // the DOM and keep loading/rendering as before — tabs only control visibility.
@@ -1477,5 +1768,7 @@ loadPostings();
 loadSweeps();
 loadBatch();
 loadSettings();
+loadProfileText();
+loadIdentity();
 </script>
 </body>

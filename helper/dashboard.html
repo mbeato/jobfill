@@ -487,8 +487,20 @@
 /* the signature move: verdict + criterion, split by a hairline, in one cell.
    This is the ONE clip exception in the grid (19-UI-SPEC.md Table Grammar
    rule 3): truncating the criterion would defeat the entire point of the
-   design, and a prior audit caught exactly that regression. */
-.jf-scope td.jf-decision-cell{white-space:normal}
+   design, and a prior audit caught exactly that regression.
+   Deviation (Rule 1, found in 19-05): the exception selector must match
+   ".jf-grid tbody td"'s own compound structure (2 classes + 2 elements) to
+   actually outrank it in the cascade -- a bare ".jf-scope td.jf-decision-cell"
+   (2 classes + 1 element) LOSES the specificity contest to the base nowrap
+   rule above, so white-space:normal here was silently dead on arrival. This
+   never surfaced on the queue grid (plan 04) because .jf-crit sets its own
+   white-space:normal directly and never depends on inheriting it from the
+   td. It surfaces on applications' decision cell because item 52 keeps the
+   status a live <select> instead of a static .jf-verdict/.jf-crit pair
+   (deliberate — see this plan's <deliberate_change>), so the criterion here
+   is a plain .jf-sub line with no such override of its own; it must actually
+   inherit a wrapping white-space from the cell. */
+.jf-scope .jf-grid tbody td.jf-decision-cell{white-space:normal}
 .jf-scope .jf-cell-decision{display:flex;align-items:flex-start;gap:var(--jf-s2);min-width:0}
 .jf-scope .jf-verdict{
   font-weight:700;color:var(--jf-ink);flex:none;line-height:var(--jf-lh-data);

@@ -20,13 +20,13 @@ import { fetchGreenhouse } from './seek/greenhouse';
 import { fetchLever } from './seek/lever';
 import { fetchAshby } from './seek/ashby';
 import { fetchHNPostings } from './seek/hn';
-import { createBoardsTable, upsertBoard, recordBoardResult, resolveEffectiveTokens } from './seek/boards';
+import { createBoardsTable, upsertBoard, recordBoardResult, resolveEffectiveTokens, listAllBoards } from './seek/boards';
 import { createSeekMetaTable } from './seek/meta';
 import { fetchSimplify } from './seek/simplify';
 import { fetchGetro } from './seek/getro';
 import { harvestYcDirectory } from './seek/ycdir';
 import type { SourceName } from './seek/types';
-import { classifyMetadata, classifyYoe } from './seek/filter';
+import { classifyMetadata, classifyYoe, classifyBoardGrace } from './seek/filter';
 import { fetchJD } from './seek/jd-fetch';
 import { scoreRelevance, loadProfileSummary } from './seek/relevance';
 import { promotePosting } from './seek/promote';
@@ -280,6 +280,7 @@ const jobDeps: JobDeps = {
   // upsertBoard here so sweep.ts stays unaware of the boards module directly.
   harvestYcDirectory: ({ db, blocklist }) => harvestYcDirectory({ db, upsertBoard, blocklist }),
   classifyMetadata,
+  classifyBoardGrace,
   classifyYoe,
   fetchJD,
   scoreRelevance,
@@ -287,6 +288,7 @@ const jobDeps: JobDeps = {
   promotePosting,
   recordDecision,
   listPostingsToDecide,
+  listAllBoards,
   spawnSidecar,
 };
 

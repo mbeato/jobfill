@@ -76,6 +76,7 @@ function baseDeps(overrides: Partial<JobDeps> = {}): JobDeps {
     recordBoardResult: () => {},
     resolveEffectiveTokens: (_db, _ats, tokens) => tokens,
     classifyMetadata: () => ({ reject: false }),
+    classifyBoardGrace: () => ({ reject: false }),
     classifyYoe: () => ({ reject: false }),
     fetchJD: async () => 'some jd text',
     scoreRelevance: async () => ({ relevant: true, reason: 'matches profile' }),
@@ -83,6 +84,7 @@ function baseDeps(overrides: Partial<JobDeps> = {}): JobDeps {
     promotePosting,
     recordDecision,
     listPostingsToDecide,
+    listAllBoards: () => [],
     spawnSidecar: async () => ({ ran: true, exitCode: 0, authExpired: [] }),
     ...overrides,
   };

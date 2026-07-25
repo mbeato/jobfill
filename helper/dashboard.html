@@ -173,6 +173,8 @@
   <div id="settings" data-tab="settings">
     <h2>search criteria</h2>
     <div id="settingsCriteriaBody"></div>
+    <h2>relevance profile</h2>
+    <div id="settingsProfileBody"></div>
   </div>
 <script>
 const STATUSES = ['unsubmitted', 'applied', 'replied', 'interviewing', 'offer', 'rejected'];
@@ -1453,6 +1455,101 @@ async function saveCriteria() {
   }
 }
 
+// -----------------------------------------------------------------------
+// Settings tab — relevance profile editor (CFG-03). The prose steering the
+// relevance LLM check, DB-backed since seek.profile.md was deleted (plan
+// 05). Mirrors loadSettings/renderCriteria's load/render shape, with a
+// plain single-click save — see saveProfileText for why no narrowing arm
+// applies to free-form prose. See 18-UI-SPEC.md "Surface 2".
+// -----------------------------------------------------------------------
+
+const MAX_PROFILE_CHARS = 4000;
+
+async function loadProfileText() {
+  const body = document.getElementById('settingsProfileBody');
+  body.innerHTML = `<div class="muted">loading relevance profile…</div>`;
+  try {
+    const resp = await fetch('/settings/profile');
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const { profile } = await resp.json();
+    renderProfileText(profile);
+  } catch (e) {
+    body.innerHTML = `<div class="muted" onclick="loadProfileText()">couldn't load relevance profile — click to retry</div>`;
+  }
+}
+
+function renderProfileText(text) {
+  const body = document.getElementById('settingsProfileBody');
+  body.innerHTML = `
+    <div class="settings-hint">describe the roles, seniority, and locations you're targeting — the relevance check reads this prose for every posting that passes the rules above.</div>
+    <div class="settings-field profile">
+      <textarea id="profileText" oninput="refreshProfileCount()">${esc(text)}</textarea>
+      <div class="settings-count" id="profileCount"></div>
+    </div>
+    <div class="settings-actions">
+      <button id="profileSaveBtn" class="primary" onclick="saveProfileText()">save relevance profile</button>
+      <span class="settings-hint" id="profileSaveError"></span>
+    </div>`;
+  refreshProfileCount();
+}
+
+function refreshProfileCount() {
+  const textarea = document.getElementById('profileText');
+  const countEl = document.getElementById('profileCount');
+  const saveBtn = document.getElementById('profileSaveBtn');
+  if (!textarea || !countEl) return;
+  const len = textarea.value.length;
+  if (textarea.value.trim().length === 0) {
+    countEl.textContent = "the relevance profile can't be empty — describe target roles so the relevance check has something to judge against";
+    countEl.classList.add('rule-error');
+    if (saveBtn) saveBtn.disabled = true;
+  } else if (len > MAX_PROFILE_CHARS) {
+    countEl.textContent = `too long — trim to 4,000 characters (currently ${len})`;
+    countEl.classList.add('rule-error');
+    if (saveBtn) saveBtn.disabled = true;
+  } else {
+    countEl.textContent = `${len} / 4,000 characters`;
+    countEl.classList.remove('rule-error');
+    if (saveBtn) saveBtn.disabled = false;
+  }
+}
+
+// Plain single click, no narrowing arm: free-form prose steering an already
+// precision-biased LLM judgment has no clean binary more-or-less-restrictive
+// signal the way a flat term list does, and its failure mode is a worse LLM
+// verdict rather than a hard-coded permanent rejection.
+async function saveProfileText() {
+  const textarea = document.getElementById('profileText');
+  if (!textarea) return;
+  try {
+    const resp = await fetch('/settings/profile', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ profile: textarea.value }),
+    });
+    const errorEl = document.getElementById('profileSaveError');
+    if (!resp.ok) {
+      const respBody = await resp.json().catch(() => ({}));
+      if (errorEl) {
+        errorEl.innerHTML = esc(`couldn't save — ${respBody.error || `HTTP ${resp.status}`}`);
+        errorEl.classList.add('rule-error');
+      }
+      return;
+    }
+    if (errorEl) {
+      errorEl.textContent = '';
+      errorEl.classList.remove('rule-error');
+    }
+    await loadProfileText();
+  } catch (e) {
+    const errorEl = document.getElementById('profileSaveError');
+    if (errorEl) {
+      errorEl.innerHTML = esc(`couldn't save — ${String(e?.message || e)}`);
+      errorEl.classList.add('rule-error');
+    }
+  }
+}
+
 // Tab navigation: one visible group at a time, persisted in the URL hash so a
 // reload (or a bookmarked #runs) lands where the operator left off. All sections stay in
 // the DOM and keep loading/rendering as before — tabs only control visibility.
@@ -1477,5 +1574,6 @@ loadPostings();
 loadSweeps();
 loadBatch();
 loadSettings();
+loadProfileText();
 </script>
 </body>

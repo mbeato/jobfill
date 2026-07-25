@@ -6,6 +6,7 @@ import { promotePosting } from './promote';
 import { createSweepsTable, getSweepById } from './runs';
 import { createBatchRunsTable } from './batch';
 import { beginSweep, runSweepJob, spawnSidecar, SweepAlreadyRunningError, type JobDeps } from './job';
+import { compileCriteria, defaultCriteria } from './criteria';
 import type { NormalizedPosting, SeekConfig } from './types';
 
 // In-memory DB with the full trio (sweeps/postings/queue) plus the minimal
@@ -75,6 +76,7 @@ function baseDeps(overrides: Partial<JobDeps> = {}): JobDeps {
     upsertBoard: () => null,
     recordBoardResult: () => {},
     resolveEffectiveTokens: (_db, _ats, tokens) => tokens,
+    loadCriteria: () => compileCriteria(defaultCriteria()),
     classifyMetadata: () => ({ reject: false }),
     classifyBoardGrace: () => ({ reject: false }),
     classifyYoe: () => ({ reject: false }),

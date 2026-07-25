@@ -22,7 +22,7 @@ import { fetchAshby } from './seek/ashby';
 import { fetchHNPostings } from './seek/hn';
 import { createBoardsTable, upsertBoard, recordBoardResult, resolveEffectiveTokens, listAllBoards } from './seek/boards';
 import { createSeekMetaTable } from './seek/meta';
-import { seedCriteriaOnce } from './seek/criteria';
+import { seedCriteriaOnce, loadCriteria } from './seek/criteria';
 import { fetchSimplify } from './seek/simplify';
 import { fetchGetro } from './seek/getro';
 import { harvestYcDirectory } from './seek/ycdir';
@@ -284,6 +284,7 @@ const jobDeps: JobDeps = {
   // optional) down to SweepDeps' { db, blocklist } surface, closing over
   // upsertBoard here so sweep.ts stays unaware of the boards module directly.
   harvestYcDirectory: ({ db, blocklist }) => harvestYcDirectory({ db, upsertBoard, blocklist }),
+  loadCriteria,
   classifyMetadata,
   classifyBoardGrace,
   classifyYoe,

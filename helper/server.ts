@@ -12,6 +12,7 @@ import { createApplicationsTable, insertApplication, updateApplicationStatus, de
 // Re-exported so it reads as "exported from server.ts" per the phase 15 plan.
 import { safeDocPath, safeOutDir } from './docpath';
 export { safeDocPath };
+import { mergeProfilePatch } from './profile-merge';
 import { mapViaCLI } from './mapping';
 import { normalizeUrl } from './seek/normalize';
 import { createPostingsTable, upsertPosting, listPostings, recordDecision, listPostingsToDecide } from './seek/postings';
@@ -22,14 +23,23 @@ import { fetchAshby } from './seek/ashby';
 import { fetchHNPostings } from './seek/hn';
 import { createBoardsTable, upsertBoard, recordBoardResult, resolveEffectiveTokens, listAllBoards } from './seek/boards';
 import { createSeekMetaTable } from './seek/meta';
-import { seedCriteriaOnce, loadCriteria } from './seek/criteria';
+import {
+  seedCriteriaOnce,
+  loadCriteria,
+  readCriteria,
+  validateCriteria,
+  saveCriteria,
+  readRelevanceProfile,
+  saveRelevanceProfile,
+  MAX_PROFILE_CHARS,
+} from './seek/criteria';
 import { fetchSimplify } from './seek/simplify';
 import { fetchGetro } from './seek/getro';
 import { harvestYcDirectory } from './seek/ycdir';
 import type { SourceName } from './seek/types';
 import { classifyMetadata, classifyYoe, classifyBoardGrace } from './seek/filter';
 import { fetchJD } from './seek/jd-fetch';
-import { scoreRelevance, loadProfileSummary } from './seek/relevance';
+import { scoreRelevance, loadProfileSummary, DEFAULT_PROFILE_SUMMARY } from './seek/relevance';
 import { promotePosting } from './seek/promote';
 import {
   createSweepsTable,
@@ -956,6 +966,98 @@ Bun.serve({
         const profilePath = join(HERE, '..', 'profile.local.json');
         if (!existsSync(profilePath)) return json({ error: 'profile.local.json not found' }, 404);
         return json(JSON.parse(await Bun.file(profilePath).text()));
+      }
+      // PATCH /profile — merge-patch on contact/links/workAuth/eeo/answers
+      // only (D-11). The path is NEVER derived from request input — it is
+      // the same source expression GET /profile above uses, because
+      // runner-core.mjs:77 reads exactly this file on every runner start
+      // (D-02) and must never see anything else.
+      if (pathname === '/profile' && req.method === 'PATCH') {
+        const profilePath = join(HERE, '..', 'profile.local.json');
+        let body: unknown;
+        try {
+          body = await req.json();
+        } catch {
+          return json({ error: 'malformed profile patch' }, 400);
+        }
+        try {
+          // A malformed existing file is tolerated as the fresh-install case
+          // — mergeProfilePatch treats `undefined` as "no file yet".
+          let existing: unknown;
+          if (existsSync(profilePath)) {
+            try {
+              existing = JSON.parse(await Bun.file(profilePath).text());
+            } catch {
+              existing = undefined;
+            }
+          }
+          const merged = mergeProfilePatch(existing, body);
+          // Temp-file write + renameSync: a batch runner can be reading this
+          // exact file at the same moment (runner-core.mjs:77 reseeds on
+          // every start), and a partially-written JSON file would break a
+          // fill rather than degrade it. renameSync is already imported, so
+          // this atomic swap costs one extra line.
+          await Bun.write(profilePath + '.tmp', JSON.stringify(merged, null, 2));
+          renameSync(profilePath + '.tmp', profilePath);
+          return json(merged);
+        } catch (e) {
+          return json({ error: String((e as Error)?.message ?? e) }, 500);
+        }
+      }
+      // GET /settings/criteria — readCriteria coerces and falls back to the
+      // D-14 generic defaults, so this route cannot 500 on a corrupt row.
+      if (pathname === '/settings/criteria' && req.method === 'GET') {
+        return json(readCriteria(db));
+      }
+      // PATCH /settings/criteria — the write-boundary half of the codebase's
+      // double posture (fail-closed coercion at read, explicit allowlist +
+      // rejection at write). These values drive a filter whose rejections
+      // are permanent (Phase 9 D-14), so a malformed save must be refused
+      // loudly with a 400 BEFORE touching the DB, never coerced quietly —
+      // mirrors the /queue POST block's allowlist-before-write posture above.
+      if (pathname === '/settings/criteria' && req.method === 'PATCH') {
+        let body: unknown;
+        try {
+          body = await req.json();
+        } catch {
+          return json({ error: 'malformed criteria' }, 400);
+        }
+        const result = validateCriteria(body);
+        if (!result.ok) return json({ error: result.error }, 400);
+        // Store the normalized object, never the raw body.
+        saveCriteria(db, result.criteria);
+        // Re-read so the client re-renders from what was actually stored.
+        return json(readCriteria(db));
+      }
+      // GET /settings/profile — the fallback means a fresh install opens the
+      // editor pre-filled with the generic template instead of an empty box
+      // (CFG-05 first-run path).
+      if (pathname === '/settings/profile' && req.method === 'GET') {
+        return json({ profile: readRelevanceProfile(db) ?? DEFAULT_PROFILE_SUMMARY });
+      }
+      // PATCH /settings/profile — the length bound is a prompt-cost bound,
+      // not a ReDoS bound: this text is embedded verbatim into every
+      // relevance LLM call by buildPrompt and is never compiled.
+      if (pathname === '/settings/profile' && req.method === 'PATCH') {
+        let body: unknown;
+        try {
+          body = await req.json();
+        } catch {
+          return json({ error: 'malformed profile' }, 400);
+        }
+        const b = body as { profile?: unknown };
+        const text = typeof b.profile === 'string' ? b.profile : '';
+        if (typeof b.profile !== 'string' || text.trim().length === 0) {
+          return json(
+            { error: "the relevance profile can't be empty — describe target roles so the relevance check has something to judge against" },
+            400,
+          );
+        }
+        if (text.length > MAX_PROFILE_CHARS) {
+          return json({ error: `too long — trim to 4,000 characters (currently ${text.length})` }, 400);
+        }
+        saveRelevanceProfile(db, text);
+        return json({ profile: readRelevanceProfile(db) });
       }
       // GET /queue/:id/resume — stream the PDF that was attached to this row's fill
       // so the operator can review the actual content before submitting. Resolution mirrors

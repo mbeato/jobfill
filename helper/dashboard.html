@@ -202,10 +202,9 @@
 
 /* ── jf: legacy neutralizer ─────────────────────────────────────────────
    Re-declares, using --jf-* values, every property the legacy element rules
-   above (body/table/th,td/th/select/input.notes/a/h2) would otherwise
-   inherit into a ported panel — e.g. the legacy th's uppercase text
-   transform and td's light-grey bottom rule silently bleeding into new
-   markup. */
+   above (body/table/th,td/th/select/input/a/h2) would otherwise inherit into
+   a ported panel — e.g. the legacy th's uppercase text transform and td's
+   light-grey bottom rule silently bleeding into new markup. */
 .jf-scope table{width:100%;border-collapse:separate;border-spacing:0;margin-top:0}
 .jf-scope th,.jf-scope td{text-align:left;padding:var(--jf-cell-y) var(--jf-s3);border-bottom:var(--jf-hair) solid var(--jf-rule);vertical-align:top}
 .jf-scope th{font-family:var(--jf-mono);font-size:var(--jf-t-xxs);font-weight:400;letter-spacing:var(--jf-track-wide);text-transform:none;color:var(--jf-ink-3)}

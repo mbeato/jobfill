@@ -35,6 +35,15 @@ const TOKEN_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 export const DEAD_AFTER = 5;
 export const DEAD_RECHECK_DAYS = 14;
 
+// D-10 (HARD CONSTRAINT): the one-time backfill of the 286 seek.config.json seed
+// tokens must write a first_seen_at safely OLDER than any posting it could match.
+// classifyBoardGrace (plan 17-01) suppresses any posting staged within
+// GRACE_WINDOW_HOURS (48h) of its board's first_seen_at; the oldest row in the live
+// postings table is 2026-07-22 06:04:43, so this 2020 sentinel guarantees every
+// already-staged posting sits far outside the grace delta. Writing datetime('now')
+// here instead would mass-suppress the entire next sweep.
+export const SEED_BACKFILL_FIRST_SEEN = '2020-01-01 00:00:00';
+
 export function createBoardsTable(db: Database) {
   db.run(`CREATE TABLE IF NOT EXISTS boards (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -94,6 +103,44 @@ export function upsertBoard(
     )
     .get(input.ats, token, input.source_of_discovery) as Record<string, unknown>;
   return toRow(raw);
+}
+
+// D-10: one-time backfill giving every seek.config.json seed token a boards row
+// backdated to SEED_BACKFILL_FIRST_SEEN. This deliberately overrides the write-once
+// first_seen_at rule upsertBoard enforces (Phase 16 D-02) — exactly once, for exactly
+// the curated-seed token set, and only that one column. A config token has been polled
+// since Phase 9, so a first_seen_at created by yesterday's simplify harvest is a false
+// record of when jobfill first saw that board; the sentinel restores the truth that
+// these boards are not new. source_of_discovery, last_ok_at, dead_since and
+// consecutive_failures are left untouched on conflict — this repairs only the
+// freshness clock, never re-attributes discovery provenance. Must be invoked exactly
+// once, behind a persisted one-time flag (plan 17-04 owns that), so a token the operator
+// hand-adds to seek.config.json later correctly receives first_seen_at = datetime('now')
+// from the ordinary per-sweep sync (D-06) and correctly enters grace.
+export function backfillSeedBoards(
+  db: Database,
+  tokensByAts: Record<string, string[]>,
+  blocklist: string[] = [],
+): number {
+  let written = 0;
+  for (const [ats, tokens] of Object.entries(tokensByAts)) {
+    if (!BOARDS_ATS.has(ats)) continue;
+    for (const t of tokens ?? []) {
+      const token = String(t ?? '').trim();
+      if (!TOKEN_RE.test(token)) continue;
+      const lowerToken = token.toLowerCase();
+      if (blocklist.some(b => String(b ?? '').trim().toLowerCase() === lowerToken)) continue;
+      db.query(
+        `INSERT INTO boards (ats, token, source_of_discovery, first_seen_at)
+         VALUES (?, ?, 'seed', ?)
+         ON CONFLICT(ats, token) DO UPDATE SET
+           first_seen_at = excluded.first_seen_at,
+           updated_at = datetime('now')`,
+      ).run(ats, token, SEED_BACKFILL_FIRST_SEEN);
+      written++;
+    }
+  }
+  return written;
 }
 
 // D-04: a single parameterized UPDATE, no-op when the row doesn't exist (a genuinely

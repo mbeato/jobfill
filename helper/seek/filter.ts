@@ -73,8 +73,11 @@ const FIRST_SEEN_SOURCES = new Set(['greenhouse', 'yc']);
 // day and let its whole backlog through — exactly the failure FILT-07 exists
 // to prevent. 72h was rejected as discarding two extra days of genuinely-new
 // postings. Named explicitly in HOURS (not days, unlike every other cap in
-// this file) to avoid a silent 24x unit-ambiguity bug. Exported for Phase
-// 18's CFG-01.
+// this file) to avoid a silent 24x unit-ambiguity bug. This window is
+// deliberately NOT user-editable (Phase 17 D-13, Phase 18 D-03) — setting it
+// to 0 would re-open the FILT-07 failure Phase 17 shipped to prevent,
+// measured live at roughly 1,855 undecided rows from boards added the
+// previous day.
 export const GRACE_WINDOW_HOURS = 48;
 
 // SQLite writes datetime('now') as 'YYYY-MM-DD HH:MM:SS' — UTC but with no zone
@@ -255,12 +258,15 @@ export function classifyBoardGrace(
   }
 }
 
-export function classifyYoe(jdText: string): { reject: boolean; reason?: string } {
+export function classifyYoe(jdText: string, criteria: CompiledCriteria): { reject: boolean; reason?: string } {
   try {
+    // D-06/D-14: an unset threshold means the YoE rule is off — the JD is not
+    // scanned at all.
+    if (criteria.yoeThreshold === null) return { reject: false };
     const text = String(jdText ?? '');
     for (const match of text.matchAll(YOE_RE)) {
       const years = parseInt(match[1], 10);
-      if (!Number.isNaN(years) && years > 1) {
+      if (!Number.isNaN(years) && years > criteria.yoeThreshold) {
         return { reject: true, reason: REASON_YOE };
       }
     }

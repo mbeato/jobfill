@@ -1616,7 +1616,13 @@ const IDENTITY_OPTIONS = {
   ],
   'eeo.gender': ['Male', 'Female', 'Non-binary', DECLINE_SELF_ID],
   'eeo.hispanicLatino': ['Yes', 'No', DECLINE_SELF_ID],
+  // "Hispanic or Latino" belongs here as well as in its own question above:
+  // EEO-1 has a two-question presentation (ethnicity, then race) and a
+  // single-question one where Hispanic or Latino is simply one of the seven
+  // categories. Greenhouse and friends use the single-question form, so a
+  // real stored profile can legitimately hold it as `race`.
   'eeo.race': [
+    'Hispanic or Latino',
     'American Indian or Alaska Native',
     'Asian',
     'Black or African American',
@@ -1673,13 +1679,19 @@ function renderIdentity(p) {
   // the first option the next time this form is saved, which is exactly the
   // kind of unrecoverable quiet data loss the profile merge exists to prevent.
   const selectField = (id, label, value, options, hint = '') => {
-    const current = (value ?? '').trim();
-    const known = options.includes(current);
+    const raw = (value ?? '').trim();
+    // Match case-insensitively and select the canonical spelling. A profile
+    // holding "yes" should snap to "Yes" rather than be carried as a one-off
+    // variant — same meaning, and canonical casing is what the filler wants to
+    // hand an ATS. Only a genuinely unrecognised value falls through to the
+    // preserved-value branch below.
+    const canonical = options.find((o) => o.toLowerCase() === raw.toLowerCase());
+    const current = canonical ?? raw;
     const opts = [
       `<option value=""${current === '' ? ' selected' : ''}>— not set —</option>`,
       ...options.map((o) => `<option value="${esc(o)}"${o === current ? ' selected' : ''}>${esc(o)}</option>`),
     ];
-    if (current !== '' && !known) {
+    if (current !== '' && !canonical) {
       opts.push(`<option value="${esc(current)}" selected>${esc(current)} — kept from your existing profile</option>`);
     }
     return `

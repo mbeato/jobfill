@@ -885,6 +885,11 @@ document.getElementById('aChips').addEventListener('click', (e) => {
 // left stuck disabled on a thrown/rejected fetch. No existing dashboard.html
 // button blocks for a true multi-minute server op (triggerFill fires-and-forgets
 // a detached runner job); this is new UI, not a copy.
+// D-05: the generate menu blocks on the request — the control is disabled and
+// shows "generating…" before the fetch, reset in a finally so the row is never
+// left stuck disabled on a thrown/rejected fetch. No existing dashboard.html
+// button blocks for a true multi-minute server op (triggerFill fires-and-forgets
+// a detached runner job); this is new UI, not a copy.
 async function triggerGenerate(id, doctype) {
   const select = document.getElementById(`gen-select-${id}`);
   const status = document.getElementById(`gen-status-${id}`);
@@ -893,27 +898,27 @@ async function triggerGenerate(id, doctype) {
   placeholder.textContent = 'generating…';
   select.value = '';
   select.disabled = true;
-  status.textContent = '';
+  status.innerHTML = '';
   try {
     const resp = await fetch(`/applications/${id}/generate/${doctype}`, { method: 'POST' });
     const body = await resp.json();
     if (!resp.ok) {
-      status.textContent = esc(body.error || `HTTP ${resp.status}`);
+      status.innerHTML = `<div class="jf-notice"><svg aria-hidden="true"><use href="#i-alert"/></svg>${esc(body.error || `HTTP ${resp.status}`)}</div>`;
     } else if (doctype === 'email') {
-      // CR-02: the read-back box's cache is keyed by id and never invalidated on
+      // CR-02: the read-back panel's cache is keyed by id and never invalidated on
       // its own — a successful regeneration must drop the stale cached draft (and
-      // collapse an already-open box) so the next toggleEmail() open re-fetches
-      // the fresh text instead of showing the previous generation.
+      // collapse an already-open panel) so the next expand re-fetches the fresh
+      // text instead of showing the previous generation.
       emailCache.delete(id);
-      const slot = document.getElementById(`email-slot-${id}`);
-      const arrow = document.getElementById(`email-arrow-${id}`);
-      if (slot && slot.style.display !== 'none') {
-        slot.style.display = 'none';
-        if (arrow) arrow.textContent = '▾';
+      const emailRow = document.getElementById(`email-${id}`);
+      const emailBtn = document.getElementById(`email-disc-${id}`);
+      if (emailRow && !emailRow.hidden) {
+        emailRow.hidden = true;
+        if (emailBtn) emailBtn.setAttribute('aria-expanded', 'false');
       }
     }
   } catch (e) {
-    status.textContent = `helper unreachable — ${esc(String(e?.message || e))}`;
+    status.innerHTML = `<div class="jf-notice"><svg aria-hidden="true"><use href="#i-alert"/></svg>${esc(`helper unreachable — ${String(e?.message || e)}`)}</div>`;
   } finally {
     placeholder.textContent = placeholderLabel;
     select.disabled = false;
@@ -930,95 +935,85 @@ async function patch(id, body) {
   load();
 }
 
-function toggleSummary(id) {
-  const body = document.getElementById(`summary-${id}`);
-  const arrow = document.getElementById(`arrow-${id}`);
-  const expanded = body.style.display !== 'none';
-  body.style.display = expanded ? 'none' : 'block';
-  arrow.textContent = expanded ? '▾' : '▴';
-}
-
 // D-07: jd is kept out of the list payload, so it's fetched on demand here,
 // once per row, and cached — re-collapsing/re-expanding a cached row does not
 // re-hit the endpoint. Only the error state re-attempts on re-expand (T-14-06).
 const jdCache = new Map();
 
-async function toggleJd(id) {
-  const slot = document.getElementById(`jd-slot-${id}`);
-  const arrow = document.getElementById(`jd-arrow-${id}`);
-  const expanded = slot.style.display !== 'none';
-  if (expanded) {
-    slot.style.display = 'none';
-    arrow.textContent = '▾';
-    return;
-  }
-  slot.style.display = 'block';
-  arrow.textContent = '▴';
-
+async function loadJd(id) {
+  const panel = document.getElementById(`jd-panel-${id}`);
+  if (!panel) return;
   if (jdCache.has(id)) {
-    slot.innerHTML = jdCache.get(id);
+    panel.innerHTML = jdCache.get(id);
     return;
   }
-
-  slot.innerHTML = `<div class="muted">loading job description…</div>`;
+  panel.innerHTML = `<p class="jf-dim">loading job description…</p>`;
   try {
     const resp = await fetch(`/applications/${id}/jd`);
     if (!resp.ok) {
-      slot.innerHTML = `<div class="muted">couldn't load job description — click to retry</div>`;
+      panel.innerHTML = `<div class="jf-notice"><svg aria-hidden="true"><use href="#i-alert"/></svg>couldn't load job description — click to retry</div>`;
       return;
     }
     const { jd } = await resp.json();
     const html = jd && jd.trim()
-      ? `<div class="jd-body">${esc(jd)}</div>`
-      : `<div class="muted">no JD captured</div>`;
+      ? `<pre class="jf-snapshot">${esc(jd)}</pre>`
+      : `<p class="jf-dim">no JD captured</p>`;
     jdCache.set(id, html);
-    slot.innerHTML = html;
+    panel.innerHTML = html;
   } catch (e) {
-    slot.innerHTML = `<div class="muted">couldn't load job description — click to retry</div>`;
+    panel.innerHTML = `<div class="jf-notice"><svg aria-hidden="true"><use href="#i-alert"/></svg>couldn't load job description — click to retry</div>`;
   }
 }
 
-// D-07: the generated follow-up email surfaces in an inline expandable
-// read-back box, reusing toggleJd's structure verbatim — cache success/empty,
-// never cache the error branch so re-expand re-attempts (mirrors T-14-06).
-// The fetched email text is inserted via esc() before innerHTML — mitigates
-// stored-XSS from generated prose (T-15-06, mirrors T-14-05).
+// D-07: the generated follow-up email surfaces in an expandable read-back panel,
+// reusing loadJd's structure verbatim — cache success/empty, never cache the
+// error branch so re-expand re-attempts (mirrors T-14-06). The fetched email
+// text is inserted via esc() before innerHTML — mitigates stored-XSS from
+// generated prose (T-15-06, mirrors T-14-05).
 const emailCache = new Map();
 
-async function toggleEmail(id) {
-  const slot = document.getElementById(`email-slot-${id}`);
-  const arrow = document.getElementById(`email-arrow-${id}`);
-  const expanded = slot.style.display !== 'none';
-  if (expanded) {
-    slot.style.display = 'none';
-    arrow.textContent = '▾';
-    return;
-  }
-  slot.style.display = 'block';
-  arrow.textContent = '▴';
-
+async function loadEmail(id) {
+  const panel = document.getElementById(`email-panel-${id}`);
+  if (!panel) return;
   if (emailCache.has(id)) {
-    slot.innerHTML = emailCache.get(id);
+    panel.innerHTML = emailCache.get(id);
     return;
   }
-
-  slot.innerHTML = `<div class="muted">loading follow-up email…</div>`;
+  panel.innerHTML = `<p class="jf-dim">loading follow-up email…</p>`;
   try {
     const resp = await fetch(`/applications/${id}/email`);
     if (!resp.ok) {
-      slot.innerHTML = `<div class="muted">couldn't load follow-up email — click to retry</div>`;
+      panel.innerHTML = `<div class="jf-notice"><svg aria-hidden="true"><use href="#i-alert"/></svg>couldn't load follow-up email — click to retry</div>`;
       return;
     }
     const { email } = await resp.json();
     const html = email && email.trim()
-      ? `<div class="jd-body">${esc(email)}</div>`
-      : `<div class="muted">no email generated</div>`;
+      ? `<pre class="jf-snapshot">${esc(email)}</pre>`
+      : `<p class="jf-dim">no email generated</p>`;
     emailCache.set(id, html);
-    slot.innerHTML = html;
+    panel.innerHTML = html;
   } catch (e) {
-    slot.innerHTML = `<div class="muted">couldn't load follow-up email — click to retry</div>`;
+    panel.innerHTML = `<div class="jf-notice"><svg aria-hidden="true"><use href="#i-alert"/></svg>couldn't load follow-up email — click to retry</div>`;
   }
 }
+
+// The shared .jf-disc listener (plan 01) only flips aria-expanded/hidden. This
+// listener, scoped to #applications, does the actual fetch-on-first-expand for
+// the JD/email disclosures, keyed by data-jf-doc — never on collapse, never on
+// a cached re-expand. It reads aria-expanded BEFORE the shared listener
+// (attached on `document`) toggles it: this listener is attached on an
+// ANCESTOR of the button (the panel container), so during the bubble phase it
+// always runs before a listener attached on `document`, regardless of script
+// order.
+document.getElementById('applications').addEventListener('click', (e) => {
+  const btn = e.target.closest('.jf-disc[data-jf-doc]');
+  if (!btn) return;
+  const expanding = btn.getAttribute('aria-expanded') !== 'true';
+  if (!expanding) return;
+  const id = Number(btn.dataset.jfId);
+  if (btn.dataset.jfDoc === 'jd') loadJd(id);
+  else if (btn.dataset.jfDoc === 'email') loadEmail(id);
+});
 
 function esc(s) {
   return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));

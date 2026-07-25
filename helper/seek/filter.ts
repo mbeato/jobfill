@@ -2,9 +2,13 @@
 // classifyMetadata over the stored PostingRow (title/location/freshness) and classifyYoe
 // over fetched JD text — mirroring hn.ts's defensive-string-function + try/catch-fallback
 // style: never throw, never call the network/LLM, worst case survives to the next stage.
+// Phase 18 (CFG-01): both classifiers now read their title/location terms, age caps, and
+// YoE threshold from an injected CompiledCriteria object instead of module-scope literals;
+// this file compiles nothing and stays db-free (D-05 compiles once per sweep, in criteria.ts).
 
 import type { PostingRow } from './postings';
 import type { BoardRow } from './boards';
+import type { CompiledCriteria } from './criteria';
 
 // D-13 decision_reason codes, kept as literal constants (mirrors failures.ts's
 // VALID_STATUSES allowlist-enum style).
@@ -18,38 +22,26 @@ const REASON_YOE = 'rules:yoe';
 const REASON_BOARD_GRACE = 'rules:board-grace';
 
 // All regexes below are linear (no nested quantifiers) to stay ReDoS-safe (T-10-05):
-// title/location/JD text are untrusted third-party strings.
+// title/location/JD text are untrusted third-party strings. The injected patterns on
+// CompiledCriteria are built by criteria.ts from escaped literal terms (D-05), so "all
+// regexes here are linear" still holds, now by construction rather than by hand-authoring.
 
-// Bare seniority words that are unambiguous on their own.
-const BARE_SENIORITY_RE = /\b(senior|principal|sr\.?|vp|director|head of)\b/i;
 // "staff"/"lead" are ambiguous alone (e.g. "Member of Technical Staff" must survive),
 // so they only count as seniority markers when adjacent to an engineering role word.
+// D-04: these two stay authored here, not user-editable, because a flat term list
+// cannot express a phrase with optional interior words — they exist so "Staff Software
+// Engineer" is rejected while "Member of Technical Staff" survives. The
+// criteria.staffLeadBuiltins boolean is the on/off control, for the user who is
+// searching FOR staff roles.
 const STAFF_ENGINEER_RE = /\bstaff\s+(?:software\s+)?(?:engineer|developer)\b/i;
 const LEAD_ENGINEER_RE = /\blead\s+(?:software\s+)?(?:engineer|developer)\b|\bengineering\s+lead\b/i;
-
-const NON_ENGINEERING_RE =
-  /\b(product manager|product designer|designer|sales|recruiter|marketing|account executive|customer success)\b/i;
-
-// D-02 as amended 2026-07-22: NY and SF are both home markets; US-generic
-// location strings ("United States", "USA", "US") read as US-remote-friendly
-// and survive to the LLM rather than hard-rejecting.
-const NY_RE = /\b(new york|nyc|ny)\b/i;
-const SF_RE = /\b(san francisco|sf)\b/i;
-const US_GENERIC_RE = /\b(united states|usa|us)\b|\bu\.s\./i;
-const REMOTE_RE = /\bremote\b/i;
-// Work-mode strings some sources put in the location field ("Hybrid",
-// "In-Office", "Full-time") carry no geography — treat as ambiguous (pass to
-// the LLM), same as an empty location, instead of hard-rejecting.
-const WORK_MODE_ONLY_RE = /^(hybrid|in[- ]?office|on[- ]?site|full[- ]?time|part[- ]?time|contract|flexible)$/i;
-
-const MAX_STALE_DAYS = 2;
 
 // Aggregator sources whose posted_at is an INDEX time — when the aggregator
 // first observed the listing, not when the employer posted it. D-09 rightly
 // refuses to trust that as an employer post date, but it is still a valid
 // LOWER BOUND on how long the listing has been publicly visible, which is the
 // crowding signal that matters. So these get their own, far more generous cap
-// rather than bypassing the freshness filter entirely.
+// (criteria.maxStaleDaysIndexed) rather than bypassing the freshness filter entirely.
 //
 // Deliberately keyed on source, NOT on `posted_at_trusted === false`, because
 // that flag covers two incompatible semantics:
@@ -61,24 +53,6 @@ const MAX_STALE_DAYS = 2;
 // Greenhouse's real freshness clock is phase 17's first_seen_at.
 const INDEX_DATE_SOURCES = new Set(['simplify', 'getro']);
 
-// Sized to the ~9-day average application window in tech-sector postings
-// (Davis & Samaniego de la Parra, "Application Flows", NBER w32320 — 66M
-// applications across ~8M Dice postings: 39% of applications arrive within
-// 48h of posting, 54% within 96h, median posting duration 7 days). 7 days
-// tracks that median: past it, the applicant pool has overwhelmingly formed
-// and the window is typically closing.
-const MAX_STALE_DAYS_INDEXED = 7;
-
-// Phase 17 D-02: the first-seen aging cutoff for sources whose posted_at carries
-// zero age information (see FIRST_SEEN_SOURCES below). Its own constant, NOT
-// shared with MAX_STALE_DAYS (2) or MAX_STALE_DAYS_INDEXED (7): with
-// LLM_CAP() = 100 against a ~2,000-row FIFO backlog, a 2-day cutoff would
-// auto-reject postings because the LLM budget ran out before reaching them,
-// not because they are actually old. 7 days tracks the same application-window
-// research cited above for MAX_STALE_DAYS_INDEXED. Exported (unlike the two
-// existing caps) because Phase 18's CFG-01 exposes it as a user-editable setting.
-export const MAX_FIRST_SEEN_DAYS = 7;
-
 // D-01: the sources whose posted_at carries zero age information, so
 // postings.created_at (when jobfill first staged the row) is their only honest
 // freshness clock. Exactly these two:
@@ -86,9 +60,9 @@ export const MAX_FIRST_SEEN_DAYS = 7;
 //     pushes forward — carries no age information (see INDEX_DATE_SOURCES above).
 //   - yc: posted_at is NULL on every row.
 // jobright is excluded: posted_at_trusted is true and it is already capped at
-// MAX_STALE_DAYS. simplify/getro are excluded: their index date is a genuine,
+// criteria.maxStaleDays. simplify/getro are excluded: their index date is a genuine,
 // strictly-stricter lower bound than a first-seen cap could be, so they must
-// not gain a second, weaker clock on top of MAX_STALE_DAYS_INDEXED.
+// not gain a second, weaker clock on top of criteria.maxStaleDaysIndexed.
 const FIRST_SEEN_SOURCES = new Set(['greenhouse', 'yc']);
 
 // D-09: boards are harvested DURING a sweep but first polled on the NEXT
@@ -99,8 +73,11 @@ const FIRST_SEEN_SOURCES = new Set(['greenhouse', 'yc']);
 // day and let its whole backlog through — exactly the failure FILT-07 exists
 // to prevent. 72h was rejected as discarding two extra days of genuinely-new
 // postings. Named explicitly in HOURS (not days, unlike every other cap in
-// this file) to avoid a silent 24x unit-ambiguity bug. Exported for Phase
-// 18's CFG-01.
+// this file) to avoid a silent 24x unit-ambiguity bug. This window is
+// deliberately NOT user-editable (Phase 17 D-13, Phase 18 D-03) — setting it
+// to 0 would re-open the FILT-07 failure Phase 17 shipped to prevent,
+// measured live at roughly 1,855 undecided rows from boards added the
+// previous day.
 export const GRACE_WINDOW_HOURS = 48;
 
 // SQLite writes datetime('now') as 'YYYY-MM-DD HH:MM:SS' — UTC but with no zone
@@ -125,24 +102,32 @@ function parseStoredTs(value: unknown): number {
 // minimum/at-least phrasing ("minimum 3 years") without a separate pattern.
 const YOE_RE = /(\d+)\s*\+?\s*(?:years?|yrs?)/gi;
 
-export function classifyMetadata(posting: PostingRow): { reject: boolean; reason?: string } {
+export function classifyMetadata(posting: PostingRow, criteria: CompiledCriteria): { reject: boolean; reason?: string } {
   try {
     const title = String(posting?.title ?? '');
-    if (BARE_SENIORITY_RE.test(title) || STAFF_ENGINEER_RE.test(title) || LEAD_ENGINEER_RE.test(title)) {
-      return { reject: true, reason: REASON_TITLE };
-    }
-    if (NON_ENGINEERING_RE.test(title)) {
+    // A null regex means that rule is skipped entirely (D-06) — never treat null as
+    // "match all". criteria.staffLeadBuiltins gates the two adjacency-nuanced regexes.
+    if (
+      (criteria.seniorityRe !== null && criteria.seniorityRe.test(title)) ||
+      (criteria.staffLeadBuiltins &&
+        (STAFF_ENGINEER_RE.test(title) ||
+          LEAD_ENGINEER_RE.test(title))) ||
+      (criteria.nonEngineeringRe !== null && criteria.nonEngineeringRe.test(title))
+    ) {
       return { reject: true, reason: REASON_TITLE };
     }
 
     const location = String(posting?.location ?? '').trim();
+    // D-06 fail-open point: criteria.locationRe !== null is checked FIRST. An empty
+    // accepted-locations list compiles to a null locationRe, meaning location
+    // filtering is off — every posting reaches the precision-biased LLM stage. The
+    // strict reading (empty accept-list means accept nothing) would silently reject
+    // an entire sweep on rules:location, and rejection is permanent (Phase 9 D-14).
     if (
+      criteria.locationRe !== null &&
       location &&
-      !WORK_MODE_ONLY_RE.test(location) &&
-      !NY_RE.test(location) &&
-      !SF_RE.test(location) &&
-      !US_GENERIC_RE.test(location) &&
-      !REMOTE_RE.test(location)
+      (criteria.workModeOnlyRe === null || !criteria.workModeOnlyRe.test(location)) &&
+      !criteria.locationRe.test(location)
     ) {
       return { reject: true, reason: REASON_LOCATION };
     }
@@ -154,7 +139,15 @@ export function classifyMetadata(posting: PostingRow): { reject: boolean; reason
       const ts = Date.parse(postedAt);
       if (!Number.isNaN(ts)) {
         const ageDays = (Date.now() - ts) / (1000 * 60 * 60 * 24);
-        const cap = trusted ? MAX_STALE_DAYS : MAX_STALE_DAYS_INDEXED;
+        // criteria.maxStaleDaysIndexed (the generous cap for index-date sources) is
+        // sized to the ~9-day average application window in tech-sector postings
+        // (Davis & Samaniego de la Parra, "Application Flows", NBER w32320 — 66M
+        // applications across ~8M Dice postings: 39% of applications arrive within
+        // 48h of posting, 54% within 96h, median posting duration 7 days). 7 days
+        // tracks that median: past it, the applicant pool has overwhelmingly formed
+        // and the window is typically closing. Both caps are user-editable (CFG-01);
+        // this research is why the D-14 generic defaults keep 2 / 7.
+        const cap = trusted ? criteria.maxStaleDays : criteria.maxStaleDaysIndexed;
         if (ageDays > cap) {
           return { reject: true, reason: REASON_STALE };
         }
@@ -165,13 +158,25 @@ export function classifyMetadata(posting: PostingRow): { reject: boolean; reason
     // information — postings.created_at (when jobfill first staged the row) is
     // the only honest clock available. Fires across the whole to-decide
     // backlog, including postings the LLM never reached: a posting held
-    // MAX_FIRST_SEEN_DAYS without evaluation is stale by the time it would be
-    // evaluated, so backlog GC is the intended behavior, not a side effect.
+    // criteria.maxFirstSeenDays without evaluation is stale by the time it would
+    // be evaluated, so backlog GC is the intended behavior, not a side effect.
+    //
+    // Phase 17 D-02: this cap has its own constant, NOT shared with
+    // criteria.maxStaleDays (2) or criteria.maxStaleDaysIndexed (7): with
+    // LLM_CAP() = 100 against a ~2,000-row FIFO backlog, a 2-day cutoff would
+    // auto-reject postings because the LLM budget ran out before reaching them,
+    // not because they are actually old. 7 days tracks the same application-window
+    // research cited above for maxStaleDaysIndexed. Formerly exported from this
+    // file as MAX_FIRST_SEEN_DAYS specifically because Phase 18's CFG-01 was
+    // going to expose it as a user-editable setting — that claim was correct, and
+    // this is where it was fulfilled: the cap now arrives as
+    // criteria.maxFirstSeenDays. Unlike the GRACE_WINDOW_HOURS comment above, this
+    // one is not being corrected, it is being fulfilled.
     if (FIRST_SEEN_SOURCES.has(String(posting?.source ?? ''))) {
       const createdTs = parseStoredTs(posting?.created_at);
       if (!Number.isNaN(createdTs)) {
         const ageDays = (Date.now() - createdTs) / (1000 * 60 * 60 * 24);
-        if (ageDays > MAX_FIRST_SEEN_DAYS) {
+        if (ageDays > criteria.maxFirstSeenDays) {
           return { reject: true, reason: REASON_STALE };
         }
       }
@@ -190,7 +195,7 @@ export function classifyMetadata(posting: PostingRow): { reject: boolean; reason
       const updatedTs = Date.parse(posting.posted_at);
       if (!Number.isNaN(updatedTs)) {
         const ageDays = (Date.now() - updatedTs) / (1000 * 60 * 60 * 24);
-        if (ageDays > MAX_FIRST_SEEN_DAYS) {
+        if (ageDays > criteria.maxFirstSeenDays) {
           return { reject: true, reason: REASON_STALE };
         }
       }
@@ -253,12 +258,15 @@ export function classifyBoardGrace(
   }
 }
 
-export function classifyYoe(jdText: string): { reject: boolean; reason?: string } {
+export function classifyYoe(jdText: string, criteria: CompiledCriteria): { reject: boolean; reason?: string } {
   try {
+    // D-06/D-14: an unset threshold means the YoE rule is off — the JD is not
+    // scanned at all.
+    if (criteria.yoeThreshold === null) return { reject: false };
     const text = String(jdText ?? '');
     for (const match of text.matchAll(YOE_RE)) {
       const years = parseInt(match[1], 10);
-      if (!Number.isNaN(years) && years > 1) {
+      if (!Number.isNaN(years) && years > criteria.yoeThreshold) {
         return { reject: true, reason: REASON_YOE };
       }
     }

@@ -428,6 +428,186 @@
    reserved-for list does not include field-level validation. */
 .jf-scope .jf-input--invalid{border-style:dashed;border-color:var(--jf-rule-strong)}
 
+/* ── jf: chip group (plan 04 — shared by queue's lifecycle filter, and by
+   the filter chips the applications/seek surfaces add in later plans).
+   Chips pull left by 1px so the group reads as one segmented control. ──── */
+.jf-scope .jf-chips{display:flex;flex-wrap:wrap;gap:0;align-items:stretch}
+.jf-scope .jf-chip{
+  appearance:none;cursor:pointer;
+  display:inline-flex;align-items:center;gap:var(--jf-s2);
+  padding:var(--jf-s2) var(--jf-s4);
+  margin-right:calc(-1 * var(--jf-hair));
+  background:var(--jf-paper-cell);color:var(--jf-ink-2);
+  border:var(--jf-hair) solid var(--jf-rule-2);border-radius:var(--jf-r0);
+  font-family:var(--jf-mono);font-size:var(--jf-t-xs);line-height:var(--jf-lh-data);
+  transition:color var(--jf-dur-fast) var(--jf-ease-out),
+             background-color var(--jf-dur-fast) var(--jf-ease-out),
+             border-color var(--jf-dur-fast) var(--jf-ease-out);
+}
+.jf-scope .jf-chip:first-child{border-start-start-radius:var(--jf-r2);border-end-start-radius:var(--jf-r2)}
+.jf-scope .jf-chip:last-child{border-start-end-radius:var(--jf-r2);border-end-end-radius:var(--jf-r2);margin-right:0}
+.jf-scope .jf-chip:hover{color:var(--jf-ink);border-color:var(--jf-rule-strong);position:relative;z-index:1}
+.jf-scope .jf-chip:active{background:var(--jf-paper-sunk)}
+.jf-scope .jf-chip:focus-visible{outline:var(--jf-hair-2) solid var(--jf-focus);outline-offset:calc(-1 * var(--jf-hair-2));position:relative;z-index:2}
+.jf-scope .jf-chip[aria-pressed="true"]{background:var(--jf-paper-inv);color:var(--jf-ink-inv);border-color:var(--jf-paper-inv);position:relative;z-index:1}
+.jf-scope .jf-chip .n{font-weight:700;font-variant-numeric:tabular-nums}
+.jf-scope .jf-chip[aria-pressed="true"] .n{color:var(--jf-ink-inv)}
+
+/* ── jf: the grid (plan 04 — shared by queue, applications, library, failures
+   and runs; landed in full now so plans 05-08 do not each add a partial
+   copy). Fixed layout, rules on both axes, hard clip by default — the ONE
+   exception is the decision cell below, which must wrap, never truncate. ── */
+.jf-scope .jf-gridwrap{overflow-x:auto;border-bottom:var(--jf-hair) solid var(--jf-rule)}
+.jf-scope .jf-gridwrap--tall{
+  /* INTERIM (plan 04): the reference's real rule is a flex-fill (flex:1 1
+     auto on this same class, nested under main > [role=tabpanel]) against
+     the fixed-height flex body shell that only lands in plan 09.
+     Until that shell exists, a bare overflow:auto wrapper has no resolved
+     height and the sticky thead never engages, so this max-height stands in
+     — sized off the viewport, leaving room for the current heading and tab
+     strip. Plan 09 removes this rule and restores the reference's flex-fill
+     rule verbatim; plan 07 reuses this same interim fallback for the seek
+     grid. */
+  max-height:calc(100vh - 15rem);
+  overflow:auto;
+}
+.jf-scope .jf-grid{
+  width:100%;min-width:78rem;
+  border-collapse:separate;border-spacing:0;
+  table-layout:fixed;
+  background:var(--jf-paper-cell);
+  font-family:var(--jf-mono);font-size:var(--jf-t-sm);
+}
+.jf-scope .jf-grid thead th{
+  position:sticky;top:0;z-index:20;
+  background:var(--jf-paper-sunk);
+  text-align:left;vertical-align:middle;
+  padding:var(--jf-s2) var(--jf-s3);
+  font-family:var(--jf-mono);font-weight:400;font-size:var(--jf-t-xxs);
+  letter-spacing:var(--jf-track-wide);color:var(--jf-ink-3);
+  border-bottom:var(--jf-hair-2) solid var(--jf-rule-strong);
+  border-right:var(--jf-hair) solid var(--jf-rule);
+  white-space:nowrap;
+}
+.jf-scope .jf-grid thead th:last-child{border-right:0}
+.jf-scope .jf-th{display:inline-flex;align-items:center;gap:var(--jf-s1);min-height:var(--jf-t-lg)}
+.jf-scope .jf-th svg{width:var(--jf-sigil);height:var(--jf-sigil);color:var(--jf-ink-4);flex:none}
+.jf-scope .jf-grid tbody td{
+  padding:var(--jf-cell-y) var(--jf-s3);
+  vertical-align:top;
+  height:var(--jf-row-min);
+  color:var(--jf-ink);
+  border-bottom:var(--jf-hair) solid var(--jf-rule);
+  border-right:var(--jf-hair) solid var(--jf-rule);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  transition:background-color var(--jf-dur-fast) var(--jf-ease-out);
+}
+.jf-scope .jf-grid tbody td:last-child{border-right:0}
+.jf-scope .jf-row,.jf-scope .jf-detailrow{scroll-margin-block-start:var(--jf-appbar-h)}
+.jf-scope .jf-row:hover > td{background:var(--jf-paper-sunk)}
+.jf-scope .jf-row:focus-within > td{background:var(--jf-paper-sunk)}
+.jf-scope .jf-row--done > td{color:var(--jf-ink-3)}
+.jf-scope .jf-row--done .jf-verdict{color:var(--jf-ink-3);font-weight:400}
+
+/* row-number gutter, right-aligned like a spreadsheet */
+.jf-scope .jf-gut{
+  width:var(--jf-gutter-w);text-align:right;
+  color:var(--jf-ink-4);font-size:var(--jf-t-xxs);
+  background:var(--jf-paper-sunk);
+  position:relative;
+  font-variant-numeric:tabular-nums;
+}
+.jf-scope .jf-grid thead .jf-gut{text-align:right;letter-spacing:var(--jf-track-none)}
+.jf-scope .jf-row:hover .jf-gut{color:var(--jf-ink-2)}
+/* attention tick: a 3px amber bar on the gutter edge. never the ONLY signal,
+   always paired with the amber verdict badge in the decision cell. */
+.jf-scope .jf-row--attn .jf-gut::after{
+  content:'';position:absolute;inset-block:0;right:0;
+  width:var(--jf-tick);background:var(--jf-attn);
+}
+
+/* the signature move: verdict + criterion, split by a hairline, in one cell.
+   This is the ONE clip exception in the grid (19-UI-SPEC.md Table Grammar
+   rule 3): truncating the criterion would defeat the entire point of the
+   design, and a prior audit caught exactly that regression. */
+.jf-scope td.jf-decision-cell{white-space:normal}
+.jf-scope .jf-cell-decision{display:flex;align-items:flex-start;gap:var(--jf-s2);min-width:0}
+.jf-scope .jf-verdict{
+  font-weight:700;color:var(--jf-ink);flex:none;line-height:var(--jf-lh-data);
+  letter-spacing:var(--jf-track-tight);
+}
+.jf-scope .jf-verdict--attn{
+  color:var(--jf-attn-ink);background:var(--jf-attn-wash);
+  border:var(--jf-hair) solid var(--jf-attn-edge);border-radius:var(--jf-r1);
+  padding:0 var(--jf-s1);
+  display:inline-flex;align-items:center;gap:var(--jf-s1);
+}
+.jf-scope .jf-verdict--attn::before{
+  content:'';width:var(--jf-s1);height:var(--jf-s1);background:var(--jf-attn);flex:none;
+}
+.jf-scope .jf-verdict--muted{color:var(--jf-ink-3);font-weight:400}
+.jf-scope .jf-crit{
+  color:var(--jf-ink-3);font-size:var(--jf-t-xs);
+  padding-left:var(--jf-s2);
+  border-left:var(--jf-hair) solid var(--jf-rule-2);
+  flex:1 1 auto;min-width:0;align-self:stretch;
+  white-space:normal;overflow-wrap:anywhere;line-height:var(--jf-lh-data);
+}
+.jf-scope .jf-num{text-align:right;font-variant-numeric:tabular-nums}
+.jf-scope .jf-sub{
+  display:block;font-family:var(--jf-mono);font-size:var(--jf-t-xs);
+  color:var(--jf-ink-3);margin-top:var(--jf-s1);
+  overflow:hidden;text-overflow:ellipsis;
+}
+.jf-scope .jf-grid a{color:var(--jf-ink-2);text-decoration:underline;text-underline-offset:var(--jf-hair-2);text-decoration-color:var(--jf-rule-strong)}
+.jf-scope .jf-grid a:hover{color:var(--jf-ink);text-decoration-color:var(--jf-ink)}
+.jf-scope .jf-grid a:active{color:var(--jf-ink-2)}
+.jf-scope .jf-grid a:focus-visible{outline:var(--jf-hair-2) solid var(--jf-focus);outline-offset:var(--jf-hair)}
+.jf-scope .jf-acts{display:flex;gap:var(--jf-s1);flex-wrap:nowrap;overflow:visible}
+.jf-scope .jf-acts > .jf-btn{flex:none;padding-inline:var(--jf-s2)}
+.jf-scope td.jf-acts-cell{overflow:visible}
+
+/* expandable detail row + mono snapshot / key-value panel, shared by every
+   grid surface that needs a per-row disclosure. */
+.jf-scope .jf-detailrow > td{
+  padding:0;background:var(--jf-paper-sunk);
+  border-bottom:var(--jf-hair) solid var(--jf-rule-2);
+  overflow:visible;white-space:normal;
+}
+.jf-scope .jf-panel{
+  animation:jf-open var(--jf-dur-open) var(--jf-ease-out) both;
+  padding:var(--jf-s4) var(--jf-s5) var(--jf-s4) calc(var(--jf-gutter-w) + var(--jf-s3));
+}
+.jf-scope .jf-snapshot{
+  margin:0;font-family:var(--jf-mono);font-size:var(--jf-t-xs);
+  line-height:var(--jf-lh-data);color:var(--jf-ink-2);
+  background:var(--jf-paper-cell);
+  border:var(--jf-hair) solid var(--jf-rule);border-left:var(--jf-hair-3) solid var(--jf-rule-strong);
+  border-radius:var(--jf-r2);
+  padding:var(--jf-s3) var(--jf-s4);
+  max-height:var(--jf-snapmax);overflow:auto;white-space:pre-wrap;word-break:break-word;
+}
+.jf-scope .jf-panel-h{
+  font-family:var(--jf-mono);font-size:var(--jf-t-xxs);letter-spacing:var(--jf-track-wide);
+  color:var(--jf-ink-3);margin:0 0 var(--jf-s2);
+}
+.jf-scope .jf-kv{display:grid;grid-template-columns:minmax(0,10rem) minmax(0,1fr);gap:0}
+.jf-scope .jf-kv > dt,.jf-scope .jf-kv > dd{
+  margin:0;padding:var(--jf-s1) var(--jf-s3);
+  font-family:var(--jf-mono);font-size:var(--jf-t-xs);
+  border-bottom:var(--jf-hair) solid var(--jf-rule);
+}
+.jf-scope .jf-kv > dt{color:var(--jf-ink-3);border-right:var(--jf-hair) solid var(--jf-rule)}
+.jf-scope .jf-kv > dd{color:var(--jf-ink-2);overflow:hidden;text-overflow:ellipsis}
+
+/* past 1280px there is room to spend, and the criterion is what it gets
+   spent on. :root override, not a .jf-scope rule (D-03's four-exception
+   allowlist) — inert until a ported panel references --jf-col-decision,
+   exactly like the base token block. */
+@media (min-width:80rem){
+  :root{--jf-col-decision:24rem;--jf-col-decision-wide:26rem;--jf-col-page:15rem}
+}
+
 /* ── jf: responsive — the form stacks to label-above-field ───────────────── */
 @media (max-width:52rem){
   .jf-scope .jf-frow{grid-template-columns:minmax(0,1fr)}
@@ -500,10 +680,47 @@
     <button onclick="setTab('failures')" data-tabbtn="failures">failures</button>
     <button onclick="setTab('settings')" data-tabbtn="settings">settings</button>
   </nav>
-  <div id="queue" data-tab="queue">
-    <h2>posting queue</h2>
-    <div id="queueSummary"></div>
-    <div id="queueBody"></div>
+  <div id="queue" data-tab="queue" class="jf-scope">
+    <div class="jf-toolbar">
+      <div class="jf-count">
+        <span class="jf-count-n" id="qCountN">0</span>
+        <span class="jf-count-t">
+          <h2>posting queue</h2>
+          <p id="qCountSub"></p>
+        </span>
+      </div>
+      <div class="jf-chips" role="group" aria-label="lifecycle filter" id="qChips"></div>
+    </div>
+    <div class="jf-gridwrap jf-gridwrap--tall">
+      <table class="jf-grid" id="qGrid">
+        <caption class="jf-sr">posting queue: one row per posting the agent queued, with the verdict and the criterion that produced it</caption>
+        <colgroup>
+          <col style="width:var(--jf-gutter-w)">
+          <col style="width:var(--jf-col-decision)"><col style="width:10rem"><col><col style="width:6.5rem">
+          <col style="width:5rem"><col style="width:20rem">
+        </colgroup>
+        <thead>
+          <tr>
+            <th scope="col" class="jf-gut">#</th>
+            <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-enum"/></svg>status · criterion</span></th>
+            <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-text"/></svg>company</span></th>
+            <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-text"/></svg>role · posting</span></th>
+            <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-date"/></svg>added</span></th>
+            <th scope="col" class="jf-num"><span class="jf-th"><svg aria-hidden="true"><use href="#i-num"/></svg>fields</span></th>
+            <th scope="col"><span class="jf-th">actions</span></th>
+          </tr>
+        </thead>
+        <tbody id="queueBody"></tbody>
+      </table>
+    </div>
+    <div class="jf-empty" id="qEmptyAll" hidden>
+      <p>no postings queued yet</p>
+      <p>add a posting URL from the popup, or POST it to /queue, to start the queue.</p>
+    </div>
+    <div class="jf-empty" id="qEmpty" hidden>
+      <p>no rows match this filter</p>
+      <p>pick another lifecycle filter above, or add a posting URL from the extension popup.</p>
+    </div>
   </div>
   <div id="sweeps" data-tab="runs">
     <h2>sweeps</h2>

@@ -96,8 +96,10 @@ export function upsertBoard(
   return toRow(raw);
 }
 
-// D-04: a single parameterized UPDATE, no-op when the row doesn't exist (config-seed
-// tokens are not in `boards`; this must not throw for them). ok=true clears the failure
+// D-04: a single parameterized UPDATE, no-op when the row doesn't exist (a genuinely
+// unknown token — one purged by the blocklist path, or a token whose case does not
+// match its stored row, the known WR-01 case-sensitivity gap, deliberately not fixed
+// in this phase; this must not throw for them). ok=true clears the failure
 // streak — a board that answers is alive again. ok=false increments the streak and
 // refreshes dead_since on EVERY failure past the threshold (not only the first), which
 // is what rolls the DEAD_RECHECK_DAYS window forward so a permanently-dead board is
@@ -131,6 +133,16 @@ export function listActiveBoards(db: Database, ats?: string): BoardRow[] {
     (ats !== undefined ? ' AND ats = ?' : '') +
     ' ORDER BY token';
   const rows = (ats !== undefined ? db.query(sql).all(ats) : db.query(sql).all()) as Record<string, unknown>[];
+  return rows.map(toRow);
+}
+
+// D-05/D-07: every board, no liveness predicate — deliberately NOT listActiveBoards.
+// runFilterPromote (plan 17-03) loads this once per sweep to build the grace lookup
+// map, and a board that has been dead-marked still needs its first-poll backlog
+// suppressed. Filtering to active boards here would silently fail open on exactly
+// the dead boards whose backlog is most likely to be stale.
+export function listAllBoards(db: Database): BoardRow[] {
+  const rows = db.query('SELECT * FROM boards ORDER BY token').all() as Record<string, unknown>[];
   return rows.map(toRow);
 }
 

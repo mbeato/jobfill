@@ -5,6 +5,7 @@ import {
   upsertBoard,
   recordBoardResult,
   listActiveBoards,
+  listAllBoards,
   resolveEffectiveTokens,
   DEAD_AFTER,
   DEAD_RECHECK_DAYS,
@@ -114,6 +115,28 @@ test('recordBoardResult on an unknown (ats, token) does not throw and inserts no
   expect(() => recordBoardResult(db, 'greenhouse', 'never-inserted', false)).not.toThrow();
   const rows = db.query('SELECT * FROM boards').all();
   expect(rows.length).toBe(0);
+});
+
+test('listAllBoards on an empty table returns []', () => {
+  const db = makeDb();
+  expect(listAllBoards(db)).toEqual([]);
+});
+
+test('listAllBoards returns all rows ordered by token, across every ats value', () => {
+  const db = makeDb();
+  upsertBoard(db, { ats: 'ashby', token: 'zeta', source_of_discovery: 'simplify' });
+  upsertBoard(db, { ats: 'greenhouse', token: 'alpha', source_of_discovery: 'simplify' });
+  upsertBoard(db, { ats: 'lever', token: 'mid', source_of_discovery: 'getro' });
+  const tokens = listAllBoards(db).map(r => r.token);
+  expect(tokens).toEqual(['alpha', 'mid', 'zeta']);
+});
+
+test('listAllBoards includes a dead-marked board that listActiveBoards excludes', () => {
+  const db = makeDb();
+  upsertBoard(db, { ats: 'greenhouse', token: 'dead', source_of_discovery: 'simplify' });
+  for (let i = 0; i < DEAD_AFTER; i++) recordBoardResult(db, 'greenhouse', 'dead', false);
+  expect(listAllBoards(db).map(r => r.token)).toContain('dead');
+  expect(listActiveBoards(db, 'greenhouse').map(r => r.token)).not.toContain('dead');
 });
 
 test('resolveEffectiveTokens is config tokens union active boards rows, minus blocklist', () => {

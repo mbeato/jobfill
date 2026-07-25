@@ -2166,5 +2166,98 @@ loadBatch();
 loadSettings();
 loadProfileText();
 loadIdentity();
+
+/* ── jf: shared JS primitives ──────────────────────────────────────────────
+   Every ported surface (plans 02-09) consumes these directly. The existing
+   esc() helper above (helper/dashboard.html:404) is reused as-is -- it is
+   intentionally NOT redeclared here as a const, since that would throw over
+   the live function binding and blank the page. armOrConfirm/armState above
+   stay in place; queue and settings still depend on them until plans 02 and
+   04. ──────────────────────────────────────────────────────────────────── */
+const $ = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
+
+// Populated by each surface plan: key -> async (id, btn) => void. The
+// delegated .jf-armable listener below looks a handler up here on the
+// SECOND click (data-jf-action) and invokes it with (data-jf-id, btn).
+const JF_ACTIONS = {};
+
+// Populated by plan 09's syncStatusBar: dest -> () => ({ n, unit,
+// filterLabel, filter, sort }). Inert until then.
+const JF_STATUS = {};
+
+/* statuses that mean "needs your attention" -- the ONE job of the accent.
+   Per-surface vocabularies differ (queue statuses vs seek decisions vs
+   application statuses), so verdictHtml takes them as an optional third arg. */
+const ATTN = new Set(['failed', 'held']);
+const DONE = new Set(['submitted', 'rejected']);
+
+function verdictHtml(st, crit, vocab = { attn: ATTN, done: DONE }) {
+  const cls = vocab.attn.has(st) ? ' jf-verdict--attn' : vocab.done.has(st) ? ' jf-verdict--muted' : '';
+  return `<span class="jf-cell-decision"><span class="jf-verdict${cls}">${esc(st)}</span>` +
+         `<span class="jf-crit" title="${esc(crit)}">${esc(crit)}</span></span>`;
+}
+
+/* ── disclosures (delegated: rows, panels, breakdowns) ───────────────────── */
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('.jf-disc');
+  if (!btn) return;
+  const target = document.getElementById(btn.getAttribute('aria-controls'));
+  if (!target) return;
+  const open = btn.getAttribute('aria-expanded') === 'true';
+  btn.setAttribute('aria-expanded', String(!open));
+  target.hidden = open;
+});
+
+/* ── two-click armed confirm ──────────────────────────────────────────────
+   Native confirm() dies in the Playwright runner's browser, so destructive
+   acts arm instead. Zero layout shift: the armed label is always SHORTER than
+   the resting label and the width is pinned before the swap. The armed state
+   signals by INVERTING ink, never by color: this system owns no red, and
+   inversion survives both colour-blindness and forced-colors. A hairline
+   thread under the label scrubs away over the 4s window so the revert is
+   visible rather than surprising.
+   Second-click dispatch (closes PATTERNS.md landmine #2): the reference's
+   version only ever disarms on the second click and never fires a real
+   action. Here, if the button carries data-jf-action, look it up in
+   JF_ACTIONS and invoke it with (data-jf-id, btn) before disarming; a
+   rejected/thrown handler still disarms so the button never gets stuck
+   armed. If data-jf-action is absent, behave exactly like the reference
+   (disarm only) -- keeps the primitive usable for a pure UI arm. ────────── */
+const armTimers = new WeakMap();
+
+function disarm(btn) {
+  const t = armTimers.get(btn);
+  if (t) { clearTimeout(t); armTimers.delete(btn); }
+  btn.classList.remove('is-armed');
+  btn.textContent = btn.dataset.resting;
+  btn.style.minWidth = '';
+}
+
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('.jf-armable');
+  if (!btn) return;
+  if (armTimers.has(btn)) {
+    const action = btn.dataset.jfAction;
+    const handler = action ? JF_ACTIONS[action] : null;
+    if (handler) {
+      Promise.resolve(handler(btn.dataset.jfId, btn))
+        .catch((err) => console.error('jf-armable action failed', action, err))
+        .finally(() => disarm(btn));
+    } else {
+      disarm(btn);
+    }
+    return;   // second click commits (or disarms if no action registered)
+  }
+  for (const other of $$('.jf-armable.is-armed')) disarm(other);
+  btn.style.minWidth = `${btn.offsetWidth}px`;
+  btn.textContent = btn.dataset.armed;
+  btn.classList.add('is-armed');
+  const thread = document.createElement('span');
+  thread.className = 'jf-arm-thread';
+  thread.setAttribute('aria-hidden', 'true');
+  btn.appendChild(thread);
+  armTimers.set(btn, setTimeout(() => disarm(btn), 4000));
+});
 </script>
 </body>

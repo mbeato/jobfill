@@ -674,6 +674,22 @@ Bun.serve({
       if (pathname === '/' && req.method === 'GET') {
         return new Response(Bun.file(join(HERE, 'dashboard.html')), { headers: { 'content-type': 'text/html' } });
       }
+      // Self-hosted typefaces for the dashboard (Phase 19 / UI-01). dashboard.html
+      // references these relatively as fonts/*.woff2 and nothing served them, so
+      // every face 404'd and the mono/sans split — which carries meaning here,
+      // mono for machine facts and sans for prose — silently fell back to system
+      // fonts. Additive static route only: no existing endpoint or response shape
+      // changes. The filename is matched against a strict allowlist pattern rather
+      // than interpolated, so no traversal is reachable.
+      if (pathname.startsWith('/fonts/') && req.method === 'GET') {
+        const name = pathname.slice('/fonts/'.length);
+        if (!/^[a-z0-9-]+\.woff2$/.test(name)) return json({ error: 'not found' }, 404);
+        const fontPath = join(HERE, 'fonts', name);
+        if (!existsSync(fontPath)) return json({ error: 'not found' }, 404);
+        return new Response(Bun.file(fontPath), {
+          headers: { 'content-type': 'font/woff2', 'cache-control': 'public, max-age=31536000, immutable' },
+        });
+      }
       if (pathname === '/applications' && req.method === 'GET') {
         // D-08: explicit jd-free column list — SELECT * would silently ship the
         // multi-KB jd column into the list payload refetched on every load/patch.

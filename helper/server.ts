@@ -12,6 +12,7 @@ import { createApplicationsTable, insertApplication, updateApplicationStatus, de
 // Re-exported so it reads as "exported from server.ts" per the phase 15 plan.
 import { safeDocPath, safeOutDir } from './docpath';
 export { safeDocPath };
+import { mergeProfilePatch } from './profile-merge';
 import { mapViaCLI } from './mapping';
 import { normalizeUrl } from './seek/normalize';
 import { createPostingsTable, upsertPosting, listPostings, recordDecision, listPostingsToDecide } from './seek/postings';
@@ -965,6 +966,43 @@ Bun.serve({
         const profilePath = join(HERE, '..', 'profile.local.json');
         if (!existsSync(profilePath)) return json({ error: 'profile.local.json not found' }, 404);
         return json(JSON.parse(await Bun.file(profilePath).text()));
+      }
+      // PATCH /profile — merge-patch on contact/links/workAuth/eeo/answers
+      // only (D-11). The path is NEVER derived from request input — it is
+      // the same source expression GET /profile above uses, because
+      // runner-core.mjs:77 reads exactly this file on every runner start
+      // (D-02) and must never see anything else.
+      if (pathname === '/profile' && req.method === 'PATCH') {
+        const profilePath = join(HERE, '..', 'profile.local.json');
+        let body: unknown;
+        try {
+          body = await req.json();
+        } catch {
+          return json({ error: 'malformed profile patch' }, 400);
+        }
+        try {
+          // A malformed existing file is tolerated as the fresh-install case
+          // — mergeProfilePatch treats `undefined` as "no file yet".
+          let existing: unknown;
+          if (existsSync(profilePath)) {
+            try {
+              existing = JSON.parse(await Bun.file(profilePath).text());
+            } catch {
+              existing = undefined;
+            }
+          }
+          const merged = mergeProfilePatch(existing, body);
+          // Temp-file write + renameSync: a batch runner can be reading this
+          // exact file at the same moment (runner-core.mjs:77 reseeds on
+          // every start), and a partially-written JSON file would break a
+          // fill rather than degrade it. renameSync is already imported, so
+          // this atomic swap costs one extra line.
+          await Bun.write(profilePath + '.tmp', JSON.stringify(merged, null, 2));
+          renameSync(profilePath + '.tmp', profilePath);
+          return json(merged);
+        } catch (e) {
+          return json({ error: String((e as Error)?.message ?? e) }, 500);
+        }
       }
       // GET /settings/criteria — readCriteria coerces and falls back to the
       // D-14 generic defaults, so this route cannot 500 on a corrupt row.

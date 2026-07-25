@@ -122,8 +122,207 @@
   .settings-actions button.primary { border-color: #1565c0; color: #1565c0; font-weight: 600; }
   .settings-actions button.primary:hover { background: #1565c0; color: #fff; }
   .settings-actions button.armed { background: #d32f2f; color: #fff; border-color: #d32f2f; font-weight: 600; }
+
+/* ==== jf: begin ==== */
+/* ── jf: fonts ──────────────────────────────────────────────────────────── */
+@font-face{font-family:'JetBrains Mono';src:url('fonts/jbmono-400.woff2') format('woff2');font-weight:400;font-style:normal;font-display:swap}
+@font-face{font-family:'JetBrains Mono';src:url('fonts/jbmono-700.woff2') format('woff2');font-weight:700;font-style:normal;font-display:swap}
+@font-face{font-family:'IBM Plex Sans';src:url('fonts/plexsans-400.woff2') format('woff2');font-weight:400;font-style:normal;font-display:swap}
+@font-face{font-family:'IBM Plex Sans';src:url('fonts/plexsans-600.woff2') format('woff2');font-weight:600;font-style:normal;font-display:swap}
+
+/* ── jf: tokens ─────────────────────────────────────────────────────────── */
+:root{
+  /* paper: light-cool, near-white, low chroma. a precision instrument. */
+  --jf-paper:        oklch(0.986 0.003 250);
+  --jf-paper-cell:   oklch(0.998 0.001 250);
+  --jf-paper-sunk:   oklch(0.966 0.005 250);
+  --jf-paper-band:   oklch(0.940 0.007 250);
+  --jf-paper-inv:    oklch(0.255 0.014 255);
+
+  /* ink ramp. contrast vs paper: ink 12:1 · ink-2 6.9:1 · ink-3 4.7:1 ·
+     ink-4 3.1:1 (non-text / sigils only). */
+  --jf-ink:          oklch(0.255 0.014 255);
+  --jf-ink-2:        oklch(0.440 0.013 255);
+  --jf-ink-3:        oklch(0.560 0.012 255);
+  --jf-ink-4:        oklch(0.680 0.010 255);
+  --jf-ink-inv:      oklch(0.968 0.003 250);
+
+  --jf-rule:         oklch(0.905 0.006 250);
+  --jf-rule-2:       oklch(0.845 0.008 250);
+  --jf-rule-strong:  oklch(0.700 0.011 255);
+
+  /* the ONE accent. job: "needs your attention / held". nothing else.
+     mixed in OKLAB, never OKLCH: an oklch mix walks the hue ARC from amber
+     78deg to the cool paper 250deg, so a 20% amber wash renders CYAN. oklab
+     is rectangular, keeps the perceptual lightness, and stays amber. */
+  --jf-attn:         oklch(0.795 0.150 78);
+  --jf-attn-wash:    color-mix(in oklab, var(--jf-attn) 20%, var(--jf-paper-cell));
+  --jf-attn-edge:    color-mix(in oklab, var(--jf-attn) 58%, var(--jf-rule-2));
+  --jf-attn-ink:     oklch(0.330 0.060 62);
+
+  /* focus ring: ink pulled toward the accent hue via color-mix, so it can
+     never be confused with a hover tint or with the accent's own job. */
+  --jf-focus:        color-mix(in oklab, var(--jf-ink) 76%, var(--jf-attn));
+  --jf-select:       color-mix(in oklab, var(--jf-ink) 8%, var(--jf-paper-cell));
+
+  /* type: mono = machine-produced facts. sans = human prose. held everywhere. */
+  --jf-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+  --jf-sans: 'IBM Plex Sans', ui-sans-serif, sans-serif;
+  --jf-t-mega: clamp(2rem, 1.35rem + 2.1vw, 2.75rem);
+  --jf-t-xl:   1.3125rem;
+  --jf-t-lg:   1rem;
+  --jf-t-md:   0.8125rem;
+  --jf-t-sm:   0.75rem;
+  --jf-t-xs:   0.6875rem;
+  --jf-t-xxs:  0.625rem;
+  --jf-lh-tight: 1.02;
+  --jf-lh-data:  1.35;
+  --jf-lh-prose: 1.55;
+  --jf-track-tight: -0.022em;
+  --jf-track-none:  0em;
+  --jf-track-wide:  0.07em;
+
+  /* space */
+  --jf-s1: 0.25rem;  --jf-s2: 0.375rem; --jf-s3: 0.5rem;  --jf-s4: 0.75rem;
+  --jf-s5: 1rem;     --jf-s6: 1.5rem;   --jf-s7: 2rem;    --jf-s8: 3rem;
+
+  /* radii: tops out at 3px. nothing in this instrument is soft. */
+  --jf-r0: 0px; --jf-r1: 1px; --jf-r2: 2px; --jf-r3: 3px;
+
+  /* hairlines */
+  --jf-hair:  1px; --jf-hair-2: 2px; --jf-hair-3: 3px;
+
+  /* layered shadows: 4 stops, each ~doubling, all tinted toward ink not black */
+  --jf-shadow-sticky:
+    0 var(--jf-hair) 0 0 var(--jf-rule-2),
+    0 var(--jf-hair-2) var(--jf-hair-3) calc(-1 * var(--jf-hair-2)) color-mix(in oklab, var(--jf-ink) 9%, transparent),
+    0 var(--jf-s1) var(--jf-s2) calc(-1 * var(--jf-hair-3)) color-mix(in oklab, var(--jf-ink) 7%, transparent),
+    0 var(--jf-s3) var(--jf-s5) calc(-1 * var(--jf-s2)) color-mix(in oklab, var(--jf-ink) 5%, transparent);
+  --jf-shadow-raise:
+    0 var(--jf-hair) 0 0 var(--jf-rule),
+    0 var(--jf-hair-2) var(--jf-hair-2) calc(-1 * var(--jf-hair)) color-mix(in oklab, var(--jf-ink) 6%, transparent),
+    0 var(--jf-s2) var(--jf-s3) calc(-1 * var(--jf-s2)) color-mix(in oklab, var(--jf-ink) 5%, transparent),
+    0 var(--jf-s4) var(--jf-s6) calc(-1 * var(--jf-s3)) color-mix(in oklab, var(--jf-ink) 4%, transparent);
+
+  /* motion. static posture: chrome only. */
+  --jf-dur-fast: 110ms;
+  --jf-dur-base: 160ms;
+  --jf-dur-open: 210ms;
+  --jf-dur-arm:  4000ms;
+  --jf-ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --jf-ease-move: cubic-bezier(0.77, 0, 0.175, 1);
+  --jf-ease-scrub: linear;
+  --jf-lift: 3px;
+
+  /* metrics */
+  --jf-appbar-h: 2.875rem;
+  --jf-gutter-w: 2.875rem;
+  --jf-pad-x: clamp(0.75rem, 0.4rem + 1.2vw, 1.5rem);
+  --jf-cell-y: 0.4375rem;
+  --jf-row-min: 2.125rem;
+  --jf-stroke: 1.25;
+  --jf-sigil: 0.875rem;
+  --jf-gridmin: 12rem;
+  --jf-snapmax: 14rem;
+  --jf-field-max: 42rem;
+  /* the decision column carries the signature move, so it is the one column
+     that gets more room when there is room to give. */
+  --jf-col-decision: 18rem;
+  --jf-col-decision-wide: 20rem;
+  --jf-col-page: 12rem;
+  --jf-tick: 0.1875rem;
+}
+
+/* ── jf: motion ─────────────────────────────────────────────────────────── */
+@keyframes jf-open{
+  from{opacity:0;transform:translateY(calc(-1 * var(--jf-lift)))}
+  to{opacity:1;transform:translateY(0)}
+}
+@keyframes jf-arm-countdown{
+  from{transform:scaleX(1)}
+  to{transform:scaleX(0)}
+}
+
+@media (prefers-reduced-motion:reduce){
+  .jf-scope *,.jf-scope *::before,.jf-scope *::after{transition-duration:var(--jf-dur-fast)}
+  .jf-scope .jf-panel{animation:jf-open var(--jf-dur-fast) var(--jf-ease-out) both}
+  .jf-scope .jf-panel{transform:none}
+  .jf-scope .jf-disc svg{transition:none}
+  /* the arm countdown is FUNCTIONAL state (how long the confirm stays live),
+     so it is kept, not zeroed. */
+}
+@media (prefers-contrast:more){
+  :root{
+    --jf-rule:var(--jf-ink-3);
+    --jf-rule-2:var(--jf-ink-2);
+    --jf-rule-strong:var(--jf-ink);
+    --jf-ink-3:var(--jf-ink-2);
+    --jf-ink-4:var(--jf-ink-2);
+  }
+}
+@media (forced-colors:active){
+  .jf-scope .jf-chip,.jf-scope .jf-btn,.jf-scope .jf-input,.jf-scope .jf-select,.jf-scope .jf-check,.jf-scope .jf-tag,.jf-scope .jf-state{border:var(--jf-hair) solid ButtonText}
+  .jf-scope .jf-grid tbody td,.jf-scope .jf-grid thead th{border-color:CanvasText}
+  .jf-scope .jf-chip[aria-pressed="true"],.jf-scope .jf-btn.is-armed{background:Highlight;color:HighlightText;forced-color-adjust:none}
+  .jf-scope .jf-verdict--attn{border:var(--jf-hair) solid CanvasText}
+  .jf-scope .jf-row--attn .jf-gut::after{background:Highlight;forced-color-adjust:none}
+}
+
+/* ── jf: sprite hider (global — sits at body level outside every panel) ──── */
+.jf-sr{position:absolute;width:var(--jf-hair);height:var(--jf-hair);margin:calc(-1 * var(--jf-hair));padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0}
+/* ==== jf: end ==== */
 </style>
 <body>
+<!-- ── jf: icon set: one hand-authored geometric family. 16-unit box, currentColor,
+     stroke width from --jf-stroke. no emoji, no freehand beziers. ───────── -->
+<svg class="jf-sr" aria-hidden="true" focusable="false"><defs>
+  <symbol id="i-mark" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25">
+    <rect x="1.5" y="1.5" width="13" height="13" rx="1"/><path d="M1.5 5.5h13M5.5 5.5v9M10 9h4.5"/>
+  </symbol>
+  <symbol id="i-text" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25">
+    <path d="M3.5 4h9M8 4v8.5"/>
+  </symbol>
+  <symbol id="i-num" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25">
+    <path d="M6 2.5 4.5 13.5M11.5 2.5 10 13.5M2.5 6h11M2 10h11"/>
+  </symbol>
+  <symbol id="i-date" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25">
+    <rect x="2" y="3.5" width="12" height="11" rx="1"/><path d="M2 7h12M5.5 1.75v3M10.5 1.75v3"/>
+  </symbol>
+  <symbol id="i-enum" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25">
+    <rect x="2" y="3" width="12" height="10" rx="1"/><path d="M5 7.5 7 9.5 11 5.5"/>
+  </symbol>
+  <symbol id="i-link" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25">
+    <rect x="1.75" y="6" width="7" height="4" rx="2"/><rect x="7.25" y="6" width="7" height="4" rx="2"/>
+  </symbol>
+  <symbol id="i-chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25">
+    <path d="m6 3.5 5 4.5-5 4.5"/>
+  </symbol>
+  <symbol id="i-down" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25">
+    <path d="m3.5 6 4.5 5 4.5-5"/>
+  </symbol>
+  <symbol id="i-check" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25">
+    <path d="m3 8.5 3.5 3.5L13 4"/>
+  </symbol>
+  <symbol id="i-x" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25">
+    <path d="m4 4 8 8M12 4l-8 8"/>
+  </symbol>
+  <symbol id="i-run" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25">
+    <path d="M4 2.5 13 8l-9 5.5z" stroke-linejoin="round"/>
+  </symbol>
+  <symbol id="i-lock" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25">
+    <rect x="3" y="7" width="10" height="7" rx="1"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/>
+  </symbol>
+  <symbol id="i-pin" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25">
+    <path d="M8 9.5v4.5M4.5 9.5h7l-1-3v-4h-5v4z" stroke-linejoin="round"/>
+  </symbol>
+  <symbol id="i-alert" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25">
+    <rect x="2" y="2" width="12" height="12" rx="1"/><path d="M8 4.75v4.5M8 11.25v.5"/>
+  </symbol>
+  <symbol id="i-grid" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25">
+    <rect x="2" y="2" width="12" height="12" rx="1"/><path d="M2 6h12M2 10h12M6 2v12"/>
+  </symbol>
+</defs></svg>
+
   <h1>jobfill tracker</h1>
   <nav class="tabbar" id="tabbar">
     <button onclick="setTab('queue')" data-tabbtn="queue">queue<span class="tab-badge" id="tab-badge-queue"></span></button>

@@ -1351,6 +1351,106 @@ function refreshCriteriaHints() {
   if (summary) {
     summary.textContent = `active rules — seniority: ${c.seniorityTerms.length} terms · non-engineering: ${c.nonEngineeringTerms.length} terms · location: ${c.locationTerms.length} terms${c.locationTerms.length === 0 ? ' (off)' : ''} · work-mode-neutral: ${c.workModeOnlyTerms.length} terms · staff/lead heuristics: ${c.staffLeadBuiltins ? 'on' : 'off'} · age caps: ${c.maxStaleDays}/${c.maxStaleDaysIndexed}/${c.maxFirstSeenDays} days · yoe cap: ${c.yoeThreshold === null ? 'none' : c.yoeThreshold}`;
   }
+
+  // Belt-and-braces client-side validation (T-18-07-02): the real boundary
+  // is the server's identical validateCriteria; this only disables the
+  // button and shows the message inline before a request is ever sent.
+  const criteriaSaveBtn = document.getElementById('criteriaSaveBtn');
+  const violation = validateCriteriaForm(c);
+  if (violation) {
+    setHint(violation.field, violation.message, true);
+    criteriaSaveBtn.disabled = true;
+  } else {
+    criteriaSaveBtn.disabled = false;
+  }
+
+  // Keep the save button's resting label in sync with the narrowing state so
+  // the user sees "save — narrows criteria" before they click, rather than
+  // discovering it on the first click — but only when the button is not
+  // currently armed, or the label swap would fight armOrConfirm's revert.
+  if (criteriaSaveBtn && !criteriaSaveBtn.classList.contains('armed')) {
+    criteriaSaveBtn.textContent = isNarrowing(c, criteriaSnapshot) ? 'save — narrows criteria' : 'save search criteria';
+  }
+}
+
+// isNarrowing implements the UI contract's four conditions: these are exactly
+// the changes that can cause a previously-surviving posting to be
+// permanently rejected on the next sweep (Phase 9 D-14 — a re-discovery
+// upsert never revives a rejected row). Clearing a list, raising a cap, or
+// turning the toggle off are all strictly more permissive and therefore safe
+// on a single click. A null `prev` (the snapshot never loaded) is treated as
+// narrowing — the conservative direction.
+function isNarrowing(next, prev) {
+  if (!prev) return true;
+  for (const field of CRITERIA_CAP_FIELDS) {
+    if (next[field] < prev[field]) return true;
+  }
+  if (prev.yoeThreshold === null && next.yoeThreshold !== null) return true;
+  if (prev.yoeThreshold !== null && next.yoeThreshold !== null && next.yoeThreshold < prev.yoeThreshold) return true;
+  for (const field of CRITERIA_TERM_FIELDS) {
+    if (prev[field].length === 0 && next[field].length >= 1) return true;
+  }
+  if (prev.staffLeadBuiltins === false && next.staffLeadBuiltins === true) return true;
+  return false;
+}
+
+// validateCriteriaForm returns the FIRST violation found as { field, message },
+// or null when the form is valid — using the exact strings the endpoint
+// returns (helper/seek/criteria.ts's validateCriteria) so the client and
+// server can never disagree (T-18-07-02).
+function validateCriteriaForm(c) {
+  for (const field of CRITERIA_TERM_FIELDS) {
+    const list = c[field];
+    if (list.length > 50) return { field, message: 'too many terms — max 50' };
+    for (const term of list) {
+      if (term.length > 60) return { field, message: `"${term}" is too long — max 60 characters` };
+    }
+  }
+  for (const field of CRITERIA_CAP_FIELDS) {
+    const n = c[field];
+    if (!Number.isFinite(n) || n < 1 || n > 365) return { field, message: 'must be between 1 and 365 days' };
+  }
+  if (c.yoeThreshold !== null && (!Number.isFinite(c.yoeThreshold) || c.yoeThreshold < 0 || c.yoeThreshold > 50)) {
+    return { field: 'yoeThreshold', message: 'must be between 0 and 50, or left blank for no cap' };
+  }
+  return null;
+}
+
+function showCriteriaSaveError(msg) {
+  const errorEl = document.getElementById('criteriaSaveError');
+  if (!errorEl) return;
+  errorEl.innerHTML = esc(`couldn't save — ${msg}`);
+  errorEl.classList.add('rule-error');
+}
+
+async function saveCriteria() {
+  const next = readCriteriaForm();
+  if (validateCriteriaForm(next)) return;
+
+  if (isNarrowing(next, criteriaSnapshot)) {
+    if (!armOrConfirm('criteria-save', 'criteriaSaveBtn', 'confirm?', 'save — narrows criteria')) return;
+  }
+
+  try {
+    const resp = await fetch('/settings/criteria', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(next),
+    });
+    if (!resp.ok) {
+      const respBody = await resp.json().catch(() => ({}));
+      showCriteriaSaveError(respBody.error || `HTTP ${resp.status}`);
+      return;
+    }
+    const errorEl = document.getElementById('criteriaSaveError');
+    if (errorEl) {
+      errorEl.textContent = '';
+      errorEl.classList.remove('rule-error');
+    }
+    await loadSettings();
+  } catch (e) {
+    showCriteriaSaveError(String(e?.message || e));
+  }
 }
 
 // Tab navigation: one visible group at a time, persisted in the URL hash so a

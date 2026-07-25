@@ -1805,7 +1805,7 @@ function renderCriteria(c) {
       <p class="jf-summary-b" id="ruleSummary"></p>
     </div>
     <div class="jf-saverow">
-      <button class="jf-btn jf-btn--primary" type="button" id="criteriaSaveBtn" onclick="saveCriteria()">save search criteria</button>
+      <button class="jf-btn jf-btn--primary" type="button" id="criteriaSaveBtn" data-armed="confirm?" data-resting="save search criteria" data-jf-action="settings.saveCriteria">save search criteria</button>
       <p class="jf-help">narrowing a rule asks for a second click, because a posting rejected by the next sweep is rejected permanently.</p>
     </div>
     <div id="criteriaSaveError"></div>`;
@@ -1851,12 +1851,17 @@ function refreshCriteriaHints() {
   const violation = validateCriteriaForm(c);
   criteriaSaveBtn.disabled = !!violation;
 
-  // Keep the save button's resting label in sync with the narrowing state so
-  // the user sees "save — narrows criteria" before they click, rather than
-  // discovering it on the first click — but only when the button is not
-  // currently armed, or the label swap would fight armOrConfirm's revert.
-  if (criteriaSaveBtn && !criteriaSaveBtn.classList.contains('armed')) {
-    criteriaSaveBtn.textContent = isNarrowing(c, criteriaSnapshot) ? 'save — narrows criteria' : 'save search criteria';
+  // Keep the save button's resting label AND its armable-ness in sync with
+  // the narrowing state so the user sees "save — narrows criteria" and gets
+  // the two-click gate before they click, rather than discovering it on the
+  // first click — but only when the button is not currently armed, or the
+  // swap would fight the delegated .jf-armable listener's 4s revert.
+  if (criteriaSaveBtn && !criteriaSaveBtn.classList.contains('is-armed')) {
+    const narrowing = isNarrowing(c, criteriaSnapshot);
+    criteriaSaveBtn.classList.toggle('jf-armable', narrowing);
+    criteriaSaveBtn.dataset.resting = narrowing ? 'save — narrows criteria' : 'save search criteria';
+    criteriaSaveBtn.dataset.armed = 'confirm?';
+    criteriaSaveBtn.textContent = criteriaSaveBtn.dataset.resting;
   }
 }
 
@@ -1869,14 +1874,36 @@ document.getElementById('settingsCriteriaBody').addEventListener('input', (e) =>
 document.getElementById('settingsCriteriaBody').addEventListener('change', (e) => {
   if (e.target.id === 'crit-builtins') refreshCriteriaHints();
 });
+// The save button's non-narrowing single-click path: when the button does
+// NOT carry .jf-armable, the shared delegated .jf-armable listener ignores
+// it entirely, so this fires saveCriteria() directly on one click. The
+// narrowing path (button carries .jf-armable) is handled entirely by that
+// shared listener + JF_ACTIONS['settings.saveCriteria'], registered below
+// the shared JS primitives once JF_ACTIONS exists.
+document.getElementById('settingsCriteriaBody').addEventListener('click', (e) => {
+  const btn = e.target.closest('#criteriaSaveBtn');
+  if (!btn || btn.classList.contains('jf-armable')) return;
+  saveCriteria();
+});
 
-// isNarrowing implements the UI contract's four conditions: these are exactly
-// the changes that can cause a previously-surviving posting to be
-// permanently rejected on the next sweep (Phase 9 D-14 — a re-discovery
-// upsert never revives a rejected row). Clearing a list, raising a cap, or
-// turning the toggle off are all strictly more permissive and therefore safe
-// on a single click. A null `prev` (the snapshot never loaded) is treated as
+// isNarrowing implements the UI contract's conditions: these are exactly the
+// changes that can cause a previously-surviving posting to be permanently
+// rejected on the next sweep (Phase 9 D-14 — a re-discovery upsert never
+// revives a rejected row). Clearing a list, raising a cap, or turning the
+// toggle off are all strictly more permissive and therefore safe on a
+// single click. A null `prev` (the snapshot never loaded) is treated as
 // narrowing — the conservative direction.
+//
+// WR-01 fix (19-CONTEXT.md D-06, 18-REVIEW.md): the term-list check below is
+// a directional SET DIFFERENCE, not a length comparison, and the direction
+// depends on which kind of list the field is. seniorityTerms /
+// nonEngineeringTerms / workModeOnlyTerms are REJECT lists — narrowing means
+// a term was ADDED (next has one prev didn't, so more titles get rejected).
+// locationTerms is the one ACCEPT list — narrowing means a term was REMOVED
+// (prev had one next doesn't, so a posting that matched only the removed
+// term now fails the accept check where it previously passed). A
+// same-length swap (one term out, one in) is narrowing under both
+// directions and was invisible to the old 0-length-only check this replaces.
 function isNarrowing(next, prev) {
   if (!prev) return true;
   for (const field of CRITERIA_CAP_FIELDS) {
@@ -1884,9 +1911,13 @@ function isNarrowing(next, prev) {
   }
   if (prev.yoeThreshold === null && next.yoeThreshold !== null) return true;
   if (prev.yoeThreshold !== null && next.yoeThreshold !== null && next.yoeThreshold < prev.yoeThreshold) return true;
-  for (const field of CRITERIA_TERM_FIELDS) {
-    if (prev[field].length === 0 && next[field].length >= 1) return true;
+  const REJECT_LIST_FIELDS = ['seniorityTerms', 'nonEngineeringTerms', 'workModeOnlyTerms'];
+  for (const field of REJECT_LIST_FIELDS) {
+    const prevSet = new Set(prev[field]);
+    if (next[field].some((term) => !prevSet.has(term))) return true;
   }
+  const nextLocationSet = new Set(next.locationTerms);
+  if (prev.locationTerms.some((term) => !nextLocationSet.has(term))) return true;
   if (prev.staffLeadBuiltins === false && next.staffLeadBuiltins === true) return true;
   return false;
 }
@@ -1913,20 +1944,23 @@ function validateCriteriaForm(c) {
   return null;
 }
 
+// showCriteriaSaveError renders an amber .jf-notice (19-UI-SPEC.md Safety
+// Contracts §2: save-error copy has no red — the system owns no error
+// color at all, not only for the fail-open case). The message string is
+// unchanged from the pre-port copy.
 function showCriteriaSaveError(msg) {
   const errorEl = document.getElementById('criteriaSaveError');
   if (!errorEl) return;
-  errorEl.innerHTML = esc(`couldn't save — ${msg}`);
-  errorEl.classList.add('rule-error');
+  errorEl.innerHTML = `<div class="jf-notice"><svg aria-hidden="true"><use href="#i-alert"/></svg>${esc(`couldn't save — ${msg}`)}</div>`;
 }
 
+// saveCriteria: validate first (no-op if invalid), then PATCH, then reload
+// on success or show an inline error. Arming/confirming is the save
+// button's own job now (refreshCriteriaHints + the shared delegated
+// .jf-armable listener), so this function no longer arms anything itself.
 async function saveCriteria() {
   const next = readCriteriaForm();
   if (validateCriteriaForm(next)) return;
-
-  if (isNarrowing(next, criteriaSnapshot)) {
-    if (!armOrConfirm('criteria-save', 'criteriaSaveBtn', 'confirm?', 'save — narrows criteria')) return;
-  }
 
   try {
     const resp = await fetch('/settings/criteria', {
@@ -1940,10 +1974,7 @@ async function saveCriteria() {
       return;
     }
     const errorEl = document.getElementById('criteriaSaveError');
-    if (errorEl) {
-      errorEl.textContent = '';
-      errorEl.classList.remove('rule-error');
-    }
+    if (errorEl) errorEl.innerHTML = '';
     await loadSettings();
   } catch (e) {
     showCriteriaSaveError(String(e?.message || e));
@@ -2455,6 +2486,20 @@ document.addEventListener('click', (e) => {
   thread.setAttribute('aria-hidden', 'true');
   btn.appendChild(thread);
   armTimers.set(btn, setTimeout(() => disarm(btn), 4000));
+});
+
+// Plan 02: registers the criteria narrowing-save path for the delegated
+// .jf-armable second-click dispatch above (JF_ACTIONS must exist first,
+// hence this lives here rather than in the criteria section itself), and
+// the settings status-bar fact for plan 09's syncStatusBar (inert until
+// then).
+JF_ACTIONS['settings.saveCriteria'] = () => saveCriteria();
+JF_STATUS.settings = () => ({
+  n: termCount(),
+  unit: 'terms',
+  filterLabel: 'across',
+  filter: '4 rules',
+  sort: 'unsaved edits are <b>not applied</b>',
 });
 </script>
 </body>

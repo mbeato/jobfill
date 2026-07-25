@@ -64,6 +64,45 @@ const INDEX_DATE_SOURCES = new Set(['simplify', 'getro']);
 // and the window is typically closing.
 const MAX_STALE_DAYS_INDEXED = 7;
 
+// Phase 17 D-02: the first-seen aging cutoff for sources whose posted_at carries
+// zero age information (see FIRST_SEEN_SOURCES below). Its own constant, NOT
+// shared with MAX_STALE_DAYS (2) or MAX_STALE_DAYS_INDEXED (7): with
+// LLM_CAP() = 100 against a ~2,000-row FIFO backlog, a 2-day cutoff would
+// auto-reject postings because the LLM budget ran out before reaching them,
+// not because they are actually old. 7 days tracks the same application-window
+// research cited above for MAX_STALE_DAYS_INDEXED. Exported (unlike the two
+// existing caps) because Phase 18's CFG-01 exposes it as a user-editable setting.
+export const MAX_FIRST_SEEN_DAYS = 7;
+
+// D-01: the sources whose posted_at carries zero age information, so
+// postings.created_at (when jobfill first staged the row) is their only honest
+// freshness clock. Exactly these two:
+//   - greenhouse: posted_at is job.updated_at, a MODIFICATION time that an edit
+//     pushes forward — carries no age information (see INDEX_DATE_SOURCES above).
+//   - yc: posted_at is NULL on every row.
+// jobright is excluded: posted_at_trusted is true and it is already capped at
+// MAX_STALE_DAYS. simplify/getro are excluded: their index date is a genuine,
+// strictly-stricter lower bound than a first-seen cap could be, so they must
+// not gain a second, weaker clock on top of MAX_STALE_DAYS_INDEXED.
+const FIRST_SEEN_SOURCES = new Set(['greenhouse', 'yc']);
+
+// SQLite writes datetime('now') as 'YYYY-MM-DD HH:MM:SS' — UTC but with no zone
+// designator. A bare Date.parse on that string resolves it as LOCAL time,
+// introducing a whole-timezone-offset error. This helper detects the SQLite
+// shape and normalizes it to an explicit UTC ISO string before parsing;
+// anything else (e.g. a real ISO-8601 string from a third-party API) falls
+// back to plain Date.parse unchanged. Used identically by the first-seen aging
+// check below and by classifyBoardGrace — the one case PATTERNS.md permits a
+// shared helper in this file, since both read the same SQLite-format columns
+// (postings.created_at, boards.first_seen_at).
+function parseStoredTs(value: unknown): number {
+  const s = String(value ?? '');
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(s)) {
+    return Date.parse(`${s.replace(' ', 'T')}Z`);
+  }
+  return Date.parse(s);
+}
+
 // Captures a leading integer immediately before "year(s)"/"yr(s)" (optionally with a
 // trailing "+"), which covers plain ("3 years"), plus ("5+ years"), and
 // minimum/at-least phrasing ("minimum 3 years") without a separate pattern.
@@ -100,6 +139,41 @@ export function classifyMetadata(posting: PostingRow): { reject: boolean; reason
         const ageDays = (Date.now() - ts) / (1000 * 60 * 60 * 24);
         const cap = trusted ? MAX_STALE_DAYS : MAX_STALE_DAYS_INDEXED;
         if (ageDays > cap) {
+          return { reject: true, reason: REASON_STALE };
+        }
+      }
+    }
+
+    // D-01/D-04: first-seen aging for sources whose posted_at carries no age
+    // information — postings.created_at (when jobfill first staged the row) is
+    // the only honest clock available. Fires across the whole to-decide
+    // backlog, including postings the LLM never reached: a posting held
+    // MAX_FIRST_SEEN_DAYS without evaluation is stale by the time it would be
+    // evaluated, so backlog GC is the intended behavior, not a side effect.
+    if (FIRST_SEEN_SOURCES.has(String(posting?.source ?? ''))) {
+      const createdTs = parseStoredTs(posting?.created_at);
+      if (!Number.isNaN(createdTs)) {
+        const ageDays = (Date.now() - createdTs) / (1000 * 60 * 60 * 24);
+        if (ageDays > MAX_FIRST_SEEN_DAYS) {
+          return { reject: true, reason: REASON_STALE };
+        }
+      }
+    }
+
+    // D-03: greenhouse's posted_at (= job.updated_at) is a lower bound on age
+    // in exactly one direction. updated_at >= posted_at always, so an OLD
+    // updated_at is honest proof the listing is at least that old — but a
+    // RECENT updated_at proves nothing (an edit pushes it forward) and must
+    // never be treated as evidence of freshness. The value is used only in
+    // the direction where it is provably true, never the reverse (Phase 9
+    // D-07, no fabricated dates). posted_at here is a real ISO-8601 string
+    // from the Greenhouse API, not the SQLite format, so plain Date.parse
+    // applies (not parseStoredTs).
+    if (String(posting?.source ?? '') === 'greenhouse' && posting?.posted_at) {
+      const updatedTs = Date.parse(posting.posted_at);
+      if (!Number.isNaN(updatedTs)) {
+        const ageDays = (Date.now() - updatedTs) / (1000 * 60 * 60 * 24);
+        if (ageDays > MAX_FIRST_SEEN_DAYS) {
           return { reject: true, reason: REASON_STALE };
         }
       }

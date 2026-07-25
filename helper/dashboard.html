@@ -4,8 +4,6 @@
 <style>
   body { font: 14px/1.5 system-ui, sans-serif; max-width: 1100px; margin: 24px auto; padding: 0 16px; color: #222; }
   h1 { font-size: 20px; }
-  .filters button { margin-right: 6px; padding: 4px 10px; cursor: pointer; border: 1px solid #ccc; background: #fff; border-radius: 4px; }
-  .filters button.active { background: #222; color: #fff; border-color: #222; }
   table { width: 100%; border-collapse: collapse; margin-top: 12px; }
   th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #eee; vertical-align: top; }
   th { font-size: 12px; text-transform: uppercase; color: #888; }
@@ -15,11 +13,6 @@
   h2 { font-size: 16px; font-weight: 600; line-height: 1.2; margin-top: 32px; }
   .s-queued { color: #999; } .s-filling { color: #e65100; } .s-filled { color: #2e7d32; }
   .s-failed { color: #d32f2f; } .s-reviewed { color: #1565c0; } .s-submitted { color: #2e7d32; font-weight: 600; }
-  .d-queued { color: #2e7d32; }
-  .d-rejected { color: #999; }
-  .d-held { color: #e65100; }
-  .seek-actions button { margin-right: 8px; padding: 4px 10px; cursor: pointer; border: 1px solid #ccc; background: #fff; border-radius: 4px; }
-  .decision-toggle { color: #1565c0; cursor: pointer; }
   .sweep-actions button { margin-right: 8px; padding: 4px 10px; cursor: pointer; border: 1px solid #ccc; background: #fff; border-radius: 4px; }
   .s-running { color: #e65100; } .s-ok { color: #2e7d32; }
   .sweep-toggle { color: #1565c0; cursor: pointer; }
@@ -717,7 +710,33 @@
     <div class="jf-toolbar">
       <div class="jf-chips" role="group" aria-label="decision filter" id="seekFilters"></div>
     </div>
-    <div id="seekBody"></div>
+    <div class="jf-gridwrap jf-gridwrap--tall">
+      <table class="jf-grid" id="seekGrid">
+        <caption class="jf-sr">seek decisions: every posting the agent judged, with the criterion that decided it</caption>
+        <colgroup>
+          <col style="width:var(--jf-gutter-w)"><col style="width:6.5rem"><col style="width:11rem"><col><col style="width:7rem"><col style="width:var(--jf-col-decision-wide)"><col style="width:9rem">
+        </colgroup>
+        <thead>
+          <tr>
+            <th scope="col" class="jf-gut">#</th>
+            <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-date"/></svg>fetched</span></th>
+            <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-text"/></svg>company</span></th>
+            <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-text"/></svg>title</span></th>
+            <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-text"/></svg>source</span></th>
+            <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-enum"/></svg>decision · criterion</span></th>
+            <th scope="col"><span class="jf-th">action</span></th>
+          </tr>
+        </thead>
+        <tbody id="seekBody"></tbody>
+      </table>
+    </div>
+    <div class="jf-empty" id="seekEmptyAll" hidden>
+      <p>no postings decided yet</p>
+      <p>run a seek sweep (`bun run seek`) to discover and filter postings.</p>
+    </div>
+    <div class="jf-empty" id="seekEmpty" hidden>
+      <p>no postings match this filter</p>
+    </div>
   </div>
   <div id="applications" data-tab="applications" class="jf-scope">
     <div class="jf-toolbar">
@@ -1552,28 +1571,48 @@ async function loadPostings() {
   renderPostings(postingsRows);
 }
 
-// Translates a stored decision_reason code into the operator-facing copy — never render
-// a raw code (UI-SPEC Reason Label Map). The llm: branches carry an untrusted
-// LLM-derived one-liner about third-party JD content, so it's esc()-escaped here.
-function reasonLabel(code) {
-  if (!code) return '—';
-  if (code === 'rules:location') return 'rejected — not NY/SF-based or remote-friendly';
-  if (code === 'rules:title') return 'rejected — title outside target roles';
-  if (code === 'rules:yoe') return 'rejected — requires more experience than target (incl. seniority-marker titles)';
-  if (code === 'rules:stale') return 'rejected — posted more than 2 days ago';
-  if (code === 'rules:board-grace') return 'rejected — new board, first poll skipped to avoid queueing its backlog';
-  if (code.startsWith('llm:not-relevant')) {
-    return `not relevant — ${esc(code.replace(/^llm:not-relevant\s*—\s*/, ''))}`;
+// The signature move's criterion string — the machine code first (the
+// auditable fact this design exists to surface), then a `·`-separated human
+// detail, derived ONLY from the row's own stored decision_reason. Never
+// invented: an unrecognised code falls through with no detail clause at all
+// (09-CONTEXT D-14 — a rejection is permanent, so the reason must be real).
+// The llm: branches carry an untrusted LLM-derived one-liner about
+// third-party JD content; verdictHtml() esc()'s the WHOLE returned string
+// (code + detail together) before it ever reaches the DOM, so the one-liner
+// is escaped exactly as it was before, just as part of one larger esc() call
+// instead of its own.
+function critOf(code) {
+  if (!code) return null;
+  if (code === 'rules:location') return `${code} · not NY/SF-based or remote-friendly`;
+  if (code === 'rules:title') return `${code} · title outside target roles`;
+  if (code === 'rules:yoe') return `${code} · requires more experience than target (incl. seniority-marker titles)`;
+  if (code === 'rules:stale') return `${code} · posted more than 2 days ago`;
+  if (code === 'rules:board-grace') return `${code} · new board, first poll skipped to avoid queueing its backlog`;
+  if (code === 'queued: manual') return `${code} · queued manually by the operator`;
+  if (code === 'held:jd-fetch-error') return `${code} · could not fetch job description · will retry next sweep`;
+  if (code === 'held:llm-error') return `${code} · LLM check failed · will retry next sweep`;
+  if (code.startsWith('llm:not-relevant')) return `llm:not-relevant · ${code.replace(/^llm:not-relevant\s*—\s*/, '')}`;
+  if (code.startsWith('llm:relevant')) return `llm:relevant · ${code.replace(/^llm:relevant\s*—\s*/, '')}`;
+  if (code.startsWith('dedupe:')) return `${code} · already queued or applied`;
+  if (code.startsWith('rules:')) return `${code} · did not match target criteria`;
+  return code;
+}
+
+// 'unscored' joins 'rejected' in the muted/receded vocab -- both the
+// reference's own demo row (Tessellate, id 9) and 19-UI-SPEC's signature-move
+// section ("--jf-verdict--muted (rejected/unscored/receded states)") treat it
+// as muted, not the plan action text's literal two-key example.
+const SEEK_VOCAB = { attn: new Set(['held']), done: new Set(['rejected', 'unscored']) };
+// verdictHtml (plan 01) always renders a .jf-crit span; a null decision_reason
+// (a decision with no derivable criterion) is genuinely absent here, so wrap
+// it rather than fabricate a criterion just to have something to show —
+// mirrors queueVerdictHtml/failureVerdictHtml's same wrapper need.
+function seekVerdictHtml(verdict, crit) {
+  if (crit === null) {
+    const cls = SEEK_VOCAB.attn.has(verdict) ? ' jf-verdict--attn' : SEEK_VOCAB.done.has(verdict) ? ' jf-verdict--muted' : '';
+    return `<span class="jf-cell-decision"><span class="jf-verdict${cls}">${esc(verdict)}</span></span>`;
   }
-  if (code.startsWith('llm:relevant')) {
-    return `relevant — ${esc(code.replace(/^llm:relevant\s*—\s*/, ''))}`;
-  }
-  if (code === 'queued: manual') return 'queued manually by the operator';
-  if (code === 'held:jd-fetch-error') return 'held: could not fetch job description — will retry next sweep';
-  if (code === 'held:llm-error') return 'held: LLM check failed — will retry next sweep';
-  if (code.startsWith('dedupe:')) return 'duplicate — already queued or applied';
-  if (code.startsWith('rules:')) return 'rejected — did not match target criteria';
-  return esc(code);
+  return verdictHtml(verdict, crit, SEEK_VOCAB);
 }
 
 // lastSweep's numeric counts (fetched/rejected/held/queued/byCriterion/deduped)
@@ -1632,53 +1671,69 @@ document.getElementById('seekFilters').addEventListener('click', (e) => {
   renderPostings(postingsRows);
 });
 
-function renderPostings(rows) {
-  const body = document.getElementById('seekBody');
-  if (!rows.length) {
-    body.innerHTML = `
-      <div class="muted">no postings decided yet</div>
-      <div class="muted" style="font-size: 12px">run a seek sweep (\`bun run seek\`) to discover and filter postings.</div>`;
-    return;
-  }
-  const shown = seekFilter === 'all' ? rows
+// Defaults to the live postingsRows for JF_STATUS.runs' out-of-render-cycle
+// reads, but renderPostings(rows) below always passes its OWN rows argument
+// through explicitly -- renderPostings must stay a pure function of its
+// argument (no fetch, no write) so a console-injected fixture array (UI-04
+// verification) renders without touching postingsRows or the database.
+function visibleSeekRows(rows = postingsRows) {
+  return seekFilter === 'all' ? rows
     : seekFilter === 'unscored' ? rows.filter(r => r.decision == null)
     : rows.filter(r => r.decision === seekFilter);
-  if (!shown.length) {
-    body.innerHTML = `<div class="muted">no postings match this filter</div>`;
-    return;
-  }
-  body.innerHTML = `
-    <table>
-      <thead><tr><th>date</th><th>company / role</th><th>source</th><th>decision</th><th>reason</th><th>action</th></tr></thead>
-      <tbody>
-        ${shown.map(p => {
-          const decisionClass = DECISION_VALUES.has(p.decision) ? `d-${p.decision}` : 'muted';
-          const decisionLabel = p.decision ? esc(p.decision) : '—';
-          return `
-            <tr>
-              <td class="muted">${(p.fetched_at || '').slice(0, 10)}</td>
-              <td><strong>${esc(p.company)}</strong> · ${esc(p.title)}</td>
-              <td>${esc(p.source)}</td>
-              <td><span class="${decisionClass}">${decisionLabel}</span></td>
-              <td class="muted">${reasonLabel(p.decision_reason)}</td>
-              <td class="seek-actions">
-                ${p.decision === 'rejected' || p.decision === 'held' ? `<button onclick="queueReject(${p.id})">queue anyway</button>` : ''}
-              </td>
-            </tr>`;
-        }).join('')}
-      </tbody>
-    </table>`;
 }
 
-// Additive/promotive override (D-16) — no native confirmation dialog, matching
-// the non-destructive "mark reviewed" button. Reloads first so the two re-renders
-// don't wipe an inserted notice (mirrors triggerFill's reload-then-notify order).
+// D-04: render every row. No slice, no cap, no pagination, no virtualisation --
+// this is the largest table in the product by row count, and the signature
+// move (verdict + criterion, never truncated) matters most here (09-CONTEXT
+// D-14: a rejected posting is never revived by re-discovery, so the reason it
+// was rejected has to stay visible without a click).
+function renderPostings(rows) {
+  const emptyAll = document.getElementById('seekEmptyAll');
+  const emptyFiltered = document.getElementById('seekEmpty');
+  // TWO distinct empty states (item 32): no postings decided yet vs the
+  // active filter matches none of them. Collapsing them into one is feature loss.
+  const noRowsAtAll = rows.length === 0;
+  emptyAll.hidden = !noRowsAtAll;
+  if (noRowsAtAll) {
+    document.getElementById('seekGrid').hidden = true;
+    emptyFiltered.hidden = true;
+    document.getElementById('seekBody').innerHTML = '';
+    return;
+  }
+  const shown = visibleSeekRows(rows);
+  emptyFiltered.hidden = shown.length > 0;
+  document.getElementById('seekGrid').hidden = shown.length === 0;
+  document.getElementById('seekBody').innerHTML = shown.map((p, i) => {
+    // Allowlist the stored decision BEFORE it drives any class or button branch
+    // (item 28, T-19-05): an unrecognized/absent value falls back to 'unscored'
+    // rather than reach a class attribute raw.
+    const verdict = DECISION_VALUES.has(p.decision) ? p.decision : 'unscored';
+    const crit = critOf(p.decision_reason);
+    const attn = verdict === 'held';
+    return `
+      <tr class="jf-row${attn ? ' jf-row--attn' : ''}">
+        <td class="jf-gut">${i + 1}</td>
+        <td>${esc((p.fetched_at || '').slice(0, 10))}</td>
+        <td>${esc(p.company)}</td>
+        <td>${esc(p.title)}</td>
+        <td class="jf-dim">${esc(p.source)}</td>
+        <td class="jf-decision-cell">${seekVerdictHtml(verdict, crit)}</td>
+        <td class="jf-acts-cell">${verdict === 'rejected' || verdict === 'held' ? `<span class="jf-acts"><button class="jf-btn jf-btn--quiet" type="button" onclick="queueReject(${p.id})">queue anyway</button></span>` : ''}</td>
+      </tr>`;
+  }).join('');
+}
+
+// Additive/promotive override (D-16) — deliberately no armed two-click
+// confirmation, matching the non-destructive "mark reviewed" button: this can
+// only ADD a posting to the queue, never reject or delete. Reloads first so
+// the two re-renders don't wipe an inserted notice (mirrors triggerFill's
+// reload-then-notify order).
 async function queueReject(id) {
   const resp = await (await fetch(`/postings/${id}/promote`, { method: 'POST' })).json();
   await loadPostings();
   await loadQueue();
   if (resp && resp.promoted === false) {
-    document.getElementById('seekBody').insertAdjacentHTML('afterbegin', `<div class="muted">already queued or applied</div>`);
+    document.getElementById('seek').insertAdjacentHTML('afterbegin', `<div class="jf-notice"><svg aria-hidden="true"><use href="#i-alert"/></svg>already queued or applied</div>`);
   }
 }
 
@@ -3035,6 +3090,17 @@ JF_STATUS.failures = () => ({
   unit: 'rows',
   filterLabel: 'filter',
   filter: 'all',
+  sort: 'sorted by <b>most recent</b>',
+});
+
+// Plan 07: seek decisions' status-bar fact for plan 09's syncStatusBar (inert
+// until then) -- lives here for the same JF_STATUS-must-exist-first reason as
+// every registration above.
+JF_STATUS.runs = () => ({
+  n: visibleSeekRows().length,
+  unit: 'rows',
+  filterLabel: 'filter',
+  filter: seekFilter,
   sort: 'sorted by <b>most recent</b>',
 });
 </script>

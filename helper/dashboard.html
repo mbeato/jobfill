@@ -13,10 +13,7 @@
   h2 { font-size: 16px; font-weight: 600; line-height: 1.2; margin-top: 32px; }
   .s-queued { color: #999; } .s-filling { color: #e65100; } .s-filled { color: #2e7d32; }
   .s-failed { color: #d32f2f; } .s-reviewed { color: #1565c0; } .s-submitted { color: #2e7d32; font-weight: 600; }
-  .sweep-actions button { margin-right: 8px; padding: 4px 10px; cursor: pointer; border: 1px solid #ccc; background: #fff; border-radius: 4px; }
   .s-running { color: #e65100; } .s-ok { color: #2e7d32; }
-  .sweep-toggle { color: #1565c0; cursor: pointer; }
-  .auth-badge { color: #d32f2f; font-weight: 600; margin: 4px 0; }
   .batch-actions button { margin-right: 8px; padding: 4px 10px; cursor: pointer; border: 1px solid #ccc; background: #fff; border-radius: 4px; }
   .batch-toggle { color: #1565c0; cursor: pointer; }
   /* tab navigation: sticky header, underline tabs (distinct from filter chips) */
@@ -682,11 +679,39 @@
       <p>pick another lifecycle filter above, or add a posting URL from the extension popup.</p>
     </div>
   </div>
-  <div id="sweeps" data-tab="runs">
-    <h2>sweeps</h2>
-    <div class="sweep-actions"><button onclick="triggerSweep()">Trigger sweep now</button></div>
+  <div id="sweeps" data-tab="runs" class="jf-scope">
+    <div class="jf-band">
+      <h3>sweeps</h3>
+      <p>discovery runs, newest first</p>
+      <div class="jf-tools">
+        <button class="jf-btn jf-btn--primary" type="button" onclick="triggerSweep()"><svg aria-hidden="true"><use href="#i-run"/></svg>trigger sweep now</button>
+      </div>
+    </div>
     <div id="sweepsBadges"></div>
-    <div id="sweepsBody"></div>
+    <div class="jf-gridwrap">
+      <table class="jf-grid" id="sweepsGrid">
+        <caption class="jf-sr">sweep run history: every discovery run, newest first</caption>
+        <colgroup>
+          <col style="width:var(--jf-gutter-w)"><col style="width:12rem"><col style="width:7rem"><col style="width:6rem"><col><col style="width:13rem"><col style="width:8rem">
+        </colgroup>
+        <thead>
+          <tr>
+            <th scope="col" class="jf-gut">#</th>
+            <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-date"/></svg>started</span></th>
+            <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-enum"/></svg>trigger</span></th>
+            <th scope="col" class="jf-num"><span class="jf-th"><svg aria-hidden="true"><use href="#i-num"/></svg>duration</span></th>
+            <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-text"/></svg>headline</span></th>
+            <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-enum"/></svg>status · criterion</span></th>
+            <th scope="col"><span class="jf-th">detail</span></th>
+          </tr>
+        </thead>
+        <tbody id="sweepsBody"></tbody>
+      </table>
+    </div>
+    <div class="jf-empty" id="sweepsEmpty" hidden>
+      <p>no sweeps run yet</p>
+      <p>trigger one above, or wait for the daily scheduled sweep.</p>
+    </div>
   </div>
   <div id="batch" data-tab="runs">
     <h2>batch fills</h2>
@@ -1753,13 +1778,15 @@ async function loadSweeps() {
 }
 
 // Fire-and-poll (D-10): mirrors triggerFill's reload-first-then-notify
-// order. A 409 (already running) is a friendly notice, not a thrown error.
+// order. A 409 (already running) is a friendly notice, not a thrown error,
+// rendered as a .jf-notice at the top of the #sweeps panel (mirrors
+// triggerFill/queueReject's notice target, not the grid body).
 async function triggerSweep() {
   const resp = await fetch('/sweep', { method: 'POST' });
   const body = await resp.json();
   await loadSweeps();
   if (resp.status === 409) {
-    document.getElementById('sweepsBody').insertAdjacentHTML('afterbegin', `<div class="muted">sweep already running (run ${Number(body.runId) || ''})</div>`);
+    document.getElementById('sweeps').insertAdjacentHTML('afterbegin', `<div class="jf-notice"><svg aria-hidden="true"><use href="#i-alert"/></svg>sweep already running (run ${Number(body.runId) || ''})</div>`);
     return;
   }
   if (resp.ok && body.id) pollSweep(body.id);
@@ -1792,6 +1819,12 @@ function fmtDuration(startedAt, finishedAt, status) {
 // finished sweep's detail no longer lists it, which this always reflects
 // since it only ever reads the single latest finished row, never accumulates
 // across runs.
+// D-16: derivation unchanged — only the single latest FINISHED run's
+// detail.sidecar.authExpired is ever read (rows are newest-first), so a
+// badge for a source appears until a later finished sweep's detail no
+// longer lists it. Now renders as an amber .jf-notice banner (one of the
+// five reserved uses of the accent) with the contract's ·-separated
+// phrasing instead of the legacy em-dash form.
 function renderAuthBadges(rows) {
   const el = document.getElementById('sweepsBadges');
   const latestFinished = rows.find(r => r.status !== 'running' && r.detail);
@@ -1802,52 +1835,63 @@ function renderAuthBadges(rows) {
   }
   const labels = { yc: 'YC', jobright: 'Jobright' };
   el.innerHTML = authExpired
-    .map(source => `<div class="auth-badge">${esc(labels[source] || source)} session expired — re-login (\`node scripts/seek-sidecar.mjs --login\`)</div>`)
+    .map(source => `<div class="jf-notice"><svg aria-hidden="true"><use href="#i-alert"/></svg>${esc(labels[source] || source)} session expired · re-login with <code>node scripts/seek-sidecar.mjs --login</code></div>`)
     .join('');
 }
 
+// Sweeps' vocabulary: only 'failed' needs the attention accent; nothing is
+// muted (unlike queue/seek, a finished 'ok' sweep is the unremarkable common
+// case, not a done/closed state).
+const SWEEP_VOCAB = { attn: new Set(['failed']), done: new Set([]) };
+
+// D-04: render every row — no slice, no cap, no pagination. The
+// sampleTokenErrors cap inside renderSweepSourceDetail below is a
+// pre-existing, unrelated diagnostic-detail cap (see this plan's
+// preserve-legacy-cap note), not a row-rendering cap.
 function renderSweeps(rows) {
   renderAuthBadges(rows);
-  const body = document.getElementById('sweepsBody');
-  if (!rows.length) {
-    body.innerHTML = `
-      <div class="muted">no sweeps run yet</div>
-      <div class="muted" style="font-size: 12px">trigger one above, or wait for the daily scheduled sweep.</div>`;
+  const empty = rows.length === 0;
+  document.getElementById('sweepsEmpty').hidden = !empty;
+  document.getElementById('sweepsGrid').hidden = empty;
+  if (empty) {
+    document.getElementById('sweepsBody').innerHTML = '';
     return;
   }
-  body.innerHTML = `
-    <table>
-      <thead><tr><th>started</th><th>trigger</th><th>duration</th><th>headline</th><th>status</th><th>detail</th></tr></thead>
-      <tbody>
-        ${rows.map(r => {
-          const statusClass = SWEEP_STATUSES.has(r.status) ? `s-${r.status}` : 'muted';
-          const h = r.detail?.headline;
-          // Stored detail is untrusted at this innerHTML sink — coerce to
-          // numbers, never interpolate raw (mirrors the batch headline).
-          // tokenErrors / boardsAdded are phase-16 fields (D-03 per-token
-          // isolation, D-11/D-14 slug harvest). Appended only when non-zero so
-          // an ordinary sweep's summary stays as short as it was before.
-          const extra = h
-            ? `${Number(h.tokenErrors) ? ` · ${Number(h.tokenErrors)} token errors` : ''}${Number(h.boardsAdded) ? ` · ${Number(h.boardsAdded)} boards added` : ''}`
-            : '';
-          const headline = h ? `${Number(h.fetched) || 0} fetched · ${Number(h.rejected) || 0} rejected · ${Number(h.deduped) || 0} deduped · ${Number(h.held) || 0} held · ${Number(h.queued) || 0} queued${extra}` : '—';
-          return `
-            <tr>
-              <td class="muted">${esc((r.started_at || '').replace('T', ' ').slice(0, 19))}</td>
-              <td>${esc(r.trigger)}</td>
-              <td>${fmtDuration(r.started_at, r.finished_at, r.status)}</td>
-              <td>${headline}</td>
-              <td><span class="${statusClass}">${esc(r.status)}</span></td>
-              <td>
-                ${r.detail ? `
-                  <div class="sweep-toggle" onclick="toggleSweepDetail(${r.id})">per-source <span id="sarrow-${r.id}">▾</span></div>
-                  <div id="sdetail-${r.id}" style="display:none">${renderSweepSourceDetail(r.detail)}</div>
-                ` : `<span class="muted">in progress…</span>`}
-              </td>
-            </tr>`;
-        }).join('')}
-      </tbody>
-    </table>`;
+  document.getElementById('sweepsBody').innerHTML = rows.map((r, i) => {
+    // SWEEP_STATUSES allowlist before status reaches the verdict's class
+    // logic (T-19-05) — mirrors QUEUE_STATUSES/FAILURE_STATUSES precedent.
+    const status = SWEEP_STATUSES.has(r.status) ? r.status : 'unknown';
+    // The signature-move criterion, derived only from data on the row: the
+    // trigger for a finished run, or 'running' while in progress — never
+    // fabricated.
+    const crit = status === 'running' ? 'sweep:running' : `sweep:${r.trigger}`;
+    const h = r.detail?.headline;
+    // Stored detail is untrusted at this innerHTML sink — coerce to
+    // numbers, never interpolate raw (mirrors the batch headline).
+    // tokenErrors / boardsAdded are phase-16 fields (D-03 per-token
+    // isolation, D-11/D-14 slug harvest). Appended only when non-zero so
+    // an ordinary sweep's summary stays as short as it was before.
+    const extra = h
+      ? `${Number(h.tokenErrors) ? ` · ${Number(h.tokenErrors)} token errors` : ''}${Number(h.boardsAdded) ? ` · ${Number(h.boardsAdded)} boards added` : ''}`
+      : '';
+    const headline = h ? `${Number(h.fetched) || 0} fetched · ${Number(h.rejected) || 0} rejected · ${Number(h.deduped) || 0} deduped · ${Number(h.held) || 0} held · ${Number(h.queued) || 0} queued${extra}` : '—';
+    const main = `
+      <tr class="jf-row${status === 'failed' ? ' jf-row--attn' : ''}">
+        <td class="jf-gut">${i + 1}</td>
+        <td>${esc((r.started_at || '').replace('T', ' ').slice(0, 19))}</td>
+        <td class="jf-dim">${esc(r.trigger)}</td>
+        <td class="jf-num">${fmtDuration(r.started_at, r.finished_at, r.status)}</td>
+        <td>${headline}</td>
+        <td class="jf-decision-cell">${verdictHtml(status, crit, SWEEP_VOCAB)}</td>
+        <td>${r.detail ? `<button class="jf-disc" type="button" aria-expanded="false" aria-controls="sw-${r.id}"><svg aria-hidden="true"><use href="#i-chev"/></svg>per-source</button>` : `<span class="jf-dim">in progress…</span>`}</td>
+      </tr>`;
+    const detail = r.detail ? `
+      <tr class="jf-detailrow" id="sw-${r.id}" hidden><td colspan="7"><div class="jf-panel">
+        <p class="jf-panel-h">per-source fetch log</p>
+        ${renderSweepSourceDetail(r.detail)}
+      </div></td></tr>` : '';
+    return main + detail;
+  }).join('');
 }
 
 // detail.fetch is server-composed SourceResult[]; per-source error strings
@@ -1857,7 +1901,9 @@ function renderSweepSourceDetail(detail) {
   // Per-source tokenErrors/boardsAdded (phase 16). Same untrusted-detail rule
   // as the headline: coerce counts to numbers, esc() any string that reaches
   // this innerHTML sink. sampleTokenErrors carries attacker-influenceable
-  // upstream text, so each token is escaped individually.
+  // upstream text, so each token is escaped individually. Legacy cap
+  // preserved verbatim (pre-existing, not a D-04 violation — see this plan's
+  // preserve-legacy-cap note).
   const fetchLines = (detail.fetch || [])
     .map(s => {
       const tokenErrors = Number(s.tokenErrors) || 0;
@@ -1865,23 +1911,24 @@ function renderSweepSourceDetail(detail) {
       const sample = tokenErrors && Array.isArray(s.sampleTokenErrors) && s.sampleTokenErrors.length
         ? ` (${s.sampleTokenErrors.slice(0, 5).map(e => esc(String(e?.token ?? ''))).join(', ')})`
         : '';
-      return `<div class="muted" style="padding-left:4px">${esc(s.source)}: ${Number(s.fetched) || 0} fetched${s.upserted != null ? `, ${Number(s.upserted) || 0} upserted` : ''}${tokenErrors ? `, ${tokenErrors} token errors${sample}` : ''}${boardsAdded ? `, ${boardsAdded} boards added` : ''}${s.error ? ` — error: ${esc(s.error)}` : ''}</div>`;
+      return `${esc(s.source)}: ${Number(s.fetched) || 0} fetched${s.upserted != null ? `, ${Number(s.upserted) || 0} upserted` : ''}${tokenErrors ? `, ${tokenErrors} token errors${sample}` : ''}${boardsAdded ? `, ${boardsAdded} boards added` : ''}${s.error ? ` — error: ${esc(s.error)}` : ''}`;
     })
-    .join('');
+    .join('\n');
   const bc = detail.filter?.byCriterion || {};
-  const criterionLine = `<div class="muted" style="padding-left:4px">rejected by criterion: location ${bc.location ?? 0} · title ${bc.title ?? 0} · yoe ${bc.yoe ?? 0} · stale ${bc.stale ?? 0} · grace ${bc.grace ?? 0} · llm ${bc.llm ?? 0}</div>`;
   const sidecarLine = detail.sidecar
-    ? `<div class="muted" style="padding-left:4px">sidecar: ${detail.sidecar.ran ? 'ran' : 'did not run'}${detail.sidecar.error ? ` — error: ${esc(detail.sidecar.error)}` : ''}</div>`
+    ? `sidecar: ${detail.sidecar.ran ? 'ran' : 'did not run'}${detail.sidecar.error ? ` — error: ${esc(detail.sidecar.error)}` : ''}`
     : '';
-  return fetchLines + criterionLine + sidecarLine;
-}
-
-function toggleSweepDetail(id) {
-  const body = document.getElementById(`sdetail-${id}`);
-  const arrow = document.getElementById(`sarrow-${id}`);
-  const expanded = body.style.display !== 'none';
-  body.style.display = expanded ? 'none' : 'block';
-  arrow.textContent = expanded ? '▾' : '▴';
+  return `
+    <pre class="jf-snapshot">${fetchLines}</pre>
+    <dl class="jf-kv">
+      <dt>location</dt><dd>${bc.location ?? 0}</dd>
+      <dt>title</dt><dd>${bc.title ?? 0}</dd>
+      <dt>yoe</dt><dd>${bc.yoe ?? 0}</dd>
+      <dt>stale</dt><dd>${bc.stale ?? 0}</dd>
+      <dt>board grace</dt><dd>${bc.grace ?? 0}</dd>
+      <dt>llm</dt><dd>${bc.llm ?? 0}</dd>
+    </dl>
+    ${sidecarLine ? `<p class="jf-sub">${sidecarLine}</p>` : ''}`;
 }
 
 // BATCH-02/BATCH-03: batch fills run-history — mirrors the sweeps section's

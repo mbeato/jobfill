@@ -365,6 +365,92 @@
 .jf-scope .jf-mono{font-family:var(--jf-mono);font-variant-numeric:tabular-nums}
 .jf-scope .jf-dim{color:var(--jf-ink-3)}
 .jf-scope .jf-prose{font-family:var(--jf-sans);color:var(--jf-ink)}
+
+/* ── jf: toolbar + mega count (settings band header, plan 02) ───────────── */
+.jf-scope .jf-toolbar{display:flex;flex-wrap:wrap;align-items:flex-end;gap:var(--jf-s5) var(--jf-s6);padding:var(--jf-s6) var(--jf-pad-x) var(--jf-s4);border-bottom:var(--jf-hair) solid var(--jf-rule)}
+.jf-scope .jf-count{display:flex;align-items:baseline;gap:var(--jf-s3);min-width:0}
+.jf-scope .jf-count-n{font-family:var(--jf-mono);font-weight:700;font-size:var(--jf-t-mega);line-height:var(--jf-lh-tight);letter-spacing:var(--jf-track-tight);color:var(--jf-ink);font-variant-numeric:tabular-nums}
+.jf-scope .jf-count-t{display:flex;flex-direction:column;gap:var(--jf-s1);padding-bottom:var(--jf-s1)}
+.jf-scope .jf-count-t h2{margin:0;font-family:var(--jf-sans);font-weight:600;font-size:var(--jf-t-lg);letter-spacing:var(--jf-track-tight);line-height:var(--jf-lh-tight);color:var(--jf-ink)}
+.jf-scope .jf-count-t p{margin:0;font-family:var(--jf-mono);font-size:var(--jf-t-xs);color:var(--jf-ink-3);line-height:var(--jf-lh-data)}
+
+/* ── jf: band group strips ────────────────────────────────────────────── */
+.jf-scope .jf-band{display:flex;align-items:center;gap:var(--jf-s3);padding:var(--jf-s2) var(--jf-pad-x);background:var(--jf-paper-band);border-top:var(--jf-hair) solid var(--jf-rule-2);border-bottom:var(--jf-hair) solid var(--jf-rule-2)}
+.jf-scope .jf-band h3{margin:0;font-family:var(--jf-mono);font-weight:700;font-size:var(--jf-t-xs);letter-spacing:var(--jf-track-wide);color:var(--jf-ink)}
+.jf-scope .jf-band p{margin:0;font-family:var(--jf-sans);font-size:var(--jf-t-xs);color:var(--jf-ink-3)}
+.jf-scope .jf-band .jf-tools{margin-left:auto}
+
+/* ── jf: inline editable field + select chrome (settings/identity share) ── */
+.jf-scope .jf-inline{width:100%;background:none;color:var(--jf-ink);font-family:var(--jf-sans);font-size:var(--jf-t-sm);line-height:var(--jf-lh-data);border:var(--jf-hair) solid transparent;border-radius:var(--jf-r2);padding:var(--jf-s1) var(--jf-s2);margin:calc(-1 * var(--jf-s1)) calc(-1 * var(--jf-s2));transition:border-color var(--jf-dur-fast) var(--jf-ease-out),background-color var(--jf-dur-fast) var(--jf-ease-out)}
+.jf-scope .jf-inline:hover{border-color:var(--jf-rule-2);background:var(--jf-paper-cell)}
+.jf-scope .jf-inline:active{background:var(--jf-paper-sunk)}
+.jf-scope .jf-inline:focus-visible{outline:var(--jf-hair-2) solid var(--jf-focus);outline-offset:calc(-1 * var(--jf-hair));background:var(--jf-paper-cell)}
+.jf-scope .jf-inline:disabled{color:var(--jf-ink-4);cursor:not-allowed}
+.jf-scope .jf-inline::placeholder{color:var(--jf-ink-4)}
+.jf-scope textarea.jf-inline{white-space:pre-wrap;resize:vertical;min-height:var(--jf-s8)}
+
+.jf-scope .jf-select{width:100%;max-width:100%;appearance:none;cursor:pointer;font-family:var(--jf-mono);font-size:var(--jf-t-xs);color:var(--jf-ink);background:var(--jf-paper-cell);border:var(--jf-hair) solid var(--jf-rule-2);border-radius:var(--jf-r2);padding:var(--jf-s1) var(--jf-s5) var(--jf-s1) var(--jf-s2);min-height:var(--jf-row-min);transition:border-color var(--jf-dur-fast) var(--jf-ease-out),background-color var(--jf-dur-fast) var(--jf-ease-out)}
+.jf-scope .jf-select:hover{border-color:var(--jf-rule-strong)}
+.jf-scope .jf-select:active{background:var(--jf-paper-sunk)}
+.jf-scope .jf-select:focus-visible{outline:var(--jf-hair-2) solid var(--jf-focus);outline-offset:var(--jf-hair)}
+.jf-scope .jf-select:disabled{color:var(--jf-ink-4);cursor:not-allowed;border-style:dashed}
+.jf-scope .jf-selectwrap{position:relative;display:block;min-width:0}
+.jf-scope .jf-selectwrap > svg{position:absolute;right:var(--jf-s2);top:50%;translate:0 -50%;width:var(--jf-sigil);height:var(--jf-sigil);color:var(--jf-ink-4);pointer-events:none}
+
+/* ── jf: settings form — label/control hairline rows ─────────────────────── */
+.jf-scope .jf-form{background:var(--jf-paper-cell);border-bottom:var(--jf-hair) solid var(--jf-rule)}
+.jf-scope .jf-frow{display:grid;grid-template-columns:minmax(0,20rem) minmax(0,1fr);border-bottom:var(--jf-hair) solid var(--jf-rule);transition:background-color var(--jf-dur-fast) var(--jf-ease-out)}
+.jf-scope .jf-frow:hover{background:var(--jf-paper-sunk)}
+.jf-scope .jf-frow:focus-within{background:var(--jf-paper-sunk)}
+.jf-scope .jf-flabel{padding:var(--jf-s4) var(--jf-s4) var(--jf-s4) var(--jf-pad-x);border-right:var(--jf-hair) solid var(--jf-rule);min-width:0}
+.jf-scope .jf-flabel > label,.jf-scope .jf-flabel > .jf-legend{display:block;font-family:var(--jf-sans);font-weight:600;font-size:var(--jf-t-sm);color:var(--jf-ink);line-height:var(--jf-lh-data)}
+.jf-scope .jf-help{margin:var(--jf-s1) 0 0;font-family:var(--jf-sans);font-size:var(--jf-t-xs);color:var(--jf-ink-3);line-height:var(--jf-lh-prose)}
+.jf-scope .jf-ffield{padding:var(--jf-s4) var(--jf-pad-x) var(--jf-s4) var(--jf-s4);min-width:0;display:flex;flex-direction:column;gap:var(--jf-s2);align-items:stretch}
+.jf-scope .jf-ffield > *{max-width:var(--jf-field-max)}
+.jf-scope .jf-input{width:100%;font-family:var(--jf-mono);font-size:var(--jf-t-sm);color:var(--jf-ink);line-height:var(--jf-lh-data);background:var(--jf-paper-cell);border:var(--jf-hair) solid var(--jf-rule-2);border-radius:var(--jf-r2);padding:var(--jf-s2) var(--jf-s3);min-height:var(--jf-row-min);transition:border-color var(--jf-dur-fast) var(--jf-ease-out),background-color var(--jf-dur-fast) var(--jf-ease-out)}
+.jf-scope .jf-input:hover{border-color:var(--jf-rule-strong)}
+.jf-scope .jf-input:active{background:var(--jf-paper-sunk)}
+.jf-scope .jf-input:focus-visible{outline:var(--jf-hair-2) solid var(--jf-focus);outline-offset:var(--jf-hair)}
+.jf-scope .jf-input:disabled{color:var(--jf-ink-4);cursor:not-allowed;border-style:dashed;background:var(--jf-paper-sunk)}
+.jf-scope .jf-input::placeholder{color:var(--jf-ink-4)}
+.jf-scope textarea.jf-input{resize:vertical;min-height:var(--jf-s8);white-space:pre}
+.jf-scope textarea.jf-prose-input{white-space:pre-wrap;font-family:var(--jf-sans);min-height:calc(var(--jf-s8) * 2)}
+.jf-scope .jf-input--num{max-width:var(--jf-s8);text-align:right}
+
+/* fail-open state row: calm, neutral, structurally incapable of reading as
+   an error — this system owns no error color. */
+.jf-scope .jf-state{display:flex;align-items:center;gap:var(--jf-s2);flex-wrap:wrap;min-height:var(--jf-row-min);font-family:var(--jf-mono);font-size:var(--jf-t-xs);color:var(--jf-ink-2);background:var(--jf-paper-sunk);border:var(--jf-hair) solid var(--jf-rule);border-radius:var(--jf-r2);padding:var(--jf-s2) var(--jf-s3)}
+.jf-scope .jf-state .jf-tag{flex:none}
+.jf-scope .jf-state-note{color:var(--jf-ink-3)}
+
+.jf-scope .jf-checkrow{display:flex;align-items:flex-start;gap:var(--jf-s3)}
+.jf-scope .jf-check{appearance:none;cursor:pointer;flex:none;width:var(--jf-t-lg);height:var(--jf-t-lg);margin:0;background:var(--jf-paper-cell);border:var(--jf-hair) solid var(--jf-rule-strong);border-radius:var(--jf-r2);display:grid;place-content:center;transition:background-color var(--jf-dur-fast) var(--jf-ease-out),border-color var(--jf-dur-fast) var(--jf-ease-out)}
+.jf-scope .jf-check::after{content:'';width:var(--jf-s3);height:var(--jf-s2);border-left:var(--jf-hair-2) solid var(--jf-ink-inv);border-bottom:var(--jf-hair-2) solid var(--jf-ink-inv);rotate:-45deg;opacity:0;transition:opacity var(--jf-dur-fast) var(--jf-ease-out)}
+.jf-scope .jf-check:checked{background:var(--jf-paper-inv);border-color:var(--jf-paper-inv)}
+.jf-scope .jf-check:checked::after{opacity:1}
+.jf-scope .jf-check:hover{border-color:var(--jf-ink-2)}
+.jf-scope .jf-check:active{background:var(--jf-paper-sunk)}
+.jf-scope .jf-check:checked:active{background:var(--jf-ink-2)}
+.jf-scope .jf-check:focus-visible{outline:var(--jf-hair-2) solid var(--jf-focus);outline-offset:var(--jf-hair)}
+.jf-scope .jf-check:disabled{cursor:not-allowed;border-style:dashed;border-color:var(--jf-rule)}
+.jf-scope .jf-checkrow label{font-family:var(--jf-sans);font-size:var(--jf-t-sm);color:var(--jf-ink);line-height:var(--jf-lh-data)}
+
+/* live summary panel: reads like a query preview of the saved rule set */
+.jf-scope .jf-summary{margin:0;padding:var(--jf-s4) var(--jf-pad-x);background:var(--jf-paper-sunk);border-top:var(--jf-hair) solid var(--jf-rule-2);border-bottom:var(--jf-hair) solid var(--jf-rule-2);box-shadow:var(--jf-shadow-raise)}
+.jf-scope .jf-summary-h{font-family:var(--jf-mono);font-size:var(--jf-t-xxs);letter-spacing:var(--jf-track-wide);color:var(--jf-ink-3);margin:0 0 var(--jf-s2)}
+.jf-scope .jf-summary-b{margin:0;font-family:var(--jf-mono);font-size:var(--jf-t-xs);line-height:var(--jf-lh-data);color:var(--jf-ink);white-space:pre-wrap;word-break:break-word}
+.jf-scope .jf-saverow{display:flex;align-items:center;gap:var(--jf-s4);flex-wrap:wrap;padding:var(--jf-s4) var(--jf-pad-x);border-bottom:var(--jf-hair) solid var(--jf-rule)}
+.jf-scope .jf-saverow .jf-help{margin:0}
+.jf-scope .jf-count-live{font-family:var(--jf-mono);font-size:var(--jf-t-xs);color:var(--jf-ink-3);min-height:var(--jf-t-lg)}
+
+/* ── jf: responsive — the form stacks to label-above-field ───────────────── */
+@media (max-width:52rem){
+  .jf-scope .jf-frow{grid-template-columns:minmax(0,1fr)}
+  .jf-scope .jf-flabel{border-right:0;border-bottom:var(--jf-hair) solid var(--jf-rule);padding-block:var(--jf-s3) var(--jf-s2)}
+  .jf-scope .jf-ffield{padding-inline:var(--jf-pad-x);padding-block:var(--jf-s3) var(--jf-s4)}
+  .jf-scope .jf-kv{grid-template-columns:minmax(0,1fr)}
+  .jf-scope .jf-kv > dt{border-right:0}
+}
 /* ==== jf: end ==== */
 </style>
 <body>

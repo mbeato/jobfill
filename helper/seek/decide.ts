@@ -78,9 +78,25 @@ export function DECIDE_CONCURRENCY(): number {
   return Number.isFinite(n) && n >= 1 ? n : 8;
 }
 
-// D-19: 5 consecutive scoring failures with no success between them trips
-// the breaker (see the claim helper inside runFilterPromote for the full
+// D-19: a run of consecutive failures with no success between them trips the
+// breaker (see the claim helper inside runFilterPromote for the full
 // reasoning).
+//
+// WR-01 (Phase 20 review): this counts 5 *waves*, not 5 calls — the effective
+// threshold is BREAKER_THRESHOLD * DECIDE_CONCURRENCY(), derived once per
+// sweep in runFilterPromote's prologue. Under the serial loop each failure was
+// its own data point: five attempts were issued one after another, each
+// observed to fail before the next went out. Under an N-worker pool up to N
+// calls are in flight at once and no success can possibly interleave among
+// them, so a single transient event — a rate-limit burst, or a wave of the 60s
+// relevance.ts timeouts expiring together — registers as N consecutive
+// failures and would trip the latched breaker on its first wave, abandoning
+// the rest of the budget. Multiplying by the pool width keeps "5 consecutive
+// failures" meaning what it meant serially (five successive waves of
+// evidence), and leaves concurrency-1 behaviour — and every test pinned to it
+// — byte-identical. The cost of waiting for that evidence is bounded and
+// small: at most 5 * 8 = 40 wasted slots at the shipped default, 5% of the
+// 800-call budget.
 const BREAKER_THRESHOLD = 5;
 
 export interface DecideDeps {
@@ -164,6 +180,13 @@ export async function runFilterPromote(db: Database, deps: DecideDeps): Promise<
     byCriterion: { title: 0, location: 0, stale: 0, yoe: 0, llm: 0, grace: 0 },
     llmBreakerTripped: false,
   };
+
+  // D-06/WR-01: both are read exactly once per sweep, here in the prologue
+  // alongside the profile/criteria/board snapshots — the pool width and the
+  // breaker threshold derived from it must not drift mid-sweep, and neither
+  // belongs on the per-posting hot path.
+  const concurrency = DECIDE_CONCURRENCY();
+  const breakerThreshold = BREAKER_THRESHOLD * concurrency;
 
   let llmCalls = 0;
   let consecutiveLlmFailures = 0;
@@ -304,12 +327,12 @@ export async function runFilterPromote(db: Database, deps: DecideDeps): Promise<
         } catch {
           deps.recordDecision(db, p.id, 'held', 'held:llm-error');
           counts.held++;
-          // D-19: a run of BREAKER_THRESHOLD consecutive scoring failures
+          // D-19: a run of breakerThreshold consecutive scoring failures
           // with no success between them trips the breaker — see the claim
           // helper above for the full reasoning and D-20's no-release rule
           // this preserves.
           consecutiveLlmFailures++;
-          if (consecutiveLlmFailures >= BREAKER_THRESHOLD) {
+          if (consecutiveLlmFailures >= breakerThreshold) {
             counts.llmBreakerTripped = true;
           }
         }
@@ -327,7 +350,7 @@ export async function runFilterPromote(db: Database, deps: DecideDeps): Promise<
     }
   }
 
-  await Promise.all(Array.from({ length: Math.min(DECIDE_CONCURRENCY(), postings.length) }, () => worker()));
+  await Promise.all(Array.from({ length: Math.min(concurrency, postings.length) }, () => worker()));
 
   return counts;
 }

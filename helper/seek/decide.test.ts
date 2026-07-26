@@ -965,3 +965,70 @@ test('breaker (d, D-20): a failed claim is never released -- two failures perman
   expect(calls).toBe(3);
   expect(counts.queued + counts.llmRejected).toBe(1);
 });
+
+// --- Phase 20 review WR-01: the breaker at the SHIPPED default concurrency --
+// Every test above pins concurrency 1, where "5 consecutive failures" means
+// five attempts issued one after another. At the shipped default of 8 the
+// pool has 8 calls in flight with no success able to interleave among them,
+// so the threshold scales with the pool width (BREAKER_THRESHOLD * 8 = 40) to
+// keep the trip meaning five successive WAVES of evidence rather than one.
+
+test('breaker (e, WR-01): at the shipped default concurrency of 8, a single failing wave does not trip the breaker', async () => {
+  process.env.SEEK_DECIDE_CONCURRENCY = '8';
+  process.env.SEEK_LLM_CAP = '100';
+  const db = makeDb();
+  for (let i = 0; i < 40; i++) {
+    upsertPosting(db, posting({ url: `https://boards.greenhouse.io/acme/jobs/${i}` }))!;
+  }
+  let calls = 0;
+  const deps = baseDeps({
+    scoreRelevance: async () => {
+      calls++;
+      // One transient event failing the entire in-flight wave — a rate-limit
+      // burst, or 8 of relevance.ts's 60s timeouts expiring together.
+      if (calls <= 8) throw new Error('rate limited');
+      return { relevant: true, reason: 'fit' };
+    },
+  });
+
+  const counts = await runFilterPromote(db, deps);
+
+  // The whole point: one wave is one data point, not 8. Under an unscaled
+  // threshold of 5 the latched breaker would trip inside that first wave and
+  // abandon the remaining 32 postings for the rest of the sweep.
+  expect(counts.llmBreakerTripped).toBe(false);
+  expect(calls).toBe(40);
+  expect(counts.held).toBe(8);
+  expect(counts.queued).toBe(32);
+  expect(counts.unscored).toBe(0);
+});
+
+test('breaker (f, WR-01): at concurrency 8 a sustained failure still trips, after ~5 waves rather than ~5 calls', async () => {
+  process.env.SEEK_DECIDE_CONCURRENCY = '8';
+  process.env.SEEK_LLM_CAP = '100';
+  const db = makeDb();
+  for (let i = 0; i < 80; i++) {
+    upsertPosting(db, posting({ url: `https://boards.greenhouse.io/acme/jobs/${i}` }))!;
+  }
+  let calls = 0;
+  const deps = baseDeps({
+    scoreRelevance: async () => {
+      calls++;
+      throw new Error('channel down');
+    },
+  });
+
+  const counts = await runFilterPromote(db, deps);
+
+  expect(counts.llmBreakerTripped).toBe(true);
+  // At least the threshold (5 * 8 = 40), and bounded above by it plus the
+  // at-most-7 other calls already in flight when the trip was observed. The
+  // exact number inside that window is completion-order dependent (D-08), so
+  // it is deliberately not pinned.
+  expect(calls).toBeGreaterThanOrEqual(40);
+  expect(calls).toBeLessThanOrEqual(47);
+  expect(counts.held).toBe(calls);
+  // The breaker stops CLAIMING, not draining (17-D-04) — the rest of the
+  // backlog still ran the cheap rules and lands in unscored.
+  expect(counts.unscored).toBe(80 - calls);
+});

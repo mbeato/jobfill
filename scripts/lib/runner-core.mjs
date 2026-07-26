@@ -45,6 +45,13 @@ export async function setupRunner({ profileDir, extDir, root, resumePath, explic
   try {
     ctx = await chromium.launchPersistentContext(profileDir, {
       headless: false,
+      // Without this, Playwright emulates a FIXED 1280x720 viewport that does not
+      // follow the OS window — so resizing the Chrome-for-Testing window visibly
+      // does nothing to the page, while ordinary Chrome resizes fine. `null` hands
+      // the viewport back to the real window, which is what a headful window you
+      // are meant to watch and drive by hand needs. Nothing here measures or
+      // screenshots against a fixed size, so there is no test to re-pin.
+      viewport: null,
       args: [
         `--disable-extensions-except=${extDir}`,
         `--load-extension=${extDir}`,

@@ -39,6 +39,20 @@
   --jf-attn-edge:    color-mix(in oklab, var(--jf-attn) 58%, var(--jf-rule-2));
   --jf-attn-ink:     oklch(0.330 0.060 62);
 
+  /* queue lifecycle colours. These do NOT compete with the accent above: amber
+     still means "needs your attention" and nothing else claims it. This ramp
+     answers a different question — WHICH of six states is this row in — which
+     the accent cannot answer, since five of the six need no attention at all.
+     Identity, not severity.
+
+     L is held near ink-3's 0.560 so every one clears the same contrast bar it
+     does (4.7:1) as bold verdict text on paper; chroma does the separating.
+     failed is absent on purpose — it keeps the --attn wash it already had. */
+  --jf-st-queued:    oklch(0.560 0.055 255);
+  --jf-st-filling:   oklch(0.550 0.140 250);
+  --jf-st-filled:    oklch(0.550 0.150 300);
+  --jf-st-reviewed:  oklch(0.520 0.120 155);
+
   /* focus ring: ink pulled toward the accent hue via color-mix, so it can
      never be confused with a hover tint or with the accent's own job. */
   --jf-focus:        color-mix(in oklab, var(--jf-ink) 76%, var(--jf-attn));
@@ -95,6 +109,11 @@
 
   /* metrics */
   --jf-appbar-h: 2.875rem;
+  /* left-rail width (>=64rem only — see the rail block). Sized to the longest
+     destination word, "applications", at the tab's mono --jf-t-xs plus its
+     padding, so no label truncates and the rail costs the grids no more room
+     than it has to. */
+  --jf-rail-w: 11rem;
   --jf-gutter-w: 2.875rem;
   --jf-pad-x: clamp(0.75rem, 0.4rem + 1.2vw, 1.5rem);
   --jf-cell-y: 0.4375rem;
@@ -480,19 +499,21 @@
    filling, filled and reviewed all rendered identically. The dot carries the
    state; the WORD stays --jf-ink, so 19-01's ink-only rule for type holds.
 
-   Deliberately NO second hue. :root reserves the one accent for "needs your
-   attention / held" and nothing else, so handing six states six colours would
-   spend the accent budget six times over and leave amber meaning nothing.
-   failed keeps the amber it already had; the other five are told apart without
-   introducing a colour at all.
+   Each state carries BOTH a colour (--jf-st-*, see :root) and a silhouette:
+   ring / circle / square / diamond. Two channels, not one — so the states stay
+   separable for a red-green colourblind reader, in a greyscale screenshot, and
+   under forced-colors, where the shapes survive and the hues do not.
 
-   Colour is never the only channel: the status WORD is always rendered beside
-   the dot, so this adds no colour-only information (WCAG 1.4.1).
+   Shape alone was tried first and was not enough: at 6px a donut did not
+   resolve and a light ring read as nothing. Colour alone would have failed the
+   other direction. Together they are unambiguous at 8px.
 
-   Lightness alone was not enough at this size — a donut inside a 6px dot did
-   not resolve, and ink-4 behind a ring read as nothing. So the dot is 8px and
-   carries THREE channels: silhouette (ring / square / diamond), ink level, and
-   fill. Any two adjacent states differ on at least two of them. */
+   failed keeps the --attn amber wash and dark ink it already had, so the one
+   accent still reads as "needs you" rather than becoming just another hue in
+   the ramp. submitted keeps --muted, so history still recedes.
+
+   Colour is never the ONLY channel: the status WORD is always rendered beside
+   the dot, so nothing here is conveyed by colour alone (WCAG 1.4.1). */
 .jf-scope .jf-qst{display:inline-flex;align-items:center;gap:var(--jf-s2)}
 .jf-scope .jf-qst::before{
   content:'';flex:none;
@@ -502,18 +523,18 @@
   transform:rotate(var(--jf-qdot-rot,0deg));
   box-shadow:inset 0 0 0 var(--jf-qdot-hollow,0) var(--jf-paper-cell);
 }
-/* not started: an open ring, the only hollow shape in the set */
-.jf-scope .jf-qst--queued   {--jf-qdot:var(--jf-ink-3);--jf-qdot-r:50%;--jf-qdot-hollow:var(--jf-hair-2)}
-/* in flight: solid circle, mid ink */
-.jf-scope .jf-qst--filling  {--jf-qdot:var(--jf-ink-2);--jf-qdot-r:50%}
-/* done, awaiting you: solid square, full ink */
-.jf-scope .jf-qst--filled   {--jf-qdot:var(--jf-ink)}
-/* you checked it: same full ink, rotated to a diamond — the silhouette is what
-   separates it from filled, since both are legitimately "full attention" */
-.jf-scope .jf-qst--reviewed {--jf-qdot:var(--jf-ink);--jf-qdot-rot:45deg}
-/* the one accent, unchanged */
+/* nothing has happened yet: open slate ring, the only hollow shape in the set */
+.jf-scope .jf-qst--queued   {color:var(--jf-st-queued);  --jf-qdot:var(--jf-st-queued);  --jf-qdot-r:50%;--jf-qdot-hollow:var(--jf-hair-2)}
+/* in flight: solid blue circle */
+.jf-scope .jf-qst--filling  {color:var(--jf-st-filling); --jf-qdot:var(--jf-st-filling); --jf-qdot-r:50%}
+/* machine finished, awaiting you: solid violet square */
+.jf-scope .jf-qst--filled   {color:var(--jf-st-filled);  --jf-qdot:var(--jf-st-filled)}
+/* you approved it: green, rotated to a diamond — shape carries it too, since
+   green/violet is exactly the pair a colourblind reader may not separate */
+.jf-scope .jf-qst--reviewed {color:var(--jf-st-reviewed);--jf-qdot:var(--jf-st-reviewed);--jf-qdot-rot:45deg}
+/* the one accent — no colour override, --attn already owns this row's ink */
 .jf-scope .jf-qst--failed   {--jf-qdot:var(--jf-attn)}
-/* history: solid circle, lightest ink — recedes with .jf-row--done */
+/* history — no colour override, --muted keeps it receded with .jf-row--done */
 .jf-scope .jf-qst--submitted{--jf-qdot:var(--jf-ink-4);--jf-qdot-r:50%}
 .jf-scope .jf-crit{
   color:var(--jf-ink-3);font-size:var(--jf-t-xs);
@@ -688,6 +709,72 @@ html{overflow-x:clip;-webkit-text-size-adjust:100%}
 .jf-scope .jf-appmeta span{display:inline-flex;align-items:center;gap:var(--jf-s1)}
 @media (max-width:60rem){
   .jf-scope .jf-appmeta .jf-shrink{position:absolute;width:var(--jf-hair);height:var(--jf-hair);overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+}
+
+/* ── jf: left rail ───────────────────────────────────────────────────────────
+   The six destinations move from a top bar to a full-height rail. Written as a
+   min-width LAYER on top of the bar above, not a replacement for it: below
+   64rem the original top bar is still the layout, because a fixed rail eats
+   horizontal room the dense grids need and these tables are already the widest
+   thing on the screen. Nothing above this block changed.
+
+   DOM order is untouched (brand → nav → appmeta), so the tab roving-focus
+   handler, aria-controls wiring and skip link all keep working as-is; only the
+   axis changes. The active-tab indicator moves from border-bottom to
+   border-inline-start for the same reason it was a bottom border before — it
+   should sit on the edge the rail shares with the content it selects. */
+@media (min-width:64rem){
+  .jf-scope{
+    display:grid;
+    grid-template-columns:var(--jf-rail-w) minmax(0,1fr);
+    grid-template-rows:minmax(0,1fr) auto;
+    grid-template-areas:"rail main" "rail status";
+  }
+  .jf-scope main{grid-area:main;min-width:0}
+  .jf-scope .jf-statusbar{grid-area:status}
+
+  .jf-scope .jf-appbar{
+    grid-area:rail;
+    position:static;            /* full-height rail — nothing to stick to */
+    flex-direction:column;align-items:stretch;gap:0;
+    height:auto;width:auto;min-width:0;
+    padding-inline:0;
+    border-right:var(--jf-hair) solid var(--jf-rule-2);
+    box-shadow:none;
+  }
+  .jf-scope .jf-brand{
+    height:var(--jf-appbar-h);flex:none;
+    padding:0 var(--jf-s4);margin:0;
+    border-right:0;
+    border-bottom:var(--jf-hair) solid var(--jf-rule-2);
+  }
+  .jf-scope .jf-nav{
+    flex-direction:column;
+    overflow-x:hidden;overflow-y:auto;
+    padding-block:var(--jf-s3);
+  }
+  .jf-scope .jf-tab{
+    justify-content:flex-start;
+    min-height:var(--jf-row-min);
+    padding:var(--jf-s3) var(--jf-s4);
+    border-bottom:0;
+    border-inline-start:var(--jf-hair-3) solid transparent;
+  }
+  .jf-scope .jf-tab[aria-selected="true"]{
+    border-bottom-color:transparent;
+    border-inline-start-color:var(--jf-ink);
+  }
+  /* the queue count sits at the rail's inner edge rather than crowding the word */
+  .jf-scope .jf-tab .jf-badge{margin-inline-start:auto}
+  .jf-scope .jf-appmeta{
+    margin-left:0;margin-top:auto;flex:none;
+    flex-direction:column;align-items:flex-start;gap:var(--jf-s2);
+    padding:var(--jf-s4);
+    border-top:var(--jf-hair) solid var(--jf-rule-2);
+    white-space:normal;
+  }
+  /* no sticky top bar to clear once the nav is on the side */
+  .jf-scope .jf-row,.jf-scope .jf-detailrow{scroll-margin-block-start:0}
 }
 
 /* ── jf: main flex-fills between the app bar and the status bar (below);

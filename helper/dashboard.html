@@ -280,6 +280,43 @@
 .jf-scope .jf-count-t h2{margin:0;font-family:var(--jf-sans);font-weight:600;font-size:var(--jf-t-lg);letter-spacing:var(--jf-track-tight);line-height:var(--jf-lh-tight);color:var(--jf-ink)}
 .jf-scope .jf-count-t p{margin:0;font-family:var(--jf-mono);font-size:var(--jf-t-xs);color:var(--jf-ink-3);line-height:var(--jf-lh-data)}
 
+/* ── jf: toolbar search ──────────────────────────────────────────────────────
+   One control across queue, applications, seek and failures. It sits beside the
+   chips rather than replacing them: the chips narrow by STATE, this narrows by
+   TEXT, and the two compose. The chip counts are recomputed over the search
+   result, so a chip never reports rows the search has already excluded — 19's
+   rule is that every count is exact and computed from the data, and a count
+   describing a different row set than the one on screen would break it.
+
+   Pushed to the row's end with margin-inline-start:auto so it lands on the same
+   edge on every surface regardless of how many chips precede it. */
+.jf-scope .jf-searchwrap{
+  position:relative;display:flex;align-items:center;
+  min-width:0;flex:0 1 17rem;margin-inline-start:auto;
+}
+.jf-scope .jf-searchwrap > svg{
+  position:absolute;left:var(--jf-s3);
+  width:var(--jf-sigil);height:var(--jf-sigil);
+  color:var(--jf-ink-4);pointer-events:none;
+}
+.jf-scope .jf-search{
+  width:100%;min-width:0;appearance:none;
+  font-family:var(--jf-mono);font-size:var(--jf-t-xs);color:var(--jf-ink);
+  background:var(--jf-paper-cell);
+  border:var(--jf-hair) solid var(--jf-rule-2);border-radius:var(--jf-r2);
+  padding-block:var(--jf-s1);
+  padding-inline:calc(var(--jf-s3) + var(--jf-sigil) + var(--jf-s2)) var(--jf-s3);
+  min-height:var(--jf-row-min);
+  transition:border-color var(--jf-dur-fast) var(--jf-ease-out);
+}
+.jf-scope .jf-search::placeholder{color:var(--jf-ink-4)}
+.jf-scope .jf-search:hover{border-color:var(--jf-rule-strong)}
+.jf-scope .jf-search:focus-visible{outline:var(--jf-hair-2) solid var(--jf-focus);outline-offset:var(--jf-hair)}
+.jf-scope .jf-search::-webkit-search-cancel-button{cursor:pointer}
+@media (max-width:60rem){
+  .jf-scope .jf-searchwrap{flex:1 1 100%;margin-inline-start:0}
+}
+
 /* ── jf: band group strips ────────────────────────────────────────────── */
 .jf-scope .jf-band{display:flex;align-items:center;gap:var(--jf-s3);padding:var(--jf-s2) var(--jf-pad-x);background:var(--jf-paper-band);border-top:var(--jf-hair) solid var(--jf-rule-2);border-bottom:var(--jf-hair) solid var(--jf-rule-2)}
 .jf-scope .jf-band h3{margin:0;font-family:var(--jf-mono);font-weight:700;font-size:var(--jf-t-xs);letter-spacing:var(--jf-track-wide);color:var(--jf-ink)}
@@ -816,6 +853,9 @@ html{overflow-x:clip;-webkit-text-size-adjust:100%}
   <symbol id="i-text" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25">
     <path d="M3.5 4h9M8 4v8.5"/>
   </symbol>
+  <symbol id="i-search" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25">
+    <circle cx="6.75" cy="6.75" r="4.25"/><path d="m9.9 9.9 4.1 4.1"/>
+  </symbol>
   <symbol id="i-num" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25">
     <path d="M6 2.5 4.5 13.5M11.5 2.5 10 13.5M2.5 6h11M2 10h11"/>
   </symbol>
@@ -883,6 +923,11 @@ html{overflow-x:clip;-webkit-text-size-adjust:100%}
         </span>
       </div>
       <div class="jf-chips" role="group" aria-label="lifecycle filter" id="qChips"></div>
+      <span class="jf-searchwrap">
+        <svg aria-hidden="true"><use href="#i-search"/></svg>
+        <label class="jf-sr" for="qSearch">search the queue by company, role or url</label>
+        <input class="jf-search" id="qSearch" type="search" autocomplete="off" spellcheck="false" placeholder="company, role, url…">
+      </span>
     </div>
     <div class="jf-gridwrap jf-gridwrap--tall">
       <table class="jf-grid" id="qGrid">
@@ -911,8 +956,8 @@ html{overflow-x:clip;-webkit-text-size-adjust:100%}
       <p>add a posting URL from the popup, or POST it to /queue, to start the queue.</p>
     </div>
     <div class="jf-empty" id="qEmpty" hidden>
-      <p>no rows match this filter</p>
-      <p>pick another lifecycle filter above, or add a posting URL from the extension popup.</p>
+      <p>no rows match</p>
+      <p>clear the search, pick another lifecycle filter above, or add a posting URL from the extension popup.</p>
     </div>
   </section>
   <section role="tabpanel" id="panel-runs" aria-labelledby="tab-runs" tabindex="-1" hidden>
@@ -1007,6 +1052,11 @@ html{overflow-x:clip;-webkit-text-size-adjust:100%}
     </div>
     <div class="jf-toolbar">
       <div class="jf-chips" role="group" aria-label="decision filter" id="seekFilters"></div>
+      <span class="jf-searchwrap">
+        <svg aria-hidden="true"><use href="#i-search"/></svg>
+        <label class="jf-sr" for="sSearch">search postings by company, title, source or reason</label>
+        <input class="jf-search" id="sSearch" type="search" autocomplete="off" spellcheck="false" placeholder="company, title, source…">
+      </span>
     </div>
   </div>
   <div class="jf-gridwrap jf-gridwrap--tall">
@@ -1047,6 +1097,11 @@ html{overflow-x:clip;-webkit-text-size-adjust:100%}
         </span>
       </div>
       <div class="jf-chips" role="group" aria-label="status filter" id="aChips"></div>
+      <span class="jf-searchwrap">
+        <svg aria-hidden="true"><use href="#i-search"/></svg>
+        <label class="jf-sr" for="aSearch">search applications by company, role or notes</label>
+        <input class="jf-search" id="aSearch" type="search" autocomplete="off" spellcheck="false" placeholder="company, role, notes…">
+      </span>
     </div>
     <div class="jf-gridwrap jf-gridwrap--tall">
       <table class="jf-grid" id="aGrid">
@@ -1109,9 +1164,15 @@ html{overflow-x:clip;-webkit-text-size-adjust:100%}
         <span class="jf-count-n" id="fCountN">0</span>
         <span class="jf-count-t">
           <h2>widget failures</h2>
-          <p>fields the filler could not land · captured automatically</p>
+          <p id="fCountSub">fields the filler could not land · captured automatically</p>
         </span>
       </div>
+      <div class="jf-chips" role="group" aria-label="failure status filter" id="fChips"></div>
+      <span class="jf-searchwrap">
+        <svg aria-hidden="true"><use href="#i-search"/></svg>
+        <label class="jf-sr" for="fSearch">search failures by page, field or value</label>
+        <input class="jf-search" id="fSearch" type="search" autocomplete="off" spellcheck="false" placeholder="page, field, value…">
+      </span>
     </div>
     <div class="jf-gridwrap">
       <table class="jf-grid" id="fGrid">
@@ -1136,6 +1197,10 @@ html{overflow-x:clip;-webkit-text-size-adjust:100%}
     <div class="jf-empty" id="fEmpty" hidden>
       <p>no widget failures captured yet</p>
       <p>failures are captured automatically while filling — nothing to review until a combobox or custom widget misfires.</p>
+    </div>
+    <div class="jf-empty" id="fEmptyFiltered" hidden>
+      <p>no failures match</p>
+      <p>clear the search, or pick another status filter above.</p>
     </div>
   </section>
   <section role="tabpanel" id="panel-settings" aria-labelledby="tab-settings" tabindex="-1" hidden>
@@ -1174,10 +1239,18 @@ async function load() {
 // here. Defaults to the live `apps` global for the applications status-bar
 // registration's out-of-render-cycle reads; render() always passes its own
 // snapshot of `apps` through.
+let appQuery = '';
+// Notes are included on purpose: they are the one column here you author
+// yourself, so they are the likeliest thing you remember a row by.
+function appSearchHit(a) {
+  return matchesQuery(appQuery, a.company, a.role, a.notes, a.url);
+}
+
 function visibleAppRows(rows = apps) {
-  return filter === 'all' ? rows
+  const byStatus = filter === 'all' ? rows
     : filter === 'ghosted' ? rows.filter(a => a.ghosted)
     : rows.filter(a => a.status === filter);
+  return byStatus.filter(appSearchHit);
 }
 
 // The signature move's criterion string — derived ONLY from data already on the
@@ -1263,16 +1336,22 @@ function render() {
   // (alongside 'rejected') from the headline active count.
   const active = apps.filter(a => !['rejected', 'unsubmitted'].includes(a.status)).length;
   const ghostedCount = apps.filter(a => a.ghosted).length;
+  // Chip counts and the sub-line count the SEARCH RESULT, so no count ever
+  // describes rows the search has already excluded. The headline figure and the
+  // spend/active/ghosted line stay global — they are facts about the whole
+  // tracker, not about the current view.
+  const searched = apps.filter(appSearchHit);
   document.getElementById('aCountN').textContent = String(apps.length);
-  document.getElementById('aCountSub').textContent =
-    `tracked · ${active} active · ${ghostedCount} ghosted · $${spend.toFixed(2)} api spend`;
+  document.getElementById('aCountSub').textContent = String(appQuery).trim()
+    ? `tracked · ${searched.length} of ${apps.length} match · ${active} active · ${ghostedCount} ghosted · $${spend.toFixed(2)} api spend`
+    : `tracked · ${active} active · ${ghostedCount} ghosted · $${spend.toFixed(2)} api spend`;
 
   // Synthetic 'ghosted' chip mixed with the status keys (mirrors QUEUE_CHIPS' 'all').
   document.getElementById('aChips').innerHTML = ['all', ...STATUSES, 'ghosted']
     .map(s => {
-      const n = s === 'all' ? apps.length
-        : s === 'ghosted' ? ghostedCount
-        : apps.filter(a => a.status === s).length;
+      const n = s === 'all' ? searched.length
+        : s === 'ghosted' ? searched.filter(a => a.ghosted).length
+        : searched.filter(a => a.status === s).length;
       return `<button class="jf-chip" type="button" aria-pressed="${filter === s}" data-afilter="${s}">${esc(label(s))}<span class="n">${n}</span></button>`;
     })
     .join('');
@@ -1286,6 +1365,10 @@ document.getElementById('aChips').addEventListener('click', (e) => {
   const btn = e.target.closest('[data-afilter]');
   if (!btn) return;
   filter = btn.dataset.afilter;
+  render();
+});
+document.getElementById('aSearch').addEventListener('input', (e) => {
+  appQuery = e.target.value;
   render();
 });
 
@@ -1428,6 +1511,25 @@ function esc(s) {
   return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 }
 
+/* Free-text row matching, shared by all four grids. Every whitespace-separated
+   term must appear somewhere in the row's own text columns — so "tailscale eng"
+   finds the row whether "tailscale" is the company and "eng" is in the role or
+   the other way round, and column order never matters. Case-insensitive.
+
+   An empty query matches everything, which is what lets search COMPOSE with the
+   chips instead of replacing them: every surface applies its chip filter and
+   this, in that order, and a blank box is a no-op.
+
+   Fields are joined with a space, so a term may also straddle two columns
+   ("tailscale engineer" matching company + role). That is deliberate — this is
+   a find-the-row box, not a query language. */
+function matchesQuery(query, ...fields) {
+  const q = String(query ?? '').trim().toLowerCase();
+  if (!q) return true;
+  const hay = fields.filter(Boolean).join(' ').toLowerCase();
+  return q.split(/\s+/).every(term => hay.includes(term));
+}
+
 // OBS-01: always-visible tailor-state line — unlike the resume-changes toggle above
 // (gated on a.summary truthiness), this renders for every fill regardless of summary.
 function tailorStateLine(tailorState, tailorMessage) {
@@ -1527,6 +1629,17 @@ async function loadFailures() {
   renderFailures(failureRows);
 }
 
+document.getElementById('fChips').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-ffilter]');
+  if (!btn) return;
+  failFilter = btn.dataset.ffilter;
+  renderFailures(failureRows);
+});
+document.getElementById('fSearch').addEventListener('input', (e) => {
+  failQuery = e.target.value;
+  renderFailures(failureRows);
+});
+
 function hostnameOf(url) {
   try {
     return new URL(url).hostname;
@@ -1569,16 +1682,55 @@ function failureVerdictHtml(status, crit) {
 // (helper/dashboard.html:1145/:1699-equivalent diagnostic caps inside a single
 // row's detail — options-seen capped at 20 below — are pre-existing behaviour
 // this D-04 rule does not govern; see this plan's preserve-legacy-caps note.)
+let failFilter = 'all';
+let failQuery = '';
+// The full url, not just hostnameOf(url) as the page column displays: the host
+// is usually the ATS (boards.greenhouse.io) and the COMPANY is in the path, so
+// matching only the visible host means searching a company name finds nothing.
+// The url is a superset of the host, so what you can see stays findable.
+function failSearchHit(r) {
+  return matchesQuery(failQuery, r.url, r.field_label, r.widget_kind, r.mapped_value, r.status);
+}
+
+function visibleFailureRows(rows = failureRows) {
+  const status = (r) => (FAILURE_STATUSES.includes(r.status) ? r.status : 'unknown');
+  return rows
+    .filter(r => failFilter === 'all' || status(r) === failFilter)
+    .filter(failSearchHit);
+}
+
 function renderFailures(rows) {
+  // TWO distinct empty states, matching queue and seek: nothing captured at all
+  // vs captured rows that the filter/search excludes. Collapsing them loses the
+  // difference between "nothing has gone wrong yet" and "you filtered it out".
+  const noRowsAtAll = rows.length === 0;
+  const shown = visibleFailureRows(rows);
   document.getElementById('fCountN').textContent = String(rows.length);
-  const empty = rows.length === 0;
-  document.getElementById('fEmpty').hidden = !empty;
-  document.getElementById('fGrid').hidden = empty;
-  if (empty) {
+  document.getElementById('fCountSub').textContent = String(failQuery).trim() || failFilter !== 'all'
+    ? `${shown.length} of ${rows.length} shown · captured automatically`
+    : 'fields the filler could not land · captured automatically';
+
+  // Chips count the search result, and a status with none is omitted — same
+  // grammar as QUEUE_CHIPS, which only ever shows a chip that has rows behind it.
+  const searched = rows.filter(failSearchHit);
+  const statusOf = (r) => (FAILURE_STATUSES.includes(r.status) ? r.status : 'unknown');
+  const counts = {};
+  for (const r of searched) counts[statusOf(r)] = (counts[statusOf(r)] || 0) + 1;
+  document.getElementById('fChips').innerHTML = ['all', ...FAILURE_STATUSES, 'unknown']
+    .filter(s => s === 'all' || counts[s])
+    .map(s => {
+      const n = s === 'all' ? searched.length : counts[s];
+      return `<button class="jf-chip" type="button" aria-pressed="${failFilter === s}" data-ffilter="${s}">${esc(s)}<span class="n">${n}</span></button>`;
+    }).join('');
+
+  document.getElementById('fEmpty').hidden = !noRowsAtAll;
+  document.getElementById('fEmptyFiltered').hidden = noRowsAtAll || shown.length > 0;
+  document.getElementById('fGrid').hidden = noRowsAtAll || shown.length === 0;
+  if (!shown.length) {
     document.getElementById('failuresBody').innerHTML = '';
     return;
   }
-  document.getElementById('failuresBody').innerHTML = rows.map((r, i) => {
+  document.getElementById('failuresBody').innerHTML = shown.map((r, i) => {
     const status = FAILURE_STATUSES.includes(r.status) ? r.status : 'unknown';
     const crit = failureCriterion(r);
     const attn = FAILURE_VOCAB.attn.has(status);
@@ -1690,6 +1842,7 @@ async function patchQueue(id, body) {
 // filters the table. Labels speak the operator's language ("needs review", "ready to
 // submit"), not raw status enums.
 let queueFilter = 'all';
+let queueQuery = '';
 const QUEUE_CHIPS = [
   { key: 'all', label: 'all' },
   { key: 'reviewed', label: 'ready to submit' },
@@ -1699,25 +1852,48 @@ const QUEUE_CHIPS = [
   { key: 'failed', label: 'failed' },
   { key: 'submitted', label: 'submitted' },
 ];
+// Search matches the queue's own text columns. Kept beside visibleQueueRows so
+// the chip counts below and the rows on screen can never drift apart.
+function queueSearchHit(r) {
+  return matchesQuery(queueQuery, r.company, r.role, r.url);
+}
+
 function renderQueueChips(rows) {
+  // The tab badge is a GLOBAL "you have work waiting" signal, so it counts every
+  // row regardless of the search box. Narrowing it would make work vanish from
+  // the nav just because you typed something, which is the opposite of its job.
+  // Plan 09 moved it onto the .jf-badge in the app bar; hidden (not an
+  // empty-string content check) is what keeps it invisible at zero.
+  const allCounts = {};
+  for (const r of rows) allCounts[r.status] = (allCounts[r.status] || 0) + 1;
+  const globalActionable = (allCounts.reviewed || 0) + (allCounts.filled || 0);
+  document.getElementById('queueBadge').textContent = String(globalActionable);
+  document.getElementById('queueBadge').hidden = globalActionable === 0;
+
+  // Everything below describes the VIEW, so it counts the search result. 19's
+  // rule is that every count is exact and computed from the data; a chip
+  // reporting rows the search has already excluded would break it.
+  const searched = rows.filter(queueSearchHit);
   const counts = {};
-  for (const r of rows) counts[r.status] = (counts[r.status] || 0) + 1;
-  // Queue tab badge = the actionable morning number (ready to submit + needs review).
-  // Plan 09 moved it onto the new .jf-badge in the app bar; hidden (not an
-  // empty-string content check) is what keeps it invisible at zero now.
+  for (const r of searched) counts[r.status] = (counts[r.status] || 0) + 1;
   const actionable = (counts.reviewed || 0) + (counts.filled || 0);
-  document.getElementById('queueBadge').textContent = String(actionable);
-  document.getElementById('queueBadge').hidden = actionable === 0;
   document.getElementById('qCountN').textContent = String(actionable);
-  document.getElementById('qCountSub').textContent = `rows need you · ${rows.length} in queue`;
+  document.getElementById('qCountSub').textContent = String(queueQuery).trim()
+    ? `rows need you · ${searched.length} of ${rows.length} match`
+    : `rows need you · ${rows.length} in queue`;
   document.getElementById('qChips').innerHTML = QUEUE_CHIPS
     .filter(c => c.key === 'all' || counts[c.key])
     .map(c => {
-      const n = c.key === 'all' ? rows.length : counts[c.key];
+      const n = c.key === 'all' ? searched.length : counts[c.key];
       return `<button class="jf-chip" type="button" aria-pressed="${queueFilter === c.key}" data-qfilter="${c.key}">${esc(c.label)}<span class="n">${n}</span></button>`;
     }).join('');
   return counts;
 }
+
+document.getElementById('qSearch').addEventListener('input', (e) => {
+  queueQuery = e.target.value;
+  renderQueue(queueRows);
+});
 document.getElementById('qChips').addEventListener('click', (e) => {
   const btn = e.target.closest('[data-qfilter]');
   if (!btn) return;
@@ -1738,6 +1914,7 @@ function visibleQueueRows(rows = queueRows) {
   if (!rows.length) return [];
   return rows
     .filter(r => queueFilter === 'all' || r.status === queueFilter)
+    .filter(queueSearchHit)
     .slice()
     .sort((a, b) => (QUEUE_ORDER[a.status] ?? 9) - (QUEUE_ORDER[b.status] ?? 9)
       || String(b.created_at || '').localeCompare(String(a.created_at || '')));
@@ -1997,12 +2174,15 @@ function renderSeekStats(ls) {
 // state derived from all /postings rows — the two scopes legitimately
 // disagree (see the D-15/FILT-04 comment above).
 function renderSeekFilters(rows) {
+  // Counted over the search result so a chip never reports rows the search has
+  // excluded — the same rule the queue and applications chips follow.
+  const searched = rows.filter(seekSearchHit);
   const counts = {
-    all: rows.length,
-    queued: rows.filter(r => r.decision === 'queued').length,
-    rejected: rows.filter(r => r.decision === 'rejected').length,
-    held: rows.filter(r => r.decision === 'held').length,
-    unscored: rows.filter(r => r.decision == null).length,
+    all: searched.length,
+    queued: searched.filter(r => r.decision === 'queued').length,
+    rejected: searched.filter(r => r.decision === 'rejected').length,
+    held: searched.filter(r => r.decision === 'held').length,
+    unscored: searched.filter(r => r.decision == null).length,
   };
   document.getElementById('seekFilters').innerHTML = ['all', 'queued', 'rejected', 'held', 'unscored']
     .map(s => `<button class="jf-chip" type="button" aria-pressed="${seekFilter === s}" data-sfilter="${s}">${s}<span class="n">${counts[s]}</span></button>`)
@@ -2014,6 +2194,13 @@ document.getElementById('seekFilters').addEventListener('click', (e) => {
   seekFilter = btn.dataset.sfilter;
   renderPostings(postingsRows);
 });
+document.getElementById('sSearch').addEventListener('input', (e) => {
+  seekQuery = e.target.value;
+  // Chips first: renderPostings repaints the virtual window from the same
+  // visibleSeekRows this recounts, so both read one filtered set per keystroke.
+  renderSeekFilters(postingsRows);
+  renderPostings(postingsRows);
+});
 
 // Defaults to the live postingsRows for the runs status-bar registration's
 // out-of-render-cycle reads, but renderPostings(rows) below always passes
@@ -2021,10 +2208,18 @@ document.getElementById('seekFilters').addEventListener('click', (e) => {
 // through explicitly -- renderPostings must stay a pure function of its
 // argument (no fetch, no write) so a console-injected fixture array (UI-04
 // verification) renders without touching postingsRows or the database.
+let seekQuery = '';
+// decision_reason is searchable too: with 45k rows the reason code is often how
+// you actually find a set ("rules:yoe", "held:jd-fetch-error").
+function seekSearchHit(r) {
+  return matchesQuery(seekQuery, r.company, r.title, r.source, r.decision_reason);
+}
+
 function visibleSeekRows(rows = postingsRows) {
-  return seekFilter === 'all' ? rows
+  const byDecision = seekFilter === 'all' ? rows
     : seekFilter === 'unscored' ? rows.filter(r => r.decision == null)
     : rows.filter(r => r.decision === seekFilter);
+  return byDecision.filter(seekSearchHit);
 }
 
 // D-04 AMENDED (2026-07-25, measured). The original decision said "render

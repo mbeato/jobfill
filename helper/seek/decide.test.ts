@@ -111,8 +111,8 @@ afterEach(() => {
   else process.env.SEEK_DECIDE_CONCURRENCY = ORIGINAL_CONCURRENCY;
 });
 
-test('LLM_CAP defaults to 100 when SEEK_LLM_CAP is unset', () => {
-  expect(LLM_CAP()).toBe(100);
+test('LLM_CAP defaults to 800 when SEEK_LLM_CAP is unset', () => {
+  expect(LLM_CAP()).toBe(800);
 });
 
 test('LLM_CAP reads a valid numeric SEEK_LLM_CAP', () => {
@@ -123,9 +123,9 @@ test('LLM_CAP reads a valid numeric SEEK_LLM_CAP', () => {
 // WR-02: a non-numeric SEEK_LLM_CAP must fail closed to the safe default,
 // not silently become NaN (every `>= NaN` comparison is false, which would
 // make the cap check never trip and process the entire backlog unbounded).
-test('LLM_CAP falls back to 100 on a non-numeric SEEK_LLM_CAP', () => {
+test('LLM_CAP falls back to 800 on a non-numeric SEEK_LLM_CAP', () => {
   process.env.SEEK_LLM_CAP = 'unlimited';
-  expect(LLM_CAP()).toBe(100);
+  expect(LLM_CAP()).toBe(800);
 });
 
 test('DECIDE_CONCURRENCY() defaults to 8 when SEEK_DECIDE_CONCURRENCY is unset', () => {

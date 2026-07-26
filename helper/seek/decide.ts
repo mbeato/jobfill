@@ -30,9 +30,27 @@ import { JD_FETCHABLE_SOURCES } from './jd-fetch';
 // WR-02: fail closed (not open) on a misconfigured env var — a non-numeric
 // SEEK_LLM_CAP (e.g. a typo) must fall back to the safe default, not silently
 // become NaN (every `>= NaN` comparison is false, so the cap would never trip).
+//
+// D-16/D-17/D-18 (Phase 20 plan 05): raised from 100 to 800, backed by a real
+// measured sweep at SEEK_DECIDE_CONCURRENCY=8 against a copy of the live
+// jobfill.db (2026-07-26) — not derived from arithmetic (D-17). That sweep
+// made 189 real scoreRelevance calls in 127.6s of decide-stage wall clock:
+// 0.675s effective seconds per scored posting once concurrency-8 parallelism
+// is accounted for, projecting to ~540s (9 min) decide wall clock at this
+// cap, ~630s (10.5 min) total including the ~90s fetch stage — comfortably
+// inside the unattended 07:00 scheduling window, which has no hard deadline
+// and 3 retry attempts. The same sweep fully drained the day's real backlog
+// (328 postings claimed a cap slot; 0 left unscored), so 800 carries ~2.4x
+// headroom over that measured steady-state survivor count. D-16: the budget
+// stays a call count, not a wall-clock budget — a count is what keeps this
+// function's own reader tests and the cap-never-exceeded invariant
+// (decide.test.ts's D-09 checks) assertable; a wall-clock budget would make
+// every test time-dependent and every sweep irreproducible. Consequence
+// (D-18): once a sweep's survivors fit under 800, `unscored` stops being the
+// normal condition and becomes a signal that something is wrong.
 export function LLM_CAP(): number {
-  const n = Number(process.env.SEEK_LLM_CAP ?? 100);
-  return Number.isFinite(n) && n >= 0 ? n : 100;
+  const n = Number(process.env.SEEK_LLM_CAP ?? 800);
+  return Number.isFinite(n) && n >= 0 ? n : 800;
 }
 
 // D-06: read fresh on every call (not frozen at import), mirroring LLM_CAP()

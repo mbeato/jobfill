@@ -664,6 +664,18 @@ html{overflow-x:clip;-webkit-text-size-adjust:100%}
 .jf-scope main > section{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;overflow-y:auto}
 .jf-scope main > section > *{flex:none}
 
+/* ── jf: status bar (plan 09 task 2) ─────────────────────────────────────── */
+.jf-scope .jf-statusbar{
+  position:sticky;bottom:0;z-index:25;flex:none;
+  display:flex;align-items:center;gap:var(--jf-s4);flex-wrap:wrap;
+  padding:var(--jf-s2) var(--jf-pad-x);
+  background:var(--jf-paper-sunk);
+  border-top:var(--jf-hair) solid var(--jf-rule-strong);
+  font-family:var(--jf-mono);font-size:var(--jf-t-xxs);color:var(--jf-ink-3);
+}
+.jf-scope .jf-statusbar b{color:var(--jf-ink);font-weight:700}
+.jf-scope .jf-statusbar .jf-right{margin-left:auto;display:flex;gap:var(--jf-s4);align-items:center}
+
 /* Doubled attribute selector so [hidden] outranks the app-shell rule that
    flexes a visible tabpanel, on specificity alone -- without this every
    destination lays out at once, each squeezed into a sixth of the shell.
@@ -1011,6 +1023,16 @@ html{overflow-x:clip;-webkit-text-size-adjust:100%}
     <div id="settingsIdentityBody"></div>
   </section>
   </main>
+
+  <footer class="jf-statusbar">
+    <span><b id="sbRows">0</b> <span id="sbUnit">rows</span></span>
+    <span><span id="sbFilterLabel">filter</span> <b id="sbFilter">all</b></span>
+    <span id="sbSort"></span>
+    <div class="jf-right">
+      <span>db jobfill.db</span>
+      <span>read only until you click</span>
+    </div>
+  </footer>
 <script>
 const STATUSES = ['unsubmitted', 'applied', 'replied', 'interviewing', 'offer', 'rejected'];
 // D-05: pre-submit token stays the raw enum in the store/PATCH; only its display
@@ -1028,8 +1050,9 @@ async function load() {
 
 // D-15: 'ghosted' is a synthetic chip filtering the server-derived a.ghosted flag,
 // not a status equality match — trust the server field, never recompute the rule
-// here. Defaults to the live `apps` global for JF_STATUS.applications' out-of-
-// render-cycle reads; render() always passes its own snapshot of `apps` through.
+// here. Defaults to the live `apps` global for the applications status-bar
+// registration's out-of-render-cycle reads; render() always passes its own
+// snapshot of `apps` through.
 function visibleAppRows(rows = apps) {
   return filter === 'all' ? rows
     : filter === 'ghosted' ? rows.filter(a => a.ghosted)
@@ -1130,6 +1153,9 @@ function render() {
     .join('');
 
   document.getElementById('aBody').innerHTML = renderAppRows(visibleAppRows(apps));
+  // Plan 09: keep the status bar in sync once applications is already the
+  // visible destination and a status-chip filter changes what's shown.
+  if (currentDest === 'applications') syncStatusBar('applications');
 }
 document.getElementById('aChips').addEventListener('click', (e) => {
   const btn = e.target.closest('[data-afilter]');
@@ -1577,8 +1603,9 @@ document.getElementById('qChips').addEventListener('click', (e) => {
 // Actionability sort: what the operator should touch first floats to the top; submitted is
 // history and sinks to the bottom, visually receded (.jf-row--done).
 const QUEUE_ORDER = { reviewed: 0, filled: 1, filling: 2, queued: 3, failed: 4, submitted: 5 };
-// Defaults to the live queueRows for JF_STATUS.queue's out-of-render-cycle reads, but
-// renderQueue(rows) below always passes its OWN rows argument through explicitly --
+// Defaults to the live queueRows for the queue status-bar registration's
+// out-of-render-cycle reads, but renderQueue(rows) below always passes its
+// OWN rows argument through explicitly --
 // renderQueue must stay a pure function of its argument (no fetch, no write) so a
 // console-injected fixture array (UI-04 verification) renders without touching queueRows
 // or the database.
@@ -1716,6 +1743,10 @@ function renderQueue(rows) {
       </div></td></tr>` : '';
     return main + detail;
   }).join('');
+  // Plan 09: keep the status bar's row count/filter from drifting once queue
+  // is already the visible destination and a chip filter or a reload changes
+  // what's shown -- applyDest already covers the switch-TO-queue case.
+  if (currentDest === 'queue') syncStatusBar('queue');
 }
 
 // D-15/FILT-04: seek decisions section. Two independent scopes on one screen —
@@ -1839,8 +1870,9 @@ document.getElementById('seekFilters').addEventListener('click', (e) => {
   renderPostings(postingsRows);
 });
 
-// Defaults to the live postingsRows for JF_STATUS.runs' out-of-render-cycle
-// reads, but renderPostings(rows) below always passes its OWN rows argument
+// Defaults to the live postingsRows for the runs status-bar registration's
+// out-of-render-cycle reads, but renderPostings(rows) below always passes
+// its OWN rows argument
 // through explicitly -- renderPostings must stay a pure function of its
 // argument (no fetch, no write) so a console-injected fixture array (UI-04
 // verification) renders without touching postingsRows or the database.
@@ -1866,6 +1898,7 @@ function renderPostings(rows) {
     document.getElementById('seekGrid').hidden = true;
     emptyFiltered.hidden = true;
     document.getElementById('seekBody').innerHTML = '';
+    if (currentDest === 'runs') syncStatusBar('runs');
     return;
   }
   const shown = visibleSeekRows(rows);
@@ -1889,6 +1922,9 @@ function renderPostings(rows) {
         <td class="jf-acts-cell">${verdict === 'rejected' || verdict === 'held' ? `<span class="jf-acts"><button class="jf-btn jf-btn--quiet" type="button" onclick="queueReject(${p.id})">queue anyway</button></span>` : ''}</td>
       </tr>`;
   }).join('');
+  // Plan 09: keep the status bar in sync once runs is already the visible
+  // destination and a decision-chip filter changes what seek shows.
+  if (currentDest === 'runs') syncStatusBar('runs');
 }
 
 // Additive/promotive override (D-16) — deliberately no armed two-click
@@ -2511,6 +2547,11 @@ function refreshCriteriaHints() {
     criteriaSaveBtn.dataset.armed = 'confirm?';
     criteriaSaveBtn.textContent = criteriaSaveBtn.dataset.resting;
   }
+
+  // Plan 09: the status bar reads the live (unsaved) term count across all 4
+  // rules on settings, so an edit updates it exactly like every other
+  // destination's filter-driven recount -- only while settings is visible.
+  if (currentDest === 'settings') syncStatusBar('settings');
 }
 
 // Live recompute on every field edit — no debounce, no network call —
@@ -3111,28 +3152,14 @@ document.getElementById('settingsIdentityBody').addEventListener('click', (e) =>
 // Tab navigation: one visible group at a time, persisted in the URL hash so a
 // reload (or a bookmarked #runs) lands where the operator left off. All sections stay in
 // the DOM and keep loading/rendering as before — tabs only control visibility.
-// TASK-1 BRIDGE (superseded by task 2's navigate/applyDest/destFromHash/
-// hashchange set below the shared-primitives block): this is a minimal
-// reimplementation against the new tab-{dest}/panel-{dest} ids and the
-// [hidden] attribute mechanism, kept only so the shell renders correctly and
-// exactly one destination is visible at every commit -- it still has no
-// hashchange listener and the nav buttons have no click handler yet (that is
-// deliberately task 2's job), so mouse clicks and back/forward do nothing
-// until task 2 lands moments later in this same execution pass.
-const TABS = ['queue', 'runs', 'applications', 'library', 'failures', 'settings'];
-function setTab(name) {
-  if (!TABS.includes(name)) name = 'queue';
-  for (const d of TABS) {
-    const tab = document.getElementById(`tab-${d}`);
-    const panel = document.getElementById(`panel-${d}`);
-    const on = d === name;
-    tab.setAttribute('aria-selected', String(on));
-    tab.tabIndex = on ? 0 : -1;
-    panel.hidden = !on;
-  }
-  if (location.hash !== `#${name}`) history.replaceState(null, '', `#${name}`);
-}
-setTab(location.hash.replace('#', '') || 'queue');
+// The actual switching logic (applyDest/destFromHash/navigate, plus the
+// browser-history listener) lives in the shared-primitives block below,
+// since it dispatches through syncStatusBar -> JF_STATUS, which does not
+// exist yet at this point in the script. The boot call is likewise deferred
+// to the very end of the script, once every per-destination status-bar
+// registration below has run -- calling it here, before those registrations
+// exist, would throw and abort every load() call below it. The ten load()
+// calls' own relative order is untouched.
 
 load();
 loadLibrary();
@@ -3161,9 +3188,76 @@ const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 // SECOND click (data-jf-action) and invokes it with (data-jf-id, btn).
 const JF_ACTIONS = {};
 
-// Populated by plan 09's syncStatusBar: dest -> () => ({ n, unit,
-// filterLabel, filter, sort }). Inert until then.
+// Populated by each surface's registration below; consumed by plan 09's
+// syncStatusBar, added later in this same block.
 const JF_STATUS = {};
+
+/* ── jf: destination switching (plan 09 task 2) ───────────────────────────
+   Supersedes task 1's setTab bridge. DESTS reuses the pre-port TABS array's
+   values under the reference's own name; nothing else in the file referenced
+   TABS. */
+const DESTS = ['queue', 'runs', 'applications', 'library', 'failures', 'settings'];
+
+let currentDest = null;
+
+// Pure render: switch the visible destination. Never touches history, so it
+// is safe to call from the browser-history listener below without
+// re-entering navigate().
+function applyDest(name, focusTab) {
+  if (!DESTS.includes(name)) name = 'queue';
+  currentDest = name;
+  for (const d of DESTS) {
+    const tab = document.getElementById(`tab-${d}`);
+    const panel = document.getElementById(`panel-${d}`);
+    const on = d === name;
+    tab.setAttribute('aria-selected', String(on));
+    tab.tabIndex = on ? 0 : -1;
+    panel.hidden = !on;
+  }
+  if (focusTab) document.getElementById(`tab-${name}`).focus();
+  syncStatusBar(name);
+}
+
+// The URL is the single source of truth for the destination, so back/forward
+// traverse destinations and a pasted #applications works on an already-loaded
+// page. destFromHash() ignores any hash that is not one of the six
+// destinations -- in particular the skip link's #main -- so a stray hash
+// never steals the user's place or falls back to queue unexpectedly.
+function destFromHash() {
+  const h = location.hash.replace(/^#/, '');
+  return DESTS.includes(h) ? h : null;
+}
+
+// navigate() writes location.hash rather than pushState: it creates a real
+// history entry (what makes back/forward work at all) and, unlike pushState,
+// never throws on a null origin. Render happens synchronously first so focus
+// and the visible panel never disagree even for the microtask before the
+// listener below fires; that listener then finds the destination already
+// current and does nothing, while back/forward (which never call navigate())
+// still find a stale currentDest and re-render.
+function navigate(name, focusTab) {
+  if (!DESTS.includes(name)) return;
+  applyDest(name, focusTab);
+  if (location.hash !== `#${name}`) location.hash = name;
+}
+
+addEventListener('hashchange', () => {
+  const d = destFromHash();
+  if (d && d !== currentDest) applyDest(d);
+});
+
+$$('.jf-tab').forEach((tab) => {
+  tab.addEventListener('click', () => navigate(tab.dataset.dest));
+  tab.addEventListener('keydown', (e) => {
+    const i = DESTS.indexOf(tab.dataset.dest);
+    let next = null;
+    if (e.key === 'ArrowRight') next = DESTS[(i + 1) % DESTS.length];
+    else if (e.key === 'ArrowLeft') next = DESTS[(i - 1 + DESTS.length) % DESTS.length];
+    else if (e.key === 'Home') next = DESTS[0];
+    else if (e.key === 'End') next = DESTS[DESTS.length - 1];
+    if (next) { e.preventDefault(); navigate(next, true); }
+  });
+});
 
 /* statuses that mean "needs your attention" -- the ONE job of the accent.
    Per-surface vocabularies differ (queue statuses vs seek decisions vs
@@ -3242,8 +3336,7 @@ document.addEventListener('click', (e) => {
 // Plan 02: registers the criteria narrowing-save path for the delegated
 // .jf-armable second-click dispatch above (JF_ACTIONS must exist first,
 // hence this lives here rather than in the criteria section itself), and
-// the settings status-bar fact for plan 09's syncStatusBar (inert until
-// then).
+// the settings status-bar fact plan 09's syncStatusBar reads below.
 JF_ACTIONS['settings.saveCriteria'] = () => saveCriteria();
 JF_STATUS.settings = () => ({
   n: termCount(),
@@ -3261,8 +3354,8 @@ JF_STATUS.settings = () => ({
 JF_ACTIONS['queue.submit'] = (id) => patchQueue(Number(id), { status: 'submitted' });
 JF_ACTIONS['queue.remove'] = (id) => removeFromQueue(Number(id));
 
-// Plan 04: the queue's status-bar fact for plan 09's syncStatusBar (inert until
-// then) -- lives here, not in the queue section, for the same JF_STATUS-must-
+// Plan 04: the queue's status-bar fact plan 09's syncStatusBar reads below --
+// lives here, not in the queue section, for the same JF_STATUS-must-
 // exist-first reason as plan 02's registration above.
 JF_STATUS.queue = () => ({
   n: visibleQueueRows().length,
@@ -3272,8 +3365,8 @@ JF_STATUS.queue = () => ({
   sort: 'sorted by <b>actionability</b>',
 });
 
-// Plan 05: applications' status-bar fact for plan 09's syncStatusBar (inert until
-// then) -- lives here, not in the applications section, for the same JF_STATUS-
+// Plan 05: applications' status-bar fact plan 09's syncStatusBar reads below --
+// lives here, not in the applications section, for the same JF_STATUS-
 // must-exist-first reason as plan 02's/04's registrations above.
 JF_STATUS.applications = () => ({
   n: visibleAppRows().length,
@@ -3297,8 +3390,8 @@ JF_STATUS.library = () => ({
   sort: 'sorted by <b>most recent</b>',
 });
 
-// Plan 06: widget failures' status-bar fact for plan 09's syncStatusBar (inert
-// until then) -- lives here for the same JF_STATUS-must-exist-first reason as
+// Plan 06: widget failures' status-bar fact plan 09's syncStatusBar reads
+// below -- lives here for the same JF_STATUS-must-exist-first reason as
 // every registration above.
 JF_STATUS.failures = () => ({
   n: failureRows.length,
@@ -3308,8 +3401,8 @@ JF_STATUS.failures = () => ({
   sort: 'sorted by <b>most recent</b>',
 });
 
-// Plan 07: seek decisions' status-bar fact for plan 09's syncStatusBar (inert
-// until then) -- lives here for the same JF_STATUS-must-exist-first reason as
+// Plan 07: seek decisions' status-bar fact plan 09's syncStatusBar reads
+// below -- lives here for the same JF_STATUS-must-exist-first reason as
 // every registration above.
 JF_STATUS.runs = () => ({
   n: visibleSeekRows().length,
@@ -3318,5 +3411,29 @@ JF_STATUS.runs = () => ({
   filter: seekFilter,
   sort: 'sorted by <b>most recent</b>',
 });
+
+/* ── jf: status bar sync (plan 09 task 2) ─────────────────────────────────
+   Reads the per-destination fact each surface registered in JF_STATUS above,
+   falling back to a neutral row for a destination with no registration.
+   sort is the only field written with innerHTML -- it is a fixed per-
+   destination literal defined in each JF_STATUS registration above, never
+   user or server data (T-19-23); the other four fields use textContent. */
+function syncStatusBar(dest) {
+  const fact = JF_STATUS[dest]
+    ? JF_STATUS[dest]()
+    : { n: 0, unit: 'rows', filterLabel: 'filter', filter: 'all', sort: '' };
+  $('#sbRows').textContent = String(fact.n);
+  $('#sbUnit').textContent = fact.unit;
+  $('#sbFilterLabel').textContent = fact.filterLabel;
+  $('#sbFilter').textContent = fact.filter;
+  $('#sbSort').innerHTML = fact.sort;
+}
+
+/* ── jf: boot (plan 09 task 2) ─────────────────────────────────────────────
+   Runs last, once every per-destination status-bar registration above
+   exists -- calling applyDest any earlier (e.g. where task 1's bridge used
+   to sit, before the ten load() calls) would throw inside syncStatusBar and
+   abort the rest of the script. */
+applyDest(destFromHash() || 'queue');
 </script>
 </body>

@@ -33,6 +33,14 @@ export const RELEVANCE_SCHEMA = {
   required: ['relevant', 'reason'],
 };
 
+// D-14: mapViaCLI's 240s default exists for large forms (30+ fields with
+// essay drafts); a two-field relevance verdict has none of that rationale.
+// Observed relevance-call latency is 5-20s, so 60s is 3x the slow end. A call
+// that overruns it already lands correctly in held:llm-error for retry next
+// sweep — under a bounded worker pool (plan 03), a retry is cheaper than
+// holding a pool worker for four minutes.
+export const SEEK_MAP_TIMEOUT_MS = 60_000;
+
 /**
  * Fresh-reads the `relevance_profile` row from seek_meta (D-01/D-10) on every
  * call — no caching, so an edit takes effect on the next sweep with no
@@ -99,7 +107,8 @@ export async function scoreRelevance(
   profileSummary: string,
   jdText: string,
   posting: PostingRow,
-  mapImpl: (prompt: string, schema: object) => Promise<unknown> = mapViaCLI,
+  mapImpl: (prompt: string, schema: object) => Promise<unknown> = (prompt, schema) =>
+    mapViaCLI(prompt, schema, SEEK_MAP_TIMEOUT_MS),
 ): Promise<{ relevant: boolean; reason: string }> {
   const prompt = buildPrompt(profileSummary, jdText, posting);
   const result = await mapImpl(prompt, RELEVANCE_SCHEMA);

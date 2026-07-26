@@ -200,7 +200,9 @@ export async function runFilterPromote(db: Database, deps: DecideDeps): Promise<
   //
   // D-20: a claimed slot is never released on failure. Releasing would let
   // a systematic failure loop indefinitely against the API; the breaker
-  // below, not slot recycling, is the answer to wasted slots.
+  // below, not slot recycling, is the answer to wasted slots — and per
+  // WR-02 it now covers BOTH stages a claimed slot pays for (the JD fetch
+  // and the scoring call), not just the scoring call.
   //
   // D-19 (conflict resolved against 17-D-04): the breaker stops CLAIMING,
   // not DRAINING — tripping it only makes this return false. Workers keep
@@ -214,6 +216,18 @@ export async function runFilterPromote(db: Database, deps: DecideDeps): Promise<
     if (llmCalls >= LLM_CAP()) return false;
     llmCalls++;
     return true;
+  }
+
+  // D-19: the single trip point, shared by every path that consumed a
+  // claimed slot without producing a verdict. Any success resets the streak
+  // (see the scoreRelevance catch's sibling reset), so only a systematic
+  // failure — the channel down, not one bad posting — can reach the
+  // threshold.
+  function noteFailedSlot(): void {
+    consecutiveLlmFailures++;
+    if (consecutiveLlmFailures >= breakerThreshold) {
+      counts.llmBreakerTripped = true;
+    }
   }
 
   // D-04: the pool cursor shape from ats-fetch.ts's runTokenPool, following
@@ -293,6 +307,20 @@ export async function runFilterPromote(db: Database, deps: DecideDeps): Promise<
           } catch {
             deps.recordDecision(db, p.id, 'held', 'held:jd-fetch-error');
             counts.held++;
+            // WR-02 (Phase 20 review): the slot was claimed above, BEFORE
+            // this fetch, and D-20 means it is gone either way — so a JD
+            // fetch that throws is a claimed slot that produced no verdict,
+            // the same failure the breaker exists for. Without this, a
+            // systematic fetch failure (ATS host down, a 429 storm, a DNS
+            // problem) drains all 800 slots into held:jd-fetch-error rows
+            // and never trips, which falsified the D-20 comment above.
+            //
+            // Chosen over the alternative of claiming the slot after the
+            // fetch instead: that would un-bound JD fetches from the cap —
+            // a sweep could fetch the entire backlog — giving up D-05's
+            // "the pool bound is the JD-fetch bound" for a stage that is
+            // already bounded correctly today.
+            noteFailedSlot();
             continue;
           }
 
@@ -327,14 +355,11 @@ export async function runFilterPromote(db: Database, deps: DecideDeps): Promise<
         } catch {
           deps.recordDecision(db, p.id, 'held', 'held:llm-error');
           counts.held++;
-          // D-19: a run of breakerThreshold consecutive scoring failures
-          // with no success between them trips the breaker — see the claim
-          // helper above for the full reasoning and D-20's no-release rule
-          // this preserves.
-          consecutiveLlmFailures++;
-          if (consecutiveLlmFailures >= breakerThreshold) {
-            counts.llmBreakerTripped = true;
-          }
+          // D-19: a run of breakerThreshold consecutive failures with no
+          // success between them trips the breaker — see the claim helper
+          // above for the full reasoning and D-20's no-release rule this
+          // preserves.
+          noteFailedSlot();
         }
       } catch {
         // The pool's own outer catch, mirroring ats-fetch.ts's never-rethrow

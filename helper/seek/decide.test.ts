@@ -1032,3 +1032,58 @@ test('breaker (f, WR-01): at concurrency 8 a sustained failure still trips, afte
   // backlog still ran the cheap rules and lands in unscored.
   expect(counts.unscored).toBe(80 - calls);
 });
+
+// --- Phase 20 review WR-02: the breaker covers both stages a slot pays for --
+
+test('breaker (g, WR-02): a systematic JD-fetch failure trips the breaker instead of draining the whole cap into held:jd-fetch-error', async () => {
+  process.env.SEEK_DECIDE_CONCURRENCY = '1';
+  process.env.SEEK_LLM_CAP = '100';
+  const db = makeDb();
+  for (let i = 0; i < 20; i++) {
+    upsertPosting(db, posting({ url: `https://boards.greenhouse.io/acme/jobs/${i}` }))!;
+  }
+  let fetchCalls = 0;
+  const deps = baseDeps({
+    fetchJD: async () => {
+      fetchCalls++;
+      throw new Error('ATS host down');
+    },
+  });
+
+  const counts = await runFilterPromote(db, deps);
+
+  // The slot is claimed before the fetch, so a fetch that throws is a
+  // claimed slot that produced no verdict — identical to a scoring failure
+  // from the budget's point of view, and D-20 means neither is returned.
+  expect(fetchCalls).toBe(5);
+  expect(counts.held).toBe(5);
+  expect(counts.llmBreakerTripped).toBe(true);
+  expect(counts.unscored).toBe(15);
+});
+
+test('breaker (g2, WR-02): a JD-fetch failure streak is reset by a successful verdict, so intermittent 404s never trip it', async () => {
+  process.env.SEEK_DECIDE_CONCURRENCY = '1';
+  process.env.SEEK_LLM_CAP = '100';
+  const db = makeDb();
+  for (let i = 0; i < 20; i++) {
+    upsertPosting(db, posting({ url: `https://boards.greenhouse.io/acme/jobs/${i}` }))!;
+  }
+  let fetchCalls = 0;
+  const deps = baseDeps({
+    fetchJD: async () => {
+      fetchCalls++;
+      if (fetchCalls % 2 === 0) throw new Error('greenhouse acme/1 returned HTTP 404');
+      return 'some jd text';
+    },
+  });
+
+  const counts = await runFilterPromote(db, deps);
+
+  // An ordinary 404 is transient and per-posting (see the held-for-retry
+  // test above); only a run with no success between them is evidence the
+  // channel itself is down.
+  expect(fetchCalls).toBe(20);
+  expect(counts.held).toBe(10);
+  expect(counts.queued).toBe(10);
+  expect(counts.llmBreakerTripped).toBe(false);
+});

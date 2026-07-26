@@ -3,7 +3,7 @@ import { Database } from 'bun:sqlite';
 import { createPostingsTable, upsertPosting, recordDecision, listPostingsToDecide } from './postings';
 import { createQueueTable } from '../queue';
 import { promotePosting } from './promote';
-import { runFilterPromote, LLM_CAP, type DecideDeps, type FilterCounts } from './decide';
+import { runFilterPromote, LLM_CAP, DECIDE_CONCURRENCY, type DecideDeps, type FilterCounts } from './decide';
 import { createBoardsTable, upsertBoard } from './boards';
 import { classifyBoardGrace } from './filter';
 import { compileCriteria, defaultCriteria } from './criteria';
@@ -126,6 +126,37 @@ test('LLM_CAP reads a valid numeric SEEK_LLM_CAP', () => {
 test('LLM_CAP falls back to 100 on a non-numeric SEEK_LLM_CAP', () => {
   process.env.SEEK_LLM_CAP = 'unlimited';
   expect(LLM_CAP()).toBe(100);
+});
+
+test('DECIDE_CONCURRENCY() defaults to 8 when SEEK_DECIDE_CONCURRENCY is unset', () => {
+  expect(DECIDE_CONCURRENCY()).toBe(8);
+});
+
+test('DECIDE_CONCURRENCY() reads a valid numeric SEEK_DECIDE_CONCURRENCY', () => {
+  process.env.SEEK_DECIDE_CONCURRENCY = '3';
+  expect(DECIDE_CONCURRENCY()).toBe(3);
+});
+
+// WR-02: a non-numeric SEEK_DECIDE_CONCURRENCY must fail closed to the safe
+// default, mirroring LLM_CAP's lesson exactly.
+test('DECIDE_CONCURRENCY() falls back to 8 on a non-numeric SEEK_DECIDE_CONCURRENCY', () => {
+  process.env.SEEK_DECIDE_CONCURRENCY = 'abc';
+  expect(DECIDE_CONCURRENCY()).toBe(8);
+});
+
+// The guard here is `>= 1`, not LLM_CAP's `>= 0`: a cap of 0 is a
+// meaningful configuration (score nothing), but a concurrency of 0 would
+// spawn zero workers and silently no-op the entire decide stage -- so '0'
+// and any negative value must also fail closed, unlike LLM_CAP where '0' is
+// a legitimate value.
+test('DECIDE_CONCURRENCY() falls back to 8 on "0" (a concurrency of 0 would silently no-op the decide stage)', () => {
+  process.env.SEEK_DECIDE_CONCURRENCY = '0';
+  expect(DECIDE_CONCURRENCY()).toBe(8);
+});
+
+test('DECIDE_CONCURRENCY() falls back to 8 on a negative value', () => {
+  process.env.SEEK_DECIDE_CONCURRENCY = '-4';
+  expect(DECIDE_CONCURRENCY()).toBe(8);
 });
 
 test('metadata reject: fetchJD and scoreRelevance are never called, decision is rejected with the rules reason', async () => {
@@ -819,4 +850,118 @@ test('D-09 check 2d: concurrency 8 is genuinely concurrent -- max in-flight scor
   // The lower bound proves the pool is actually concurrent, not
   // accidentally serial.
   expect(maxInFlight).toBeGreaterThan(1);
+});
+
+// --- Phase 20 plan 03: breaker (D-19/D-20) and DECIDE_CONCURRENCY reader ---
+// Forced to concurrency 1 throughout: the breaker's own claiming is
+// per-worker, so an 8-worker pool can have several calls already in flight
+// when the trip is observed, making an exact invocation count
+// order-dependent. Concurrency 1 is what makes "exactly N calls" assertable
+// at all -- exactly the same reasoning D-09 check 1 uses for FilterCounts.
+
+test('breaker (a): trips after BREAKER_THRESHOLD (5) consecutive scoring failures and stops claiming', async () => {
+  process.env.SEEK_DECIDE_CONCURRENCY = '1';
+  process.env.SEEK_LLM_CAP = '100';
+  const db = makeDb();
+  for (let i = 0; i < 20; i++) {
+    upsertPosting(db, posting({ url: `https://boards.greenhouse.io/acme/jobs/${i}` }))!;
+  }
+  let scoreCalls = 0;
+  const deps = baseDeps({
+    scoreRelevance: async () => {
+      scoreCalls++;
+      throw new Error('always fails');
+    },
+  });
+
+  const counts = await runFilterPromote(db, deps);
+
+  expect(scoreCalls).toBe(5);
+  expect(counts.held).toBe(5);
+  expect(counts.llmBreakerTripped).toBe(true);
+  // The breaker stops CLAIMING, not draining (17-D-04): the remaining 15
+  // postings still had grace and classifyMetadata applied for the whole
+  // backlog -- they land in unscored, not vanish.
+  expect(counts.unscored).toBe(15);
+});
+
+test('breaker (b, D-19): unattempted postings stay decision NULL with decision_reason NULL, never held', async () => {
+  process.env.SEEK_DECIDE_CONCURRENCY = '1';
+  process.env.SEEK_LLM_CAP = '100';
+  const db = makeDb();
+  for (let i = 0; i < 20; i++) {
+    upsertPosting(db, posting({ url: `https://boards.greenhouse.io/acme/jobs/${i}` }))!;
+  }
+  const deps = baseDeps({
+    scoreRelevance: async () => {
+      throw new Error('always fails');
+    },
+  });
+
+  await runFilterPromote(db, deps);
+
+  // Mislabelling the unattempted 15 as `held` would corrupt the
+  // held-for-retry signal -- they were never attempted, so they must stay
+  // indistinguishable from "not yet reached".
+  const held = db.query(`SELECT count(*) as c FROM postings WHERE decision = 'held'`).get() as { c: number };
+  const unattempted = db
+    .query(`SELECT count(*) as c FROM postings WHERE decision IS NULL AND decision_reason IS NULL`)
+    .get() as { c: number };
+  expect(held.c).toBe(5);
+  expect(unattempted.c).toBe(15);
+});
+
+test('breaker (c): a success resets the consecutive-failure streak -- alternating throw/success never trips it', async () => {
+  process.env.SEEK_DECIDE_CONCURRENCY = '1';
+  process.env.SEEK_LLM_CAP = '100';
+  const db = makeDb();
+  for (let i = 0; i < 20; i++) {
+    upsertPosting(db, posting({ url: `https://boards.greenhouse.io/acme/jobs/${i}` }))!;
+  }
+  let calls = 0;
+  let successes = 0;
+  const deps = baseDeps({
+    scoreRelevance: async () => {
+      calls++;
+      if (calls % 2 === 0) {
+        successes++;
+        return { relevant: true, reason: 'ok' };
+      }
+      throw new Error('flaky');
+    },
+  });
+
+  const counts = await runFilterPromote(db, deps);
+
+  // 20 calls at concurrency 1, alternating throw/success -- a
+  // non-resetting counter would have tripped well before all 20 ran.
+  expect(calls).toBe(20);
+  expect(successes).toBe(10);
+  expect(counts.llmBreakerTripped).toBe(false);
+});
+
+test('breaker (d, D-20): a failed claim is never released -- two failures permanently consume their cap slots', async () => {
+  process.env.SEEK_DECIDE_CONCURRENCY = '1';
+  process.env.SEEK_LLM_CAP = '3';
+  const db = makeDb();
+  for (let i = 0; i < 5; i++) {
+    upsertPosting(db, posting({ url: `https://boards.greenhouse.io/acme/jobs/${i}` }))!;
+  }
+  let calls = 0;
+  const deps = baseDeps({
+    scoreRelevance: async () => {
+      calls++;
+      if (calls <= 2) throw new Error('transient');
+      return { relevant: true, reason: 'ok' };
+    },
+  });
+
+  const counts = await runFilterPromote(db, deps);
+
+  // Releasing a failed claim would let a systematic failure loop
+  // indefinitely against the API, which is why D-20 forbids it: the cap's 3
+  // slots are permanently consumed by the 2 failures plus the 1 success, so
+  // only 1 of them produced a decided (non-held) verdict.
+  expect(calls).toBe(3);
+  expect(counts.queued + counts.llmRejected).toBe(1);
 });

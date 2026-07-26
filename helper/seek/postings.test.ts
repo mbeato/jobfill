@@ -161,19 +161,55 @@ test('recordDecision slices an overlong/XSS-shaped reason to MAX_TEXT before wri
   expect(updated!.decision_reason!.length).toBe(2000);
 });
 
-test('listPostingsToDecide returns only null/held decisions, oldest-fetched-first, and honors limit', () => {
+test('listPostingsToDecide returns rows source-interleaved by rank (D-01/D-02), honors the decision filter, and limit selects across sources not just the head of the largest source', () => {
   const db = makeDb();
-  const a = upsertPosting(db, posting({ url: 'https://boards.greenhouse.io/acme/jobs/1' }))!;
-  const b = upsertPosting(db, posting({ url: 'https://boards.greenhouse.io/acme/jobs/2' }))!;
-  const c = upsertPosting(db, posting({ url: 'https://boards.greenhouse.io/acme/jobs/3' }))!;
-  db.query(`UPDATE postings SET fetched_at = datetime('now', '-2 hour') WHERE id = ?`).run(a.id);
-  db.query(`UPDATE postings SET fetched_at = datetime('now', '-1 hour') WHERE id = ?`).run(b.id);
-  recordDecision(db, a.id, 'held', 'llm:hold-for-retry');
-  recordDecision(db, c.id, 'queued', 'llm:relevant');
+  // A deliberately skewed backlog: 4 greenhouse, 1 lever, 2 yc. Under the old
+  // FIFO-on-fetched_at ordering all four greenhouse rows would return before
+  // the lever/yc rows — that is the exact starvation D-01/D-02 fix.
+  const gh1 = upsertPosting(db, posting({ url: 'https://boards.greenhouse.io/acme/jobs/1', source: 'greenhouse' }))!;
+  const gh2 = upsertPosting(db, posting({ url: 'https://boards.greenhouse.io/acme/jobs/2', source: 'greenhouse' }))!;
+  const gh3 = upsertPosting(db, posting({ url: 'https://boards.greenhouse.io/acme/jobs/3', source: 'greenhouse' }))!;
+  const gh4 = upsertPosting(db, posting({ url: 'https://boards.greenhouse.io/acme/jobs/4', source: 'greenhouse' }))!;
+  const lever1 = upsertPosting(db, posting({ url: 'https://jobs.lever.co/acme/1', source: 'lever' }))!;
+  const yc1 = upsertPosting(db, posting({ url: 'https://www.workatastartup.com/jobs/1', source: 'yc' }))!;
+  const yc2 = upsertPosting(db, posting({ url: 'https://www.workatastartup.com/jobs/2', source: 'yc' }))!;
+
+  // Force fetched_at so every greenhouse row is strictly older than the lever
+  // row, which is strictly older than both yc rows — the old FIFO ordering
+  // would have returned all four greenhouse rows before lever/yc ever appeared.
+  db.query(`UPDATE postings SET fetched_at = datetime('now', '-70 minute') WHERE id = ?`).run(gh1.id);
+  db.query(`UPDATE postings SET fetched_at = datetime('now', '-60 minute') WHERE id = ?`).run(gh2.id);
+  db.query(`UPDATE postings SET fetched_at = datetime('now', '-50 minute') WHERE id = ?`).run(gh3.id);
+  db.query(`UPDATE postings SET fetched_at = datetime('now', '-40 minute') WHERE id = ?`).run(gh4.id);
+  db.query(`UPDATE postings SET fetched_at = datetime('now', '-30 minute') WHERE id = ?`).run(lever1.id);
+  db.query(`UPDATE postings SET fetched_at = datetime('now', '-20 minute') WHERE id = ?`).run(yc1.id);
+  db.query(`UPDATE postings SET fetched_at = datetime('now', '-10 minute') WHERE id = ?`).run(yc2.id);
+
+  // 09-D-14: no decided row is revived by the ordering change.
+  const held = upsertPosting(db, posting({ url: 'https://boards.greenhouse.io/acme/jobs/held', source: 'greenhouse' }))!;
+  const queued = upsertPosting(db, posting({ url: 'https://boards.greenhouse.io/acme/jobs/queued', source: 'greenhouse' }))!;
+  recordDecision(db, held.id, 'held', 'llm:hold-for-retry');
+  recordDecision(db, queued.id, 'queued', 'llm:relevant');
+
   const rows = listPostingsToDecide(db);
-  expect(rows.map(r => r.id)).toEqual([a.id, b.id]);
-  const limited = listPostingsToDecide(db, 1);
-  expect(limited.map(r => r.id)).toEqual([a.id]);
+  const ids = rows.map(r => r.id);
+
+  // Interleave: greenhouse#1, lever#1, yc#1, greenhouse#2, yc#2, greenhouse#3,
+  // greenhouse#4 — rank is the primary key, and a source drops out of the
+  // rotation once exhausted while the larger source absorbs the remainder.
+  expect(ids).toEqual([gh1.id, lever1.id, yc1.id, gh2.id, yc2.id, gh3.id, gh4.id, held.id]);
+  expect(ids).not.toContain(queued.id);
+  expect(ids).toContain(held.id);
+
+  // D-02's own defect being guarded against: limit must be applied AFTER the
+  // interleave, so it selects one row per source rather than the head of the
+  // largest source's queue.
+  const limited = listPostingsToDecide(db, 3);
+  expect(limited.map(r => r.id)).toEqual([gh1.id, lever1.id, yc1.id]);
+
+  // Within greenhouse, ascending fetched_at order is preserved.
+  const ghRows = rows.filter(r => r.source === 'greenhouse');
+  expect(ghRows.map(r => r.id)).toEqual([gh1.id, gh2.id, gh3.id, gh4.id, held.id]);
 });
 
 test('upsertPosting re-run on a decided posting never clobbers decision/decision_reason/decided_at (D-14)', () => {

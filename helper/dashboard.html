@@ -1826,7 +1826,14 @@ function renderSeekStats(ls) {
     breakdown.hidden = true;
     return;
   }
-  stats.textContent = `${ls.fetched} fetched · ${ls.rejected} rejected · ${ls.held} held · ${ls.queued} queued`;
+  // D-21 (Phase 20): a breaker trip is appended as a fixed literal, gated on
+  // a strict === true check, only when it actually happened — an ordinary
+  // sweep's line stays exactly as short as it is today. Deliberately NOT in
+  // the per-criterion breakdown kv list below: that block is gated on
+  // ls.rejected being non-zero and could hide the label in exactly the
+  // scenario it exists for. Stays .textContent (not .innerHTML) —
+  // deliberate, so no escaping is needed here.
+  stats.textContent = `${ls.fetched} fetched · ${ls.rejected} rejected · ${ls.held} held · ${ls.queued} queued${ls.llmBreakerTripped === true ? ' · llm breaker tripped' : ''}`;
   // Only rendered when ls.rejected is non-zero (item 26) — the toggle button
   // itself is hidden, not just its panel, when there is nothing to break down.
   tools.hidden = !ls.rejected;
@@ -2143,12 +2150,24 @@ function renderSweeps(rows) {
     // tokenErrors / boardsAdded are phase-16 fields (D-03 per-token
     // isolation, D-11/D-14 slug harvest). Appended only when non-zero so
     // an ordinary sweep's summary stays as short as it was before.
+    // llmBreakerTripped (D-21, Phase 20) is a boolean, not a count, so it's
+    // checked with a strict === true comparison rather than Number(...)
+    // coercion — but the same untrusted-detail discipline applies: the
+    // appended text is a fixed literal and no value from detail is ever
+    // interpolated raw.
     const extra = h
-      ? `${Number(h.tokenErrors) ? ` · ${Number(h.tokenErrors)} token errors` : ''}${Number(h.boardsAdded) ? ` · ${Number(h.boardsAdded)} boards added` : ''}`
+      ? `${Number(h.tokenErrors) ? ` · ${Number(h.tokenErrors)} token errors` : ''}${Number(h.boardsAdded) ? ` · ${Number(h.boardsAdded)} boards added` : ''}${h.llmBreakerTripped === true ? ' · llm breaker tripped' : ''}`
       : '';
     const headline = h ? `${Number(h.fetched) || 0} fetched · ${Number(h.rejected) || 0} rejected · ${Number(h.deduped) || 0} deduped · ${Number(h.held) || 0} held · ${Number(h.queued) || 0} queued${extra}` : '—';
+    // D-21: a breaker trip also gets the row's attention treatment, reusing
+    // the same jf-row--attn grammar a failed sweep already carries. The
+    // sweep's own status stays 'ok' by design (D-21) — only the row's
+    // attention styling changes; the verdict cell and SWEEP_VOCAB handling
+    // are untouched. This is what stops the trip from being a short string
+    // nobody reads (Phase 16 closeout: a signal rendered only as a smaller
+    // number trains the eye to ignore it).
     const main = `
-      <tr class="jf-row${status === 'failed' ? ' jf-row--attn' : ''}">
+      <tr class="jf-row${status === 'failed' || h?.llmBreakerTripped === true ? ' jf-row--attn' : ''}">
         <td class="jf-gut">${i + 1}</td>
         <td>${esc((r.started_at || '').replace('T', ' ').slice(0, 19))}</td>
         <td class="jf-dim">${esc(r.trigger)}</td>

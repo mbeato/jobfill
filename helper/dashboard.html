@@ -185,10 +185,10 @@
 .jf-scope .jf-btn--quiet{border-color:transparent;background:none;color:var(--jf-ink-3)}
 .jf-scope .jf-btn--quiet:hover{background:var(--jf-paper-cell);border-color:var(--jf-rule-2);color:var(--jf-ink)}
 /* armed = second click commits. inverted ink, never a color: this system owns
-   no red, and inversion is legible without hue perception. This is the
-   deliberate D-03/UI-SPEC replacement for the two legacy per-section armed
-   button rules above (one blue, one red), which stay in the file untouched
-   until their last un-ported consumer is gone. */
+   no red, and inversion is legible without hue perception. This replaced the
+   two legacy per-section armed button rules (one blue #1565c0, one red
+   #d32f2f); both were deleted in plan 19-09 once their last un-ported
+   consumer was gone, so inversion is now the only armed treatment. */
 .jf-scope .jf-btn.is-armed{background:var(--jf-paper-inv);color:var(--jf-ink-inv);border-color:var(--jf-paper-inv);font-weight:700}
 .jf-scope .jf-btn.is-armed:hover{background:var(--jf-ink-2);border-color:var(--jf-ink-2);color:var(--jf-ink-inv)}
 .jf-scope .jf-arm-thread{
@@ -228,7 +228,6 @@
   padding:0 var(--jf-s1);
 }
 .jf-scope .jf-tag--attn{color:var(--jf-attn-ink);background:var(--jf-attn-wash);border-color:var(--jf-attn-edge)}
-.jf-scope .jf-tag--pinned{color:var(--jf-ink);border-color:var(--jf-rule-strong);font-weight:700}
 .jf-scope .jf-empty{
   padding:var(--jf-s7) var(--jf-pad-x);
   border-bottom:var(--jf-hair) solid var(--jf-rule);
@@ -1054,6 +1053,10 @@ function appCriterion(status) {
 function renderAppRows(rows) {
   return rows.map((a, i) => {
     const crit = appCriterion(a.status);
+    // Safe-URL guard (mirrors the queue and failures tables): stored urls are
+    // untrusted -- esc() html-escapes but does not neutralize a javascript:
+    // scheme, so only emit an anchor for http(s).
+    const safeUrl = /^https?:\/\//i.test(a.url || '') ? a.url : '';
     const main = `
       <tr class="jf-row${a.status === 'rejected' ? ' jf-row--done' : ''}${a.ghosted ? ' jf-row--attn' : ''}">
         <td class="jf-gut">${i + 1}</td>
@@ -1076,7 +1079,7 @@ function renderAppRows(rows) {
             onchange="patch(${a.id}, {notes: this.value})">
         </td>
         <td>
-          ${a.url ? `<a href="${esc(a.url)}" target="_blank">posting</a>` : ''}
+          ${safeUrl ? `<a href="${esc(safeUrl)}" target="_blank" rel="noopener">posting</a>` : ''}
           ${a.resume_path ? `<span class="jf-sub" title="${esc(a.resume_path)}">resume: …/${esc(a.resume_path.split('/').slice(-2).join('/'))}</span>` : ''}
           ${tailorStateLine(a.tailor_state, a.tailor_message)}
           ${a.summary ? `
@@ -1094,8 +1097,8 @@ function renderAppRows(rows) {
             </select><svg aria-hidden="true"><use href="#i-down"/></svg>
           </span>
           <div id="gen-status-${a.id}"></div>
-          ${a.cover_letter_path ? `<span class="jf-sub">cover letter: <a href="/applications/${a.id}/doc/cover-letter" target="_blank">open PDF</a></span>` : ''}
-          ${a.brief_path ? `<span class="jf-sub">interview-prep brief: <a href="/applications/${a.id}/doc/brief" target="_blank">open PDF</a></span>` : ''}
+          ${a.cover_letter_path ? `<span class="jf-sub">cover letter: <a href="/applications/${a.id}/doc/cover-letter" target="_blank" rel="noopener">open PDF</a></span>` : ''}
+          ${a.brief_path ? `<span class="jf-sub">interview-prep brief: <a href="/applications/${a.id}/doc/brief" target="_blank" rel="noopener">open PDF</a></span>` : ''}
           ${a.email_path ? `<span class="jf-sub"><button class="jf-disc" type="button" id="email-disc-${a.id}" data-jf-doc="email" data-jf-id="${a.id}" aria-expanded="false" aria-controls="email-${a.id}"><svg aria-hidden="true"><use href="#i-chev"/></svg>follow-up email</button></span>` : ''}
         </td>
       </tr>`;
@@ -1451,7 +1454,7 @@ function renderFailures(rows) {
       <tr class="jf-row${attn ? ' jf-row--attn' : ''}">
         <td class="jf-gut">${i + 1}</td>
         <td>${esc((r.created_at || '').slice(0, 10))}</td>
-        <td>${safeUrl ? `<a href="${esc(safeUrl)}" target="_blank">${esc(hostnameOf(safeUrl))}</a>` : esc(hostnameOf(r.url))}</td>
+        <td>${safeUrl ? `<a href="${esc(safeUrl)}" target="_blank" rel="noopener">${esc(hostnameOf(safeUrl))}</a>` : esc(hostnameOf(r.url))}</td>
         <td>${esc(r.field_label)}${r.widget_kind ? `<span class="jf-sub">${esc(r.widget_kind)}</span>` : ''}</td>
         <td class="jf-decision-cell">${failureVerdictHtml(status, crit)}</td>
         <td><button class="jf-disc" type="button" aria-expanded="false" aria-controls="fl-${r.id}"><svg aria-hidden="true"><use href="#i-chev"/></svg>details</button></td>
@@ -1712,7 +1715,7 @@ function renderQueue(rows) {
         <td class="jf-gut">${i + 1}</td>
         <td class="jf-decision-cell">${queueVerdictHtml(status, crit)}</td>
         <td title="${esc(q.company)}">${esc(q.company)}</td>
-        <td title="${esc(q.role)}">${esc(q.role)}<span class="jf-sub">${safeUrl ? `<a href="${esc(safeUrl)}" target="_blank">${esc(safeUrl)}</a>` : esc(q.url)}</span>${q.resume_name ? `<span class="jf-sub">resume: <a href="/queue/${q.id}/resume" target="_blank">${esc(q.resume_name)}</a></span>` : ''}${status === 'failed' ? `<span class="jf-sub">fill failed — ${esc(q.error)}. check the field results, or retry.</span>` : ''}${skipReason ? `<span class="jf-sub">skipped last batch — ${esc((SKIP_REASON_LABELS[skipReason] || skipReason).replace(/^skipped — /, ''))}</span>` : ''}</td>
+        <td title="${esc(q.role)}">${esc(q.role)}<span class="jf-sub">${safeUrl ? `<a href="${esc(safeUrl)}" target="_blank" rel="noopener">${esc(safeUrl)}</a>` : esc(q.url)}</span>${q.resume_name ? `<span class="jf-sub">resume: <a href="/queue/${q.id}/resume" target="_blank" rel="noopener">${esc(q.resume_name)}</a></span>` : ''}${status === 'failed' ? `<span class="jf-sub">fill failed — ${esc(q.error)}. check the field results, or retry.</span>` : ''}${skipReason ? `<span class="jf-sub">skipped last batch — ${esc((SKIP_REASON_LABELS[skipReason] || skipReason).replace(/^skipped — /, ''))}</span>` : ''}</td>
         <td>${esc((q.created_at || '').slice(0, 10))}</td>
         <td class="jf-num">${items.length}${items.length ? `<span class="jf-sub"><button class="jf-disc" type="button" aria-expanded="false" aria-controls="qr-${q.id}"><svg aria-hidden="true"><use href="#i-chev"/></svg>fields</button></span>` : ''}</td>
         <td class="jf-acts-cell">${queueActions(status, q)}</td>

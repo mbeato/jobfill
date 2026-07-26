@@ -1742,7 +1742,13 @@ function renderQueue(rows) {
 const DECISION_VALUES = new Set(['queued', 'rejected', 'held']);
 let lastSweep = null;
 let postingsRows = [];
-let seekFilter = 'all';
+// Land on what is actionable, not on the whole corpus. With ~44.9k judged
+// postings the 'all' view is ~99% rejections (44,527 of 44,901) -- the rows a
+// sweep produced that you might actually do something about are the 43 queued
+// and 6 held. 'all' is still one click away and, since the grid is windowed,
+// now costs nothing to open. This is a landing default only: no row is hidden,
+// no count changes, every chip still reports the full data-derived figure.
+let seekFilter = 'queued';
 
 async function loadPostings() {
   [lastSweep, postingsRows] = await Promise.all([
@@ -1866,11 +1872,113 @@ function visibleSeekRows(rows = postingsRows) {
     : rows.filter(r => r.decision === seekFilter);
 }
 
-// D-04: render every row. No slice, no cap, no pagination, no virtualisation --
-// this is the largest table in the product by row count, and the signature
-// move (verdict + criterion, never truncated) matters most here (09-CONTEXT
-// D-14: a rejected posting is never revived by re-discovery, so the reason it
-// was rejected has to stay visible without a click).
+// D-04 AMENDED (2026-07-25, measured). The original decision said "render
+// everything, no cap, no pagination, no virtualisation", on the stated premise
+// that "the user has never complained about it". That premise was falsified in
+// UAT: with 44,894 real postings this grid puts ~966k layout objects on screen,
+// costing 120ms per hover and a ~3s freeze on opening the tab. Measured
+// attribution: style recalc 5ms, layout 0ms, script 0ms -- the cost is
+// hit-testing and paint over the element count itself, so no amount of CSS
+// tuning touches it (verified: neutralising every hover/transition rule changed
+// nothing, and content-visibility is a spec no-op on <tr> because containment
+// does not apply to internal table elements).
+//
+// So the window below renders only what is on screen plus overscan. Every row
+// remains reachable by scrolling and every count stays exact, because counts are
+// computed from the DATA (visibleSeekRows / seekFilters / syncStatusBar), never
+// from the DOM -- which is what makes this safe. Nothing is capped, nothing is
+// paginated behind a "show more", and no row is unreachable.
+//
+// What is deliberately preserved: the signature move (verdict + criterion in one
+// cell, never truncated -- 09-CONTEXT D-14, a rejected posting is never revived
+// by re-discovery, so the reason has to stay visible without a click), the gutter
+// numbering (absolute index within the filtered set, not the window), and
+// renderPostings' purity w.r.t. its argument so the UI-04 console-fixture
+// pattern still works.
+let seekWindowRows = [];
+let seekRowH = 34;               // px; re-measured from real rows after paint
+const SEEK_OVERSCAN = 60;        // rows rendered beyond the viewport each way
+let seekRaf = 0;
+let seekCorrecting = false;
+
+function seekScroller() {
+  const grid = document.getElementById('seekGrid');
+  return grid ? grid.closest('.jf-gridwrap') : null;
+}
+
+function seekRowHtml(p, absIndex) {
+  // Allowlist the stored decision BEFORE it drives any class or button branch
+  // (item 28, T-19-05): an unrecognized/absent value falls back to 'unscored'
+  // rather than reach a class attribute raw.
+  const verdict = DECISION_VALUES.has(p.decision) ? p.decision : 'unscored';
+  const crit = critOf(p.decision_reason);
+  const attn = verdict === 'held';
+  return `
+      <tr class="jf-row${attn ? ' jf-row--attn' : ''}">
+        <td class="jf-gut">${absIndex + 1}</td>
+        <td>${esc((p.fetched_at || '').slice(0, 10))}</td>
+        <td>${esc(p.company)}</td>
+        <td>${esc(p.title)}</td>
+        <td class="jf-dim">${esc(p.source)}</td>
+        <td class="jf-decision-cell">${seekVerdictHtml(verdict, crit)}</td>
+        <td class="jf-acts-cell">${verdict === 'rejected' || verdict === 'held' ? `<span class="jf-acts"><button class="jf-btn jf-btn--quiet" type="button" onclick="queueReject(${p.id})">queue anyway</button></span>` : ''}</td>
+      </tr>`;
+}
+
+// Spacer rows carry the off-window height so the scrollbar stays proportional
+// to the full result set -- the thumb reflects 44,894 rows, not the window.
+function paintSeekWindow() {
+  const body = document.getElementById('seekBody');
+  const wrap = seekScroller();
+  if (!body || !wrap) return;
+  const rows = seekWindowRows;
+  const perScreen = Math.max(1, Math.ceil((wrap.clientHeight || 600) / seekRowH));
+  const span = perScreen + SEEK_OVERSCAN * 2;
+  // Snap to the true end when the scroller is at the bottom. Without this the
+  // last row is unreachable whenever the height estimate runs short -- rows vary
+  // (the criterion cell wraps), so an estimate that is even slightly low leaves
+  // the tail of a 44k-row list permanently below the scroll range.
+  const atBottom = wrap.scrollTop + wrap.clientHeight >= wrap.scrollHeight - 2;
+  let first;
+  let last;
+  if (atBottom) {
+    last = rows.length;
+    first = Math.max(0, last - span);
+  } else {
+    first = Math.max(0, Math.floor(wrap.scrollTop / seekRowH) - SEEK_OVERSCAN);
+    last = Math.min(rows.length, first + span);
+  }
+  const padTop = Math.round(first * seekRowH);
+  const padBot = Math.max(0, Math.round((rows.length - last) * seekRowH));
+  const spacer = (h) => `<tr aria-hidden="true" class="jf-spacer"><td colspan="7" style="height:${h}px;padding:0;border:0"></td></tr>`;
+  body.innerHTML =
+    (padTop > 0 ? spacer(padTop) : '') +
+    rows.slice(first, last).map((p, k) => seekRowHtml(p, first + k)).join('') +
+    (padBot > 0 ? spacer(padBot) : '');
+  // Self-correct the estimate from what actually rendered. Rows vary in height
+  // because the criterion cell is the one cell allowed to wrap, so a fixed
+  // guess would drift the scrollbar over 44k rows.
+  const sample = body.querySelector('.jf-row');
+  if (sample) {
+    const h = sample.getBoundingClientRect().height;
+    if (h > 8 && Math.abs(h - seekRowH) > 1.5) {
+      seekRowH = h;
+      // The spacer heights were computed from the old estimate, so the scroll
+      // range is now wrong. Repaint once with the corrected figure. Guarded so a
+      // row height that oscillates can never loop: one correction per paint.
+      if (!seekCorrecting) {
+        seekCorrecting = true;
+        requestAnimationFrame(() => { seekCorrecting = false; paintSeekWindow(); });
+      }
+    }
+  }
+}
+
+function onSeekScroll() {
+  if (seekRaf) return;
+  seekRaf = requestAnimationFrame(() => { seekRaf = 0; paintSeekWindow(); });
+}
+
 function renderPostings(rows) {
   const emptyAll = document.getElementById('seekEmptyAll');
   const emptyFiltered = document.getElementById('seekEmpty');
@@ -1888,26 +1996,19 @@ function renderPostings(rows) {
   const shown = visibleSeekRows(rows);
   emptyFiltered.hidden = shown.length > 0;
   document.getElementById('seekGrid').hidden = shown.length === 0;
-  document.getElementById('seekBody').innerHTML = shown.map((p, i) => {
-    // Allowlist the stored decision BEFORE it drives any class or button branch
-    // (item 28, T-19-05): an unrecognized/absent value falls back to 'unscored'
-    // rather than reach a class attribute raw.
-    const verdict = DECISION_VALUES.has(p.decision) ? p.decision : 'unscored';
-    const crit = critOf(p.decision_reason);
-    const attn = verdict === 'held';
-    return `
-      <tr class="jf-row${attn ? ' jf-row--attn' : ''}">
-        <td class="jf-gut">${i + 1}</td>
-        <td>${esc((p.fetched_at || '').slice(0, 10))}</td>
-        <td>${esc(p.company)}</td>
-        <td>${esc(p.title)}</td>
-        <td class="jf-dim">${esc(p.source)}</td>
-        <td class="jf-decision-cell">${seekVerdictHtml(verdict, crit)}</td>
-        <td class="jf-acts-cell">${verdict === 'rejected' || verdict === 'held' ? `<span class="jf-acts"><button class="jf-btn jf-btn--quiet" type="button" onclick="queueReject(${p.id})">queue anyway</button></span>` : ''}</td>
-      </tr>`;
-  }).join('');
+  seekWindowRows = shown;
+  const wrap = seekScroller();
+  if (wrap && !wrap.dataset.seekBound) {
+    wrap.dataset.seekBound = '1';
+    wrap.addEventListener('scroll', onSeekScroll, { passive: true });
+  }
+  // A fresh render is a new result set: start at the top rather than holding a
+  // scroll offset that pointed into the previous filter's rows.
+  if (wrap) wrap.scrollTop = 0;
+  paintSeekWindow();
   // Plan 09: keep the status bar in sync once runs is already the visible
-  // destination and a decision-chip filter changes what seek shows.
+  // destination and a decision-chip filter changes what seek shows. Counts come
+  // from the data, not from #seekBody's rows, so windowing cannot skew them.
   if (currentDest === 'runs') syncStatusBar('runs');
 }
 

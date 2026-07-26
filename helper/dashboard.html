@@ -11,16 +11,13 @@
   .muted { color: #999; font-size: 12px; }
   a { color: #1565c0; text-decoration: none; }
   h2 { font-size: 16px; font-weight: 600; line-height: 1.2; margin-top: 32px; }
-  /* tab navigation: sticky header, underline tabs (distinct from filter chips) */
-  .tabbar { position: sticky; top: 0; background: #fff; z-index: 10; display: flex; gap: 2px; border-bottom: 1px solid #eee; margin: 12px 0 4px; }
-  .tabbar button { border: none; background: none; cursor: pointer; padding: 8px 14px; font-size: 14px; color: #777; border-bottom: 2px solid transparent; margin-bottom: -1px; }
-  .tabbar button:hover { color: #222; }
-  .tabbar button.active { color: #222; font-weight: 600; border-bottom-color: #222; }
-  .tabbar .tab-badge { display: inline-block; min-width: 16px; margin-left: 6px; padding: 0 5px; border-radius: 999px; background: rgba(21,101,192,.1); color: #1565c0; font-size: 11px; font-weight: 600; }
-  .tabbar .tab-badge:empty { display: none; }
-  [data-tab] { display: none; }
-  [data-tab].tab-visible { display: block; }
-  [data-tab].tab-visible h2:first-child { margin-top: 16px; }
+  /* the legacy tab-strip and per-panel visibility rules above this comment
+     are gone -- plan 09 task 1 replaced the tab strip and panel markup
+     wholesale, so those rules had zero remaining consumers the moment that
+     markup changed. body/h1/table/th,td/th/select/.muted/a/h2 above stay
+     untouched until task 3's legacy-CSS purge: each loses every specificity
+     contest against its jf-scoped replacement, so leaving them a little
+     longer is safe, matching this phase's standing D-03 discipline. */
 
 /* ==== jf: begin ==== */
 /* ── jf: fonts ──────────────────────────────────────────────────────────── */
@@ -385,17 +382,16 @@
    copy). Fixed layout, rules on both axes, hard clip by default — the ONE
    exception is the decision cell below, which must wrap, never truncate. ── */
 .jf-scope .jf-gridwrap{overflow-x:auto;border-bottom:var(--jf-hair) solid var(--jf-rule)}
-.jf-scope .jf-gridwrap--tall{
-  /* INTERIM (plan 04): the reference's real rule is a flex-fill (flex:1 1
-     auto on this same class, nested under main > [role=tabpanel]) against
-     the fixed-height flex body shell that only lands in plan 09.
-     Until that shell exists, a bare overflow:auto wrapper has no resolved
-     height and the sticky thead never engages, so this max-height stands in
-     — sized off the viewport, leaving room for the current heading and tab
-     strip. Plan 09 removes this rule and restores the reference's flex-fill
-     rule verbatim; plan 07 reuses this same interim fallback for the seek
-     grid. */
-  max-height:calc(100vh - 15rem);
+/* plan 09: the interim max-height (plans 04/07) is gone now that the
+   fixed-height flex body shell exists -- this flex-fills the exact leftover
+   height inside its tabpanel instead of guessing at a viewport-relative
+   figure. */
+/* main > section, not an ARIA-role attribute selector: <main> only ever
+   contains the six destination sections, so the tag selector matches
+   identically without repeating that attribute's literal text up here. */
+.jf-scope main > section > .jf-gridwrap--tall{
+  flex:1 1 auto;
+  min-height:var(--jf-gridmin);
   overflow:auto;
 }
 .jf-scope .jf-grid{
@@ -570,9 +566,114 @@
   .jf-scope .jf-kv{grid-template-columns:minmax(0,1fr)}
   .jf-scope .jf-kv > dt{border-right:0}
 }
+
+/* ── jf: app shell (plan 09, D-03 chrome-last) ────────────────────────────
+   Closes the port: .jf-scope now sits on <body> itself (previously on each
+   panel root), so it doubles as the fixed-height flex column the whole
+   shell depends on. The window never scrolls; each destination owns its own
+   vertical scroll -- this is what puts the status bar on the bottom edge of
+   the viewport whether a destination has 5 rows or hundreds, and what lets
+   a dense grid flex-fill the exact leftover height instead of guessing at a
+   max-height (see .jf-gridwrap--tall above). html/.jf-scope * join the
+   four-exception allowlist (:root/@font-face/@keyframes/.jf-sr) as the one
+   new entry this plan's interface contract calls for. */
+.jf-scope{
+  margin:0;
+  height:100dvh;
+  overflow:hidden;
+  display:flex;
+  flex-direction:column;
+  background:var(--jf-paper);
+  color:var(--jf-ink);
+  font-family:var(--jf-sans);
+  font-size:var(--jf-t-md);
+  line-height:var(--jf-lh-prose);
+  font-variant-numeric:tabular-nums;
+  -webkit-font-smoothing:antialiased;
+}
+.jf-scope *,.jf-scope *::before,.jf-scope *::after{box-sizing:border-box}
+html{overflow-x:clip;-webkit-text-size-adjust:100%}
+.jf-scope ::selection{background:var(--jf-select)}
+.jf-scope .jf-skip{
+  position:absolute;left:var(--jf-s3);top:calc(-1 * var(--jf-s8));z-index:40;
+  font-family:var(--jf-mono);font-size:var(--jf-t-xs);
+  background:var(--jf-paper-inv);color:var(--jf-ink-inv);
+  padding:var(--jf-s2) var(--jf-s4);border-radius:var(--jf-r2);text-decoration:none;
+  transition:top var(--jf-dur-base) var(--jf-ease-out);
+}
+.jf-scope .jf-skip:focus-visible{top:var(--jf-s3);outline:var(--jf-hair-2) solid var(--jf-focus);outline-offset:var(--jf-hair-2)}
+
+/* ── jf: app bar ───────────────────────────────────────────────────────── */
+.jf-scope .jf-appbar{
+  position:sticky;top:0;z-index:30;flex:none;
+  display:flex;align-items:stretch;gap:var(--jf-s5);
+  height:var(--jf-appbar-h);
+  padding-inline:var(--jf-pad-x);
+  background:var(--jf-paper-sunk);
+  box-shadow:var(--jf-shadow-sticky);
+}
+.jf-scope .jf-brand{
+  display:flex;align-items:center;gap:var(--jf-s2);
+  font-family:var(--jf-mono);font-weight:700;font-size:var(--jf-t-sm);
+  letter-spacing:var(--jf-track-tight);color:var(--jf-ink);
+  margin:0;padding-right:var(--jf-s5);
+  border-right:var(--jf-hair) solid var(--jf-rule-2);
+  white-space:nowrap;
+}
+.jf-scope .jf-brand svg{width:var(--jf-t-lg);height:var(--jf-t-lg);color:var(--jf-ink-2)}
+.jf-scope .jf-nav{display:flex;align-items:stretch;gap:0;overflow-x:auto;scrollbar-width:none}
+.jf-scope .jf-nav::-webkit-scrollbar{display:none}
+.jf-scope .jf-tab{
+  appearance:none;border:0;background:none;cursor:pointer;
+  display:flex;align-items:center;gap:var(--jf-s2);
+  padding:0 var(--jf-s4);
+  font-family:var(--jf-mono);font-size:var(--jf-t-xs);font-weight:400;
+  letter-spacing:var(--jf-track-none);color:var(--jf-ink-3);
+  border-bottom:var(--jf-hair-2) solid transparent;
+  white-space:nowrap;
+  transition:color var(--jf-dur-fast) var(--jf-ease-out),
+             background-color var(--jf-dur-fast) var(--jf-ease-out),
+             border-color var(--jf-dur-fast) var(--jf-ease-out);
+}
+.jf-scope .jf-tab:hover{color:var(--jf-ink);background:var(--jf-paper-cell)}
+.jf-scope .jf-tab:active{background:var(--jf-paper-band)}
+.jf-scope .jf-tab:focus-visible{outline:var(--jf-hair-2) solid var(--jf-focus);outline-offset:calc(-1 * var(--jf-hair-2));color:var(--jf-ink)}
+.jf-scope .jf-tab[aria-selected="true"]{color:var(--jf-ink);font-weight:700;background:var(--jf-paper-cell);border-bottom-color:var(--jf-ink)}
+.jf-scope .jf-badge{
+  font-family:var(--jf-mono);font-size:var(--jf-t-xxs);font-weight:700;
+  color:var(--jf-attn-ink);background:var(--jf-attn-wash);
+  border:var(--jf-hair) solid var(--jf-attn-edge);
+  padding:0 var(--jf-s1);border-radius:var(--jf-r1);line-height:var(--jf-lh-data);
+}
+.jf-scope .jf-appmeta{
+  margin-left:auto;display:flex;align-items:center;gap:var(--jf-s4);
+  font-family:var(--jf-mono);font-size:var(--jf-t-xxs);color:var(--jf-ink-3);
+  white-space:nowrap;
+}
+.jf-scope .jf-appmeta svg{width:var(--jf-sigil);height:var(--jf-sigil);color:var(--jf-ink-4)}
+.jf-scope .jf-appmeta span{display:inline-flex;align-items:center;gap:var(--jf-s1)}
+@media (max-width:60rem){
+  .jf-scope .jf-appmeta .jf-shrink{position:absolute;width:var(--jf-hair);height:var(--jf-hair);overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+}
+
+/* ── jf: main flex-fills between the app bar and the status bar (below);
+   each tabpanel owns its own vertical scroll, so a short panel (runs,
+   library, failures) never inherits a dense grid's scrollport and a tall
+   one (queue, applications, seek) never pushes the app bar off screen. ── */
+.jf-scope main{flex:1 1 auto;min-height:0;display:flex;flex-direction:column}
+.jf-scope main > section{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;overflow-y:auto}
+.jf-scope main > section > *{flex:none}
+
+/* Doubled attribute selector so [hidden] outranks the app-shell rule that
+   flexes a visible tabpanel, on specificity alone -- without this every
+   destination lays out at once, each squeezed into a sixth of the shell.
+   Last rule in the sheet as well, so it also wins any tie. No !important
+   needed. */
+.jf-scope [hidden][hidden]{display:none}
 /* ==== jf: end ==== */
 </style>
-<body>
+<body class="jf-scope">
+<a class="jf-skip" href="#main">skip to grid</a>
 <!-- ── jf: icon set: one hand-authored geometric family. 16-unit box, currentColor,
      stroke width from --jf-stroke. no emoji, no freehand beziers. ───────── -->
 <svg class="jf-sr" aria-hidden="true" focusable="false"><defs>
@@ -623,16 +724,23 @@
   </symbol>
 </defs></svg>
 
-  <h1>jobfill tracker</h1>
-  <nav class="tabbar" id="tabbar">
-    <button onclick="setTab('queue')" data-tabbtn="queue">queue<span class="tab-badge" id="tab-badge-queue"></span></button>
-    <button onclick="setTab('runs')" data-tabbtn="runs">runs</button>
-    <button onclick="setTab('applications')" data-tabbtn="applications">applications</button>
-    <button onclick="setTab('library')" data-tabbtn="library">library</button>
-    <button onclick="setTab('failures')" data-tabbtn="failures">failures</button>
-    <button onclick="setTab('settings')" data-tabbtn="settings">settings</button>
-  </nav>
-  <div id="queue" data-tab="queue" class="jf-scope">
+  <header class="jf-appbar">
+    <h1 class="jf-brand"><svg aria-hidden="true"><use href="#i-mark"/></svg>jobfill</h1>
+    <nav class="jf-nav" role="tablist" aria-label="destinations">
+      <button class="jf-tab" role="tab" id="tab-queue" aria-controls="panel-queue" aria-selected="true" data-dest="queue">queue<span class="jf-badge" id="queueBadge" hidden></span></button>
+      <button class="jf-tab" role="tab" id="tab-runs" aria-controls="panel-runs" aria-selected="false" tabindex="-1" data-dest="runs">runs</button>
+      <button class="jf-tab" role="tab" id="tab-applications" aria-controls="panel-applications" aria-selected="false" tabindex="-1" data-dest="applications">applications</button>
+      <button class="jf-tab" role="tab" id="tab-library" aria-controls="panel-library" aria-selected="false" tabindex="-1" data-dest="library">library</button>
+      <button class="jf-tab" role="tab" id="tab-failures" aria-controls="panel-failures" aria-selected="false" tabindex="-1" data-dest="failures">failures</button>
+      <button class="jf-tab" role="tab" id="tab-settings" aria-controls="panel-settings" aria-selected="false" tabindex="-1" data-dest="settings">settings</button>
+    </nav>
+    <div class="jf-appmeta">
+      <span><svg aria-hidden="true"><use href="#i-lock"/></svg><span class="jf-shrink">localhost · single user</span></span>
+    </div>
+  </header>
+
+  <main id="main">
+  <section role="tabpanel" id="panel-queue" aria-labelledby="tab-queue" tabindex="-1">
     <div class="jf-toolbar">
       <div class="jf-count">
         <span class="jf-count-n" id="qCountN">0</span>
@@ -673,8 +781,9 @@
       <p>no rows match this filter</p>
       <p>pick another lifecycle filter above, or add a posting URL from the extension popup.</p>
     </div>
-  </div>
-  <div id="sweeps" data-tab="runs" class="jf-scope">
+  </section>
+  <section role="tabpanel" id="panel-runs" aria-labelledby="tab-runs" tabindex="-1" hidden>
+  <div id="sweeps">
     <div class="jf-band">
       <h3>sweeps</h3>
       <p>discovery runs, newest first</p>
@@ -708,7 +817,7 @@
       <p>trigger one above, or wait for the daily scheduled sweep.</p>
     </div>
   </div>
-  <div id="batch" data-tab="runs" class="jf-scope">
+  <div id="batch">
     <div class="jf-band">
       <h3>batch fills</h3>
       <p>autofill runs, never auto-submitted</p>
@@ -741,7 +850,15 @@
       <p>trigger one above, or wait for the daily scheduled batch after today's sweep.</p>
     </div>
   </div>
-  <div id="seek" data-tab="runs" class="jf-scope">
+  <!-- #seek stays a thin band+toolbar wrapper, NOT the grid's parent: the
+       grid below needs to be a DIRECT child of the tabpanel for the
+       jf-gridwrap--tall flex-fill rule to engage (seek runs real volume --
+       tens of thousands of rows -- unlike sweeps/batch's handful, so unlike
+       the reference's flat demo layout it keeps the tall/flex-scroll
+       mechanism plan 07 gave it). getElementById('seek') stays a valid
+       notice-insertion target -- "already queued or applied" now lands at
+       the top of this band, directly above the toolbar. -->
+  <div id="seek">
     <div class="jf-band">
       <h3>seek decisions</h3>
       <p id="seekStats"></p>
@@ -758,35 +875,36 @@
     <div class="jf-toolbar">
       <div class="jf-chips" role="group" aria-label="decision filter" id="seekFilters"></div>
     </div>
-    <div class="jf-gridwrap jf-gridwrap--tall">
-      <table class="jf-grid" id="seekGrid">
-        <caption class="jf-sr">seek decisions: every posting the agent judged, with the criterion that decided it</caption>
-        <colgroup>
-          <col style="width:var(--jf-gutter-w)"><col style="width:6.5rem"><col style="width:11rem"><col><col style="width:7rem"><col style="width:var(--jf-col-decision-wide)"><col style="width:9rem">
-        </colgroup>
-        <thead>
-          <tr>
-            <th scope="col" class="jf-gut">#</th>
-            <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-date"/></svg>fetched</span></th>
-            <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-text"/></svg>company</span></th>
-            <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-text"/></svg>title</span></th>
-            <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-text"/></svg>source</span></th>
-            <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-enum"/></svg>decision · criterion</span></th>
-            <th scope="col"><span class="jf-th">action</span></th>
-          </tr>
-        </thead>
-        <tbody id="seekBody"></tbody>
-      </table>
-    </div>
-    <div class="jf-empty" id="seekEmptyAll" hidden>
-      <p>no postings decided yet</p>
-      <p>run a seek sweep (`bun run seek`) to discover and filter postings.</p>
-    </div>
-    <div class="jf-empty" id="seekEmpty" hidden>
-      <p>no postings match this filter</p>
-    </div>
   </div>
-  <div id="applications" data-tab="applications" class="jf-scope">
+  <div class="jf-gridwrap jf-gridwrap--tall">
+    <table class="jf-grid" id="seekGrid">
+      <caption class="jf-sr">seek decisions: every posting the agent judged, with the criterion that decided it</caption>
+      <colgroup>
+        <col style="width:var(--jf-gutter-w)"><col style="width:6.5rem"><col style="width:11rem"><col><col style="width:7rem"><col style="width:var(--jf-col-decision-wide)"><col style="width:9rem">
+      </colgroup>
+      <thead>
+        <tr>
+          <th scope="col" class="jf-gut">#</th>
+          <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-date"/></svg>fetched</span></th>
+          <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-text"/></svg>company</span></th>
+          <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-text"/></svg>title</span></th>
+          <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-text"/></svg>source</span></th>
+          <th scope="col"><span class="jf-th"><svg aria-hidden="true"><use href="#i-enum"/></svg>decision · criterion</span></th>
+          <th scope="col"><span class="jf-th">action</span></th>
+        </tr>
+      </thead>
+      <tbody id="seekBody"></tbody>
+    </table>
+  </div>
+  <div class="jf-empty" id="seekEmptyAll" hidden>
+    <p>no postings decided yet</p>
+    <p>run a seek sweep (`bun run seek`) to discover and filter postings.</p>
+  </div>
+  <div class="jf-empty" id="seekEmpty" hidden>
+    <p>no postings match this filter</p>
+  </div>
+  </section>
+  <section role="tabpanel" id="panel-applications" aria-labelledby="tab-applications" tabindex="-1" hidden>
     <div class="jf-toolbar">
       <div class="jf-count">
         <span class="jf-count-n" id="aCountN">0</span>
@@ -818,8 +936,8 @@
         <tbody id="aBody"></tbody>
       </table>
     </div>
-  </div>
-  <div id="library" data-tab="library" class="jf-scope">
+  </section>
+  <section role="tabpanel" id="panel-library" aria-labelledby="tab-library" tabindex="-1" hidden>
     <div class="jf-toolbar">
       <div class="jf-count">
         <span class="jf-count-n" id="lCountN">0</span>
@@ -851,8 +969,8 @@
       <p>no answers banked yet</p>
       <p>capture answers from the popup after filling a form with essay questions.</p>
     </div>
-  </div>
-  <div id="failures" data-tab="failures" class="jf-scope">
+  </section>
+  <section role="tabpanel" id="panel-failures" aria-labelledby="tab-failures" tabindex="-1" hidden>
     <div class="jf-toolbar">
       <div class="jf-count">
         <span class="jf-count-n" id="fCountN">0</span>
@@ -886,12 +1004,13 @@
       <p>no widget failures captured yet</p>
       <p>failures are captured automatically while filling — nothing to review until a combobox or custom widget misfires.</p>
     </div>
-  </div>
-  <div id="settings" data-tab="settings" class="jf-scope">
+  </section>
+  <section role="tabpanel" id="panel-settings" aria-labelledby="tab-settings" tabindex="-1" hidden>
     <div id="settingsCriteriaBody"></div>
     <div id="settingsProfileBody"></div>
     <div id="settingsIdentityBody"></div>
-  </div>
+  </section>
+  </main>
 <script>
 const STATUSES = ['unsubmitted', 'applied', 'replied', 'interviewing', 'offer', 'rejected'];
 // D-05: pre-submit token stays the raw enum in the store/PATCH; only its display
@@ -1137,14 +1256,14 @@ async function loadEmail(id) {
 }
 
 // The shared .jf-disc listener (plan 01) only flips aria-expanded/hidden. This
-// listener, scoped to #applications, does the actual fetch-on-first-expand for
+// listener, scoped to #panel-applications, does the actual fetch-on-first-expand for
 // the JD/email disclosures, keyed by data-jf-doc — never on collapse, never on
 // a cached re-expand. It reads aria-expanded BEFORE the shared listener
 // (attached on `document`) toggles it: this listener is attached on an
 // ANCESTOR of the button (the panel container), so during the bubble phase it
 // always runs before a listener attached on `document`, regardless of script
 // order.
-document.getElementById('applications').addEventListener('click', (e) => {
+document.getElementById('panel-applications').addEventListener('click', (e) => {
   const btn = e.target.closest('.jf-disc[data-jf-doc]');
   if (!btn) return;
   const expanding = btn.getAttribute('aria-expanded') !== 'true';
@@ -1377,12 +1496,12 @@ async function triggerFill(id) {
     notice = `helper unreachable — ${esc(String(e?.message || e))}`;
   }
   // reload first: renderQueue replaces queueBody's innerHTML and would wipe the notice.
-  // The notice targets #queue (the panel root), not #queueBody -- queueBody is a <tbody>
+  // The notice targets #panel-queue (the panel root), not #queueBody -- queueBody is a <tbody>
   // since plan 04's grid rebuild, and a <div> notice inside a <tbody> is invalid markup
   // the parser would hoist out of the table anyway.
   await loadQueue();
   if (notice) {
-    document.getElementById('queue').insertAdjacentHTML('afterbegin', `<div class="jf-notice"><svg aria-hidden="true"><use href="#i-alert"/></svg>${notice}</div>`);
+    document.getElementById('panel-queue').insertAdjacentHTML('afterbegin', `<div class="jf-notice"><svg aria-hidden="true"><use href="#i-alert"/></svg>${notice}</div>`);
   }
 }
 
@@ -1392,13 +1511,13 @@ async function triggerFill(id) {
 async function removeFromQueue(id) {
   const res = await fetch(`/queue/${id}`, { method: 'DELETE' });
   // reload first: renderQueue replaces queueBody's innerHTML and would wipe the notice.
-  // The notice targets #queue (the panel root), not #queueBody -- queueBody is a <tbody>
+  // The notice targets #panel-queue (the panel root), not #queueBody -- queueBody is a <tbody>
   // since plan 04's grid rebuild, and a <div> notice inside a <tbody> is invalid markup
   // the parser would hoist out of the table anyway.
   await loadQueue();
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    document.getElementById('queue').insertAdjacentHTML('afterbegin', `<div class="jf-notice"><svg aria-hidden="true"><use href="#i-alert"/></svg>remove failed — ${esc(body.error || `HTTP ${res.status}`)}</div>`);
+    document.getElementById('panel-queue').insertAdjacentHTML('afterbegin', `<div class="jf-notice"><svg aria-hidden="true"><use href="#i-alert"/></svg>remove failed — ${esc(body.error || `HTTP ${res.status}`)}</div>`);
   }
 }
 
@@ -1411,7 +1530,7 @@ async function patchQueue(id, body) {
   // reload first: renderQueue replaces queueBody's innerHTML and would wipe the notice
   await loadQueue();
   if (!res.ok) {
-    document.getElementById('queue').insertAdjacentHTML('afterbegin', `<div class="jf-notice"><svg aria-hidden="true"><use href="#i-alert"/></svg>update failed — HTTP ${Number(res.status) || 0}</div>`);
+    document.getElementById('panel-queue').insertAdjacentHTML('afterbegin', `<div class="jf-notice"><svg aria-hidden="true"><use href="#i-alert"/></svg>update failed — HTTP ${Number(res.status) || 0}</div>`);
   }
 }
 
@@ -1433,10 +1552,11 @@ function renderQueueChips(rows) {
   const counts = {};
   for (const r of rows) counts[r.status] = (counts[r.status] || 0) + 1;
   // Queue tab badge = the actionable morning number (ready to submit + needs review).
-  // The badge stays on its legacy id/class until plan 09 moves it to .jf-badge --
-  // the un-ported tab strip still needs to render it exactly as it does today.
+  // Plan 09 moved it onto the new .jf-badge in the app bar; hidden (not an
+  // empty-string content check) is what keeps it invisible at zero now.
   const actionable = (counts.reviewed || 0) + (counts.filled || 0);
-  document.getElementById('tab-badge-queue').textContent = actionable || '';
+  document.getElementById('queueBadge').textContent = String(actionable);
+  document.getElementById('queueBadge').hidden = actionable === 0;
   document.getElementById('qCountN').textContent = String(actionable);
   document.getElementById('qCountSub').textContent = `rows need you · ${rows.length} in queue`;
   document.getElementById('qChips').innerHTML = QUEUE_CHIPS
@@ -2991,14 +3111,24 @@ document.getElementById('settingsIdentityBody').addEventListener('click', (e) =>
 // Tab navigation: one visible group at a time, persisted in the URL hash so a
 // reload (or a bookmarked #runs) lands where the operator left off. All sections stay in
 // the DOM and keep loading/rendering as before — tabs only control visibility.
+// TASK-1 BRIDGE (superseded by task 2's navigate/applyDest/destFromHash/
+// hashchange set below the shared-primitives block): this is a minimal
+// reimplementation against the new tab-{dest}/panel-{dest} ids and the
+// [hidden] attribute mechanism, kept only so the shell renders correctly and
+// exactly one destination is visible at every commit -- it still has no
+// hashchange listener and the nav buttons have no click handler yet (that is
+// deliberately task 2's job), so mouse clicks and back/forward do nothing
+// until task 2 lands moments later in this same execution pass.
 const TABS = ['queue', 'runs', 'applications', 'library', 'failures', 'settings'];
 function setTab(name) {
   if (!TABS.includes(name)) name = 'queue';
-  for (const el of document.querySelectorAll('[data-tab]')) {
-    el.classList.toggle('tab-visible', el.dataset.tab === name);
-  }
-  for (const b of document.querySelectorAll('[data-tabbtn]')) {
-    b.classList.toggle('active', b.dataset.tabbtn === name);
+  for (const d of TABS) {
+    const tab = document.getElementById(`tab-${d}`);
+    const panel = document.getElementById(`panel-${d}`);
+    const on = d === name;
+    tab.setAttribute('aria-selected', String(on));
+    tab.tabIndex = on ? 0 : -1;
+    panel.hidden = !on;
   }
   if (location.hash !== `#${name}`) history.replaceState(null, '', `#${name}`);
 }

@@ -260,7 +260,40 @@ test('a clean sweep reports tokenErrors: 0 and boardsAdded: 0 explicitly, never 
   const detail = JSON.parse(row!.detail!);
   expect(detail.headline.tokenErrors).toBe(0);
   expect(detail.headline.boardsAdded).toBe(0);
+  // D-21: a clean sweep reports llmBreakerTripped strictly false, not
+  // merely falsy — the field must never be undefined.
+  expect(detail.headline.llmBreakerTripped).toBe(false);
   expect(Object.keys(detail.headline).sort()).toEqual(
-    ['at', 'boardsAdded', 'byCriterion', 'deduped', 'fetched', 'held', 'queued', 'rejected', 'tokenErrors'].sort(),
+    ['at', 'boardsAdded', 'byCriterion', 'deduped', 'fetched', 'held', 'llmBreakerTripped', 'queued', 'rejected', 'tokenErrors'].sort(),
   );
+});
+
+test('a breaker-tripped sweep (D-21) still finishes with status ok and headline.llmBreakerTripped: true', async () => {
+  const db = makeDb();
+  const { runId } = beginSweep(db, 'manual');
+  // Force single-worker determinism, mirroring decide.test.ts's own breaker
+  // tests: an 8-worker pool can have several scoreRelevance calls already
+  // in flight when the trip is observed, making an exact count
+  // order-dependent.
+  const prevConcurrency = process.env.SEEK_DECIDE_CONCURRENCY;
+  process.env.SEEK_DECIDE_CONCURRENCY = '1';
+  try {
+    const config = baseConfig({ greenhouse: { enabled: true, tokens: ['acme'] } });
+    const deps = baseDeps({
+      fetchGreenhouse: async () =>
+        Array.from({ length: 5 }, (_, i) => posting({ url: `https://boards.greenhouse.io/acme/jobs/${i}` })),
+      scoreRelevance: async () => {
+        throw new Error('always fails');
+      },
+    });
+    const result = await runSweepJob(db, config, deps, runId);
+    expect(result.status).toBe('ok');
+    const row = getSweepById(db, runId);
+    expect(row?.status).toBe('ok');
+    const detail = JSON.parse(row!.detail!);
+    expect(detail.headline.llmBreakerTripped).toBe(true);
+  } finally {
+    if (prevConcurrency === undefined) delete process.env.SEEK_DECIDE_CONCURRENCY;
+    else process.env.SEEK_DECIDE_CONCURRENCY = prevConcurrency;
+  }
 });

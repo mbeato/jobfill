@@ -106,6 +106,14 @@ export async function spawnSidecar(): Promise<SidecarResult> {
 // auto-added board visible instead of silent, and boardsAdded is the
 // per-sweep watchlist-growth signal. Both are always numeric (never
 // undefined) so a clean sweep still reports 0 rather than dropping the key.
+// D-21 (Phase 20): llmBreakerTripped is a direct filterCounts passthrough,
+// like held/queued above it, since the breaker lives inside
+// runFilterPromote rather than in a per-source fetch result. A breaker trip
+// means the LLM channel went down mid-sweep, but nothing about the sweep
+// itself failed — fetch ran, cheap rules ran, verdicts were written — so
+// the sweep status stays 'ok' and this field is the explicit signal
+// instead. Same always-present rule as tokenErrors/boardsAdded: a clean
+// sweep reports `false` rather than dropping the key.
 function buildHeadline(fetchedTotal: number, filterCounts: FilterCounts, fetchResults: SourceResult[]) {
   return {
     at: new Date().toISOString(),
@@ -117,6 +125,7 @@ function buildHeadline(fetchedTotal: number, filterCounts: FilterCounts, fetchRe
     byCriterion: filterCounts.byCriterion,
     tokenErrors: fetchResults.reduce((sum, r) => sum + (r.tokenErrors ?? 0), 0),
     boardsAdded: fetchResults.reduce((sum, r) => sum + (r.boardsAdded ?? 0), 0),
+    llmBreakerTripped: filterCounts.llmBreakerTripped,
   };
 }
 

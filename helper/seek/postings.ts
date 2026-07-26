@@ -182,10 +182,22 @@ export function recordDecision(db: Database, id: number, decision: string, reaso
 }
 
 // D-08/D-12: the sweep's scoring backlog — unscored (null) or held-for-retry
-// postings, oldest-fetched-first so the backlog is ground down in order.
+// postings, source-interleaved per D-01/D-02 rather than drained in one flat
+// pass — a ROW_NUMBER() ranks each source's queue independently so a source that
+// arrives late in a sweep reaches the front within one sweep instead of
+// sitting behind the whole greenhouse backlog. `fetched_at ASC, id ASC` is
+// kept as the within-rank tiebreak, so a source's own rows are still
+// oldest-first. `limit` is applied to the OUTER query, after the interleave
+// — applying it before would silently defeat fairness by truncating to
+// whichever source's rows happen to sort first. D-03: a posting that never
+// wins a slot ages out unscored at MAX_FIRST_SEEN_DAYS — 17-D-04 already
+// ruled that is intended backlog GC, not a defect.
 export function listPostingsToDecide(db: Database, limit?: number): PostingRow[] {
   const sql =
-    `SELECT * FROM postings WHERE decision IS NULL OR decision = 'held' ORDER BY fetched_at ASC, id ASC` +
+    `SELECT id, url, url_key, company, title, location, source, posted_at, posted_at_trusted, login_gated, not_fillable, low_confidence, decision, decision_reason, decided_at, fetched_at, created_at FROM (
+       SELECT *, ROW_NUMBER() OVER (PARTITION BY source ORDER BY fetched_at ASC, id ASC) AS rn
+       FROM postings WHERE decision IS NULL OR decision = 'held'
+     ) ORDER BY rn ASC, fetched_at ASC, id ASC` +
     (limit !== undefined ? ' LIMIT ?' : '');
   const rows = (limit !== undefined ? db.query(sql).all(limit) : db.query(sql).all()) as Record<string, unknown>[];
   return rows.map(toRow);

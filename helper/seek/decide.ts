@@ -6,7 +6,7 @@ import type { CompiledCriteria } from './criteria';
 import { JD_FETCHABLE_SOURCES } from './jd-fetch';
 
 // The filter -> promote orchestrator (D-01 two-stage, D-08 held, D-12 cap,
-// D-14 finality). Walks the to-decide backlog (oldest-fetched-first, per
+// D-14 finality). Walks the to-decide backlog (source-interleaved, per
 // listPostingsToDecide's own query-enforced finality) through cheap metadata
 // rules first, then — for survivors, gated by LLM_CAP — JD fetch, the YOE
 // rule, and the LLM relevance pass. Mirrors sweep.ts's runOne per-item

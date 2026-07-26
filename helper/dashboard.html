@@ -2,23 +2,6 @@
 <meta charset="utf-8">
 <title>jobfill tracker</title>
 <style>
-  body { font: 14px/1.5 system-ui, sans-serif; max-width: 1100px; margin: 24px auto; padding: 0 16px; color: #222; }
-  h1 { font-size: 20px; }
-  table { width: 100%; border-collapse: collapse; margin-top: 12px; }
-  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #eee; vertical-align: top; }
-  th { font-size: 12px; text-transform: uppercase; color: #888; }
-  select { padding: 3px; }
-  .muted { color: #999; font-size: 12px; }
-  a { color: #1565c0; text-decoration: none; }
-  h2 { font-size: 16px; font-weight: 600; line-height: 1.2; margin-top: 32px; }
-  /* the legacy tab-strip and per-panel visibility rules above this comment
-     are gone -- plan 09 task 1 replaced the tab strip and panel markup
-     wholesale, so those rules had zero remaining consumers the moment that
-     markup changed. body/h1/table/th,td/th/select/.muted/a/h2 above stay
-     untouched until task 3's legacy-CSS purge: each loses every specificity
-     contest against its jf-scoped replacement, so leaving them a little
-     longer is safe, matching this phase's standing D-03 discipline. */
-
 /* ==== jf: begin ==== */
 /* ── jf: fonts ──────────────────────────────────────────────────────────── */
 @font-face{font-family:'JetBrains Mono';src:url('fonts/jbmono-400.woff2') format('woff2');font-weight:400;font-style:normal;font-display:swap}
@@ -167,19 +150,17 @@
 /* ── jf: sprite hider (global — sits at body level outside every panel) ──── */
 .jf-sr{position:absolute;width:var(--jf-hair);height:var(--jf-hair);margin:calc(-1 * var(--jf-hair));padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0}
 
-/* ── jf: legacy neutralizer ─────────────────────────────────────────────
-   Re-declares, using --jf-* values, every property the legacy element rules
-   above (body/table/th,td/th/select/input/a/h2) would otherwise inherit into
-   a ported panel — e.g. the legacy th's uppercase text transform and td's
-   light-grey bottom rule silently bleeding into new markup. */
-.jf-scope table{width:100%;border-collapse:separate;border-spacing:0;margin-top:0}
-.jf-scope th,.jf-scope td{text-align:left;padding:var(--jf-cell-y) var(--jf-s3);border-bottom:var(--jf-hair) solid var(--jf-rule);vertical-align:top}
-.jf-scope th{font-family:var(--jf-mono);font-size:var(--jf-t-xxs);font-weight:400;letter-spacing:var(--jf-track-wide);text-transform:none;color:var(--jf-ink-3)}
-.jf-scope select{padding:var(--jf-s2) var(--jf-s3);font-family:var(--jf-sans);font-size:var(--jf-t-md)}
-.jf-scope input{border:var(--jf-hair) solid var(--jf-rule-2);padding:var(--jf-s2) var(--jf-s3);font-family:var(--jf-sans);font-size:var(--jf-t-md)}
+/* ── jf: links inside grid cells ──────────────────────────────────────────
+   Every anchor the port renders (queue's posting/resume links, applications'
+   posting/doc links, failures' page link) sits inside a plain <td> or
+   .jf-sub with no class of its own -- this is their one styling source. The
+   plan 01-era "legacy neutralizer" that used to carry this rule (plus six
+   others for table/th/td/select/input/h2/button) is gone: every element
+   those covered now has its own more-specific .jf-grid/.jf-count-t/.jf-btn-
+   family rule that already wins the cascade outright, so re-declaring the
+   same properties one level up was dead weight the moment the last panel
+   was ported. This is the one rule with a real, still-live consumer. */
 .jf-scope a{color:var(--jf-ink-2);text-decoration:underline;text-underline-offset:var(--jf-hair-2);text-decoration-color:var(--jf-rule-strong)}
-.jf-scope h2{font-family:var(--jf-sans);font-size:var(--jf-t-lg);font-weight:600;line-height:var(--jf-lh-tight);margin-top:0}
-.jf-scope button{font:inherit;font-family:var(--jf-mono)}
 
 /* ── jf: buttons ────────────────────────────────────────────────────────── */
 .jf-scope .jf-btn{
@@ -3417,11 +3398,18 @@ JF_STATUS.runs = () => ({
    falling back to a neutral row for a destination with no registration.
    sort is the only field written with innerHTML -- it is a fixed per-
    destination literal defined in each JF_STATUS registration above, never
-   user or server data (T-19-23); the other four fields use textContent. */
+   user or server data (T-19-23); the other four fields use textContent.
+   The try/catch guards against booting straight onto a hash (e.g. a
+   bookmarked #settings) before that destination's async load() has
+   populated its DOM/state -- settings' termCount() reads its textareas
+   directly rather than a pre-initialized array global like every other
+   registration, so it throws on a cold #settings boot without this. */
 function syncStatusBar(dest) {
-  const fact = JF_STATUS[dest]
-    ? JF_STATUS[dest]()
-    : { n: 0, unit: 'rows', filterLabel: 'filter', filter: 'all', sort: '' };
+  const neutral = { n: 0, unit: 'rows', filterLabel: 'filter', filter: 'all', sort: '' };
+  let fact = neutral;
+  if (JF_STATUS[dest]) {
+    try { fact = JF_STATUS[dest](); } catch (e) { fact = neutral; }
+  }
   $('#sbRows').textContent = String(fact.n);
   $('#sbUnit').textContent = fact.unit;
   $('#sbFilterLabel').textContent = fact.filterLabel;

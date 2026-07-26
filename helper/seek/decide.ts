@@ -14,6 +14,15 @@ import { JD_FETCHABLE_SOURCES } from './jd-fetch';
 // posting can be attributed to the exact async stage that failed (D-08:
 // held is a distinct, stricter state than the fill-flow's fail-open — a
 // held posting is NEVER promoted).
+//
+// D-04 (Phase 20): the walk is a bounded worker pool sized by
+// DECIDE_CONCURRENCY(), not a serial for loop — cheap rules still run for
+// the whole backlog per 17-D-04, and the pool bound is also the JD-fetch
+// bound (D-05). Per-posting verdicts are unchanged (each still depends only
+// on the posting, the criteria snapshot, the board map and the profile),
+// but WHICH postings win the last few cap slots now depends on completion
+// order, so FilterCounts stops being reproducible run-to-run once the cap
+// binds — bit-identity is not claimed (D-08's accepted consequence).
 
 // Read fresh on every call (not frozen at import) so a sweep-to-sweep env
 // change — or a test setting process.env.SEEK_LLM_CAP before calling — takes
@@ -25,6 +34,36 @@ export function LLM_CAP(): number {
   const n = Number(process.env.SEEK_LLM_CAP ?? 100);
   return Number.isFinite(n) && n >= 0 ? n : 100;
 }
+
+// D-06: read fresh on every call (not frozen at import), mirroring LLM_CAP()
+// above, so a test can set the env var without a process restart. Fail
+// closed (WR-02) to the default 8 on any non-finite value. The guard here is
+// `>= 1`, not LLM_CAP's `>= 0`: a cap of 0 is a meaningful configuration
+// (score nothing), but a concurrency of 0 spawns zero workers and would
+// silently no-op the entire decide stage — the exact failure class WR-02
+// exists to prevent. No upper clamp, for the same reason SEEK_LLM_CAP has
+// none: this is operator-tuning env config at the operator's own trust
+// level, and clamping it would defeat the "find the real ceiling by turning
+// a knob on a live sweep" purpose it exists for.
+//
+// A separate constant from ats-fetch.ts's ATS_CONCURRENCY = 6 (D-06): that
+// one is politeness toward HTTP hosts, this one is staying under the
+// Anthropic subscription's rate limit — conflating them would make tuning
+// either silently move the other. Default 8, not the handoff's 8-12 upper
+// end: that measurement used trivial prompts, and a real relevance call
+// carries the full profile plus a JD bounded at 12,000 chars, so
+// token-per-minute limits may bind where the trivial-prompt test could not
+// see them — the env override is how the real ceiling gets found on a live
+// sweep.
+export function DECIDE_CONCURRENCY(): number {
+  const n = Number(process.env.SEEK_DECIDE_CONCURRENCY ?? 8);
+  return Number.isFinite(n) && n >= 1 ? n : 8;
+}
+
+// D-19: 5 consecutive scoring failures with no success between them trips
+// the breaker (see the claim helper inside runFilterPromote for the full
+// reasoning).
+const BREAKER_THRESHOLD = 5;
 
 export interface DecideDeps {
   loadCriteria: (db: Database) => CompiledCriteria;
@@ -54,6 +93,7 @@ export interface FilterCounts {
   deduped: number;
   unscored: number;
   byCriterion: { title: number; location: number; stale: number; yoe: number; llm: number; grace: number };
+  llmBreakerTripped: boolean;
 }
 
 // Maps a `rules:<x>` / `llm:not-relevant` decision_reason prefix onto its
@@ -80,7 +120,10 @@ export async function runFilterPromote(db: Database, deps: DecideDeps): Promise<
   // re-compiled per posting. This snapshot is taken here, in the prologue,
   // so a settings save that lands mid-sweep takes effect on the NEXT sweep,
   // not the one already in flight; this is the one place in the code where
-  // that snapshot-per-sweep semantics is observable.
+  // that snapshot-per-sweep semantics is observable. This same once-per-sweep
+  // shape is what makes it safe for concurrent pool workers (D-04) to share
+  // profile, criteria and boardByKey read-only below — no worker may re-fetch
+  // or recompute any of them.
   const criteria = deps.loadCriteria(db);
   const postings = deps.listPostingsToDecide(db);
 
@@ -101,108 +144,172 @@ export async function runFilterPromote(db: Database, deps: DecideDeps): Promise<
     deduped: 0,
     unscored: 0,
     byCriterion: { title: 0, location: 0, stale: 0, yoe: 0, llm: 0, grace: 0 },
+    llmBreakerTripped: false,
   };
 
   let llmCalls = 0;
+  let consecutiveLlmFailures = 0;
 
-  for (const p of postings) {
-    // D-13: grace runs as its own step before classifyMetadata. D-11 fail-open
-    // on a join miss: `?? null` covers Map.get's `undefined` so a posting whose
-    // (source, company) matches no board row proceeds to classifyMetadata
-    // instead of being suppressed.
-    const board = boardByKey.get(`${p.source}:${p.company}`) ?? null;
-    const grace = deps.classifyBoardGrace(p, board);
-    if (grace.reject) {
-      // D-07/D-14: this rejection is permanent and never reconsidered, because
-      // upsertPosting's ON CONFLICT deliberately omits decision/decision_reason/
-      // decided_at. Accepted cost (D-07): a genuinely fresh posting on a
-      // brand-new board is discarded, since a first poll cannot distinguish a
-      // 3-hour-old listing from a 2-year-old one — bounded to one poll per
-      // board by the 48-hour window.
-      deps.recordDecision(db, p.id, 'rejected', grace.reason ?? 'rules:board-grace');
-      counts.rulesRejected++;
-      counts.byCriterion.grace++;
-      continue;
-    }
+  // D-07: the cap is claimed before the work, via a read-check-increment
+  // with no `await` between the three steps. This is atomic for free on
+  // JS's single-threaded event loop precisely BECAUSE nothing suspends
+  // inside it — the absence of any `await` between the read, the check and
+  // the increment IS the entire guarantee, and adding one would silently
+  // reintroduce the race.
+  //
+  // D-20: a claimed slot is never released on failure. Releasing would let
+  // a systematic failure loop indefinitely against the API; the breaker
+  // below, not slot recycling, is the answer to wasted slots.
+  //
+  // D-19 (conflict resolved against 17-D-04): the breaker stops CLAIMING,
+  // not DRAINING — tripping it only makes this return false. Workers keep
+  // consuming the cursor and applying the cheap rules for the whole backlog
+  // (17-D-04's whole-backlog cheap-rule contract is unaffected), so a
+  // breaker-skipped posting is counted in counts.unscored and left decision
+  // NULL, exactly like a capped-out posting — never `held`, which would
+  // corrupt the held-for-retry signal.
+  function claimLlmSlot(): boolean {
+    if (counts.llmBreakerTripped) return false;
+    if (llmCalls >= LLM_CAP()) return false;
+    llmCalls++;
+    return true;
+  }
 
-    const meta = deps.classifyMetadata(p, criteria);
-    if (meta.reject) {
-      deps.recordDecision(db, p.id, 'rejected', meta.reason ?? 'rules:unknown');
-      counts.rulesRejected++;
-      const criterion = criterionOf(meta.reason ?? '');
-      if (criterion) counts.byCriterion[criterion]++;
-      continue;
-    }
-
-    // D-12: the expensive stage (JD fetch + LLM) is capped per sweep.
-    // Capped survivors are left unscored (decision stays NULL, no row
-    // written) — indistinguishable from not-yet-reached, retried next sweep.
-    if (llmCalls >= LLM_CAP()) {
-      counts.unscored++;
-      continue;
-    }
-
-    // D-10: sources with no reachable JD are scored on metadata alone — an
-    // EMPTY jd triggers relevance.ts's trusted-side metadata-only guidance.
-    // (Guidance text must never ride in the jd slot — the prompt's injection
-    // rule makes the model ignore it.) The YOE rule needs JD text, so it is
-    // skipped; seniority stays covered by the title rule + LLM.
-    //
-    // Two disjoint reasons a JD is unreachable, both structural (never
-    // transient), so neither may be left to the held-for-retry path below:
-    //   1. login_gated (YC/Jobright) — fetching would fail every sweep.
-    //   2. the source has no fetchJD branch at all (simplify/getro): their
-    //      apply URLs point at arbitrary third-party hosts that ALLOWED_HOSTS
-    //      refuses as an SSRF control, so fetchJD throws `unsupported source`
-    //      forever. Observed live: 73 of 81 drained simplify postings were
-    //      stranded in held:jd-fetch-error before this branch existed.
-    //
-    // Deliberately source-structural rather than error-based: a greenhouse
-    // JD fetch that 404s IS transient and must keep its D-08 held-for-retry
-    // semantics, so it must not be swept into metadata-only scoring.
-    let jd: string;
-    if (p.login_gated || !JD_FETCHABLE_SOURCES.has(p.source)) {
-      jd = '';
-    } else {
+  // D-04: the pool cursor shape from ats-fetch.ts's runTokenPool, following
+  // ycdir.ts's runCompanyPool more closely — copied inline rather than
+  // imported, since this loop body writes decisions and mutates shared
+  // counters directly rather than accumulating a return array. Every
+  // `continue` below continues this `while` exactly as it continued the
+  // `for` loop it replaces, so the body needed no restructuring — this is
+  // what keeps D-04's diff minimal.
+  let i = 0;
+  async function worker() {
+    while (i < postings.length) {
+      const p = postings[i++];
       try {
-        jd = await deps.fetchJD(p);
-      } catch {
-        deps.recordDecision(db, p.id, 'held', 'held:jd-fetch-error');
-        counts.held++;
-        continue;
-      }
-
-      const yoe = deps.classifyYoe(jd, criteria);
-      if (yoe.reject) {
-        deps.recordDecision(db, p.id, 'rejected', 'rules:yoe');
-        counts.rulesRejected++;
-        counts.byCriterion.yoe++;
-        continue;
-      }
-    }
-
-    try {
-      llmCalls++;
-      const verdict = await deps.scoreRelevance(profile, jd, p);
-      if (verdict.relevant) {
-        const promo = deps.promotePosting(db, p);
-        if (promo.promoted) {
-          deps.recordDecision(db, p.id, 'queued', `llm:relevant — ${verdict.reason}`);
-          counts.queued++;
-        } else {
-          deps.recordDecision(db, p.id, 'rejected', promo.reason ?? 'dedupe:queue');
-          counts.deduped++;
+        // D-13: grace runs as its own step before classifyMetadata. D-11 fail-open
+        // on a join miss: `?? null` covers Map.get's `undefined` so a posting whose
+        // (source, company) matches no board row proceeds to classifyMetadata
+        // instead of being suppressed.
+        const board = boardByKey.get(`${p.source}:${p.company}`) ?? null;
+        const grace = deps.classifyBoardGrace(p, board);
+        if (grace.reject) {
+          // D-07/D-14: this rejection is permanent and never reconsidered, because
+          // upsertPosting's ON CONFLICT deliberately omits decision/decision_reason/
+          // decided_at. Accepted cost (D-07): a genuinely fresh posting on a
+          // brand-new board is discarded, since a first poll cannot distinguish a
+          // 3-hour-old listing from a 2-year-old one — bounded to one poll per
+          // board by the 48-hour window.
+          deps.recordDecision(db, p.id, 'rejected', grace.reason ?? 'rules:board-grace');
+          counts.rulesRejected++;
+          counts.byCriterion.grace++;
+          continue;
         }
-      } else {
-        deps.recordDecision(db, p.id, 'rejected', `llm:not-relevant — ${verdict.reason}`);
-        counts.llmRejected++;
-        counts.byCriterion.llm++;
+
+        const meta = deps.classifyMetadata(p, criteria);
+        if (meta.reject) {
+          deps.recordDecision(db, p.id, 'rejected', meta.reason ?? 'rules:unknown');
+          counts.rulesRejected++;
+          const criterion = criterionOf(meta.reason ?? '');
+          if (criterion) counts.byCriterion[criterion]++;
+          continue;
+        }
+
+        // D-12/D-07: the expensive stage (JD fetch + LLM) is capped per sweep,
+        // claimed before the work so concurrent workers cannot overshoot it.
+        // Capped/breaker-skipped survivors are left unscored (decision stays
+        // NULL, no row written) — indistinguishable from not-yet-reached,
+        // retried next sweep.
+        if (!claimLlmSlot()) {
+          counts.unscored++;
+          continue;
+        }
+
+        // D-10: sources with no reachable JD are scored on metadata alone — an
+        // EMPTY jd triggers relevance.ts's trusted-side metadata-only guidance.
+        // (Guidance text must never ride in the jd slot — the prompt's injection
+        // rule makes the model ignore it.) The YOE rule needs JD text, so it is
+        // skipped; seniority stays covered by the title rule + LLM.
+        //
+        // Two disjoint reasons a JD is unreachable, both structural (never
+        // transient), so neither may be left to the held-for-retry path below:
+        //   1. login_gated (YC/Jobright) — fetching would fail every sweep.
+        //   2. the source has no fetchJD branch at all (simplify/getro): their
+        //      apply URLs point at arbitrary third-party hosts that ALLOWED_HOSTS
+        //      refuses as an SSRF control, so fetchJD throws `unsupported source`
+        //      forever. Observed live: 73 of 81 drained simplify postings were
+        //      stranded in held:jd-fetch-error before this branch existed.
+        //
+        // Deliberately source-structural rather than error-based: a greenhouse
+        // JD fetch that 404s IS transient and must keep its D-08 held-for-retry
+        // semantics, so it must not be swept into metadata-only scoring.
+        let jd: string;
+        if (p.login_gated || !JD_FETCHABLE_SOURCES.has(p.source)) {
+          jd = '';
+        } else {
+          try {
+            jd = await deps.fetchJD(p);
+          } catch {
+            deps.recordDecision(db, p.id, 'held', 'held:jd-fetch-error');
+            counts.held++;
+            continue;
+          }
+
+          const yoe = deps.classifyYoe(jd, criteria);
+          if (yoe.reject) {
+            deps.recordDecision(db, p.id, 'rejected', 'rules:yoe');
+            counts.rulesRejected++;
+            counts.byCriterion.yoe++;
+            continue;
+          }
+        }
+
+        try {
+          const verdict = await deps.scoreRelevance(profile, jd, p);
+          // D-19: any successful verdict — relevant or not — means the LLM
+          // channel worked, so the consecutive-failure streak resets.
+          consecutiveLlmFailures = 0;
+          if (verdict.relevant) {
+            const promo = deps.promotePosting(db, p);
+            if (promo.promoted) {
+              deps.recordDecision(db, p.id, 'queued', `llm:relevant — ${verdict.reason}`);
+              counts.queued++;
+            } else {
+              deps.recordDecision(db, p.id, 'rejected', promo.reason ?? 'dedupe:queue');
+              counts.deduped++;
+            }
+          } else {
+            deps.recordDecision(db, p.id, 'rejected', `llm:not-relevant — ${verdict.reason}`);
+            counts.llmRejected++;
+            counts.byCriterion.llm++;
+          }
+        } catch {
+          deps.recordDecision(db, p.id, 'held', 'held:llm-error');
+          counts.held++;
+          // D-19: a run of BREAKER_THRESHOLD consecutive scoring failures
+          // with no success between them trips the breaker — see the claim
+          // helper above for the full reasoning and D-20's no-release rule
+          // this preserves.
+          consecutiveLlmFailures++;
+          if (consecutiveLlmFailures >= BREAKER_THRESHOLD) {
+            counts.llmBreakerTripped = true;
+          }
+        }
+      } catch {
+        // The pool's own outer catch, mirroring ats-fetch.ts's never-rethrow
+        // posture. The two targeted catches above already isolate fetchJD
+        // and scoreRelevance with their own held:* attribution; this one
+        // exists only to cover a synchronous recordDecision/promotePosting
+        // throw, so one bad posting can never abort the pool. Deliberately
+        // uncounted in FilterCounts: a throw here is a code defect, not an
+        // examined verdict for this posting (unlike held/rejected/queued),
+        // so folding it into any existing bucket would misrepresent what
+        // was actually decided for it.
       }
-    } catch {
-      deps.recordDecision(db, p.id, 'held', 'held:llm-error');
-      counts.held++;
     }
   }
+
+  await Promise.all(Array.from({ length: Math.min(DECIDE_CONCURRENCY(), postings.length) }, () => worker()));
 
   return counts;
 }

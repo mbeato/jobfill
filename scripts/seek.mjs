@@ -19,7 +19,7 @@ function printCounts(results) {
 function printFilterCounts(counts) {
   console.log('[seek] filter/decide:');
   console.log(
-    `  rulesRejected ${counts.rulesRejected}, llmRejected ${counts.llmRejected}, queued ${counts.queued}, held ${counts.held}, deduped ${counts.deduped}, unscored ${counts.unscored}`,
+    `  rulesRejected ${counts.rulesRejected}, llmRejected ${counts.llmRejected}, queued ${counts.queued}, held ${counts.held}, deduped ${counts.deduped}, unscored ${counts.unscored}, errored ${counts.errored ?? 0}`,
   );
   console.log(
     `  byCriterion: title ${counts.byCriterion.title}, location ${counts.byCriterion.location}, stale ${counts.byCriterion.stale}, yoe ${counts.byCriterion.yoe}, llm ${counts.byCriterion.llm}, grace ${counts.byCriterion.grace}`,

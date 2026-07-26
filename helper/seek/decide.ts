@@ -126,6 +126,15 @@ export interface FilterCounts {
   held: number;
   deduped: number;
   unscored: number;
+  // CR-01: postings whose loop body threw outside the two targeted
+  // fetchJD/scoreRelevance catches — a code or DB defect rather than a
+  // verdict. Its own bucket because it is neither of the two it sits
+  // between: not `held` (recordDecision is the very thing that failed, so
+  // no row was written) and not `unscored` (D-19: that means never
+  // attempted). Keeping it counted is what keeps FilterCounts reconcilable
+  // against toDecide, and what makes an every-posting failure visible
+  // instead of a clean-looking sweep.
+  errored: number;
   byCriterion: { title: number; location: number; stale: number; yoe: number; llm: number; grace: number };
   llmBreakerTripped: boolean;
 }
@@ -177,6 +186,7 @@ export async function runFilterPromote(db: Database, deps: DecideDeps): Promise<
     held: 0,
     deduped: 0,
     unscored: 0,
+    errored: 0,
     byCriterion: { title: 0, location: 0, stale: 0, yoe: 0, llm: 0, grace: 0 },
     llmBreakerTripped: false,
   };
@@ -218,11 +228,15 @@ export async function runFilterPromote(db: Database, deps: DecideDeps): Promise<
     return true;
   }
 
-  // D-19: the single trip point, shared by every path that consumed a
-  // claimed slot without producing a verdict. Any success resets the streak
-  // (see the scoreRelevance catch's sibling reset), so only a systematic
-  // failure — the channel down, not one bad posting — can reach the
-  // threshold.
+  // D-19: the single trip point, shared by all three paths that end a
+  // posting without a written verdict — a failed JD fetch (WR-02), a failed
+  // scoring call, and a throw the outer catch caught (CR-01). A posting that
+  // does get a verdict written resets the streak (the reset sits at the end
+  // of the scoring try below), so only a systematic failure — the LLM
+  // channel or the DB down, not one bad posting — can reach the threshold.
+  // The first two always hold a claimed slot; the third may not, but the
+  // response is the same either way: if nothing can be completed, there is
+  // no point claiming more slots.
   function noteFailedSlot(): void {
     consecutiveLlmFailures++;
     if (consecutiveLlmFailures >= breakerThreshold) {
@@ -335,9 +349,6 @@ export async function runFilterPromote(db: Database, deps: DecideDeps): Promise<
 
         try {
           const verdict = await deps.scoreRelevance(profile, jd, p);
-          // D-19: any successful verdict — relevant or not — means the LLM
-          // channel worked, so the consecutive-failure streak resets.
-          consecutiveLlmFailures = 0;
           if (verdict.relevant) {
             const promo = deps.promotePosting(db, p);
             if (promo.promoted) {
@@ -352,6 +363,16 @@ export async function runFilterPromote(db: Database, deps: DecideDeps): Promise<
             counts.llmRejected++;
             counts.byCriterion.llm++;
           }
+          // D-19: any verdict — relevant or not — means the LLM channel
+          // worked, so the consecutive-failure streak resets. CR-01: the
+          // reset sits AFTER the write, not immediately after the score, so
+          // the streak's rule is exactly "a claimed slot that produced a
+          // written verdict resets it; one that produced none increments
+          // it". With the reset before the write, a DB-level write failure
+          // — which throws for every posting, not one — reset the streak on
+          // every iteration and the breaker could never trip on the one
+          // failure mode that burns the whole budget for nothing.
+          consecutiveLlmFailures = 0;
         } catch {
           deps.recordDecision(db, p.id, 'held', 'held:llm-error');
           counts.held++;
@@ -361,16 +382,31 @@ export async function runFilterPromote(db: Database, deps: DecideDeps): Promise<
           // preserves.
           noteFailedSlot();
         }
-      } catch {
+      } catch (e) {
         // The pool's own outer catch, mirroring ats-fetch.ts's never-rethrow
         // posture. The two targeted catches above already isolate fetchJD
         // and scoreRelevance with their own held:* attribution; this one
         // exists only to cover a synchronous recordDecision/promotePosting
-        // throw, so one bad posting can never abort the pool. Deliberately
-        // uncounted in FilterCounts: a throw here is a code defect, not an
-        // examined verdict for this posting (unlike held/rejected/queued),
-        // so folding it into any existing bucket would misrepresent what
-        // was actually decided for it.
+        // throw, so one bad posting can never abort the pool.
+        //
+        // CR-01 (Phase 20 review): never silent, and never free. The
+        // pre-pool serial loop had no outer catch at all — such a throw
+        // propagated to runSweepJob and failed the sweep loudly. Swallowing
+        // it silently regressed that: a DB-level write failure throws for
+        // EVERY posting, not one, and each of those postings had already
+        // burned a cap slot and paid for its LLM call yet ends with
+        // decision NULL, so listPostingsToDecide hands it straight back
+        // next sweep to do it again — indefinitely, with the sweep still
+        // reporting status 'ok'. It cannot be recorded as `held` (the
+        // recordDecision that would write that row is what failed), so it
+        // gets a log, its own count, and — since a slot that produced no
+        // verdict is exactly what the breaker is for (D-20) — the same trip
+        // as the two stages above. That also completes the ats-fetch.ts
+        // precedent this catch cites: its never-rethrow pool RECORDS every
+        // failure (errors: [{ token, error }]) rather than dropping it.
+        console.error(`[decide] posting ${p.id} threw:`, String((e as Error)?.message ?? e));
+        counts.errored++;
+        noteFailedSlot();
       }
     }
   }

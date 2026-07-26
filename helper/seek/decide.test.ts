@@ -741,6 +741,7 @@ test('D-09 check 1: concurrency forced to 1 produces a FilterCounts byte-identic
     held: 1,
     deduped: 0,
     unscored: 0,
+    errored: 0,
     byCriterion: { title: 1, location: 0, stale: 0, yoe: 0, llm: 1, grace: 0 },
     llmBreakerTripped: false,
   };
@@ -1086,4 +1087,62 @@ test('breaker (g2, WR-02): a JD-fetch failure streak is reset by a successful ve
   expect(counts.held).toBe(10);
   expect(counts.queued).toBe(10);
   expect(counts.llmBreakerTripped).toBe(false);
+});
+
+// --- Phase 20 review CR-01: the pool's outer catch is counted, not silent ---
+// The pre-pool serial loop had no outer catch, so a recordDecision/
+// promotePosting throw failed the sweep loudly. The pool must still isolate
+// it (one bad posting never aborts the pool), but it must not erase it.
+
+test('CR-01: a posting whose decision write throws is isolated, counted in counts.errored, and does not abort the pool', async () => {
+  process.env.SEEK_DECIDE_CONCURRENCY = '1';
+  process.env.SEEK_LLM_CAP = '100';
+  const db = makeDb();
+  const rows = Array.from({ length: 4 }, (_, i) => upsertPosting(db, posting({ url: `https://boards.greenhouse.io/acme/jobs/${i}` }))!);
+  const throwingId = rows[1].id;
+  // The reachable path to the outer catch: the failing write also fails the
+  // inner catch's own recordDecision(held), so no row can be written at all.
+  const deps = baseDeps({
+    recordDecision: (db2, id, decision, reason) => {
+      if (id === throwingId) throw new Error('SQLITE_BUSY');
+      return recordDecision(db2, id, decision, reason);
+    },
+  });
+
+  const counts = await runFilterPromote(db, deps);
+
+  expect(counts.errored).toBe(1);
+  expect(counts.queued).toBe(3);
+  // Not held: the recordDecision that would have written that row is
+  // downstream of the throw. Not unscored either (D-19 reserves that for
+  // never-attempted). The row stays decision NULL and comes back next
+  // sweep, which is exactly what counts.errored makes visible.
+  expect(counts.held).toBe(0);
+  expect(counts.unscored).toBe(0);
+  const stored = db.query('SELECT decision FROM postings WHERE id = ?').get(throwingId) as { decision: string | null };
+  expect(stored.decision).toBeNull();
+});
+
+test('CR-01: a systematic throw (every posting) trips the breaker instead of burning the whole cap on a sweep that reports ok', async () => {
+  process.env.SEEK_DECIDE_CONCURRENCY = '1';
+  process.env.SEEK_LLM_CAP = '100';
+  const db = makeDb();
+  for (let i = 0; i < 20; i++) {
+    upsertPosting(db, posting({ url: `https://boards.greenhouse.io/acme/jobs/${i}` }))!;
+  }
+  const deps = baseDeps({
+    // A DB-level write failure throws for every posting, not one.
+    recordDecision: () => {
+      throw new Error('disk I/O error');
+    },
+  });
+
+  const counts = await runFilterPromote(db, deps);
+
+  expect(counts.errored).toBe(5);
+  expect(counts.llmBreakerTripped).toBe(true);
+  expect(counts.unscored).toBe(15);
+  // Reconcilable against toDecide, which is the property the silent
+  // swallow broke.
+  expect(counts.errored + counts.unscored).toBe(counts.toDecide);
 });

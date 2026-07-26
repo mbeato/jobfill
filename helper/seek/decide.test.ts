@@ -3,7 +3,7 @@ import { Database } from 'bun:sqlite';
 import { createPostingsTable, upsertPosting, recordDecision, listPostingsToDecide } from './postings';
 import { createQueueTable } from '../queue';
 import { promotePosting } from './promote';
-import { runFilterPromote, LLM_CAP, type DecideDeps } from './decide';
+import { runFilterPromote, LLM_CAP, type DecideDeps, type FilterCounts } from './decide';
 import { createBoardsTable, upsertBoard } from './boards';
 import { classifyBoardGrace } from './filter';
 import { compileCriteria, defaultCriteria } from './criteria';
@@ -58,13 +58,57 @@ function baseDeps(overrides: Partial<DecideDeps> = {}): DecideDeps {
   };
 }
 
+// --- D-09 shared fixture (Phase 20 plan 03, checks 1 & 2) -------------------
+// One fixture used by both the concurrency=1 identity test and the
+// concurrency=8 invariants tests. Every posting's outcome is a deterministic
+// function of its `company` field (not of ordering or timing), so the same
+// inputs give the same verdicts no matter what order the pool completes
+// them in: some rejected by classifyMetadata, some scored not-relevant, some
+// scored relevant, and one whose scoreRelevance throws.
+type FixtureKind = 'meta-reject' | 'llm-relevant' | 'llm-not-relevant' | 'llm-throw';
+
+const FIXTURE_SPECS: { source: string; kind: FixtureKind }[] = [
+  { source: 'greenhouse', kind: 'meta-reject' },
+  { source: 'greenhouse', kind: 'llm-relevant' },
+  { source: 'lever', kind: 'llm-not-relevant' },
+  { source: 'lever', kind: 'llm-relevant' },
+  { source: 'yc', kind: 'llm-throw' },
+  { source: 'yc', kind: 'llm-relevant' },
+];
+
+function seedFixture(db: Database): { id: number; url_key: string; kind: FixtureKind }[] {
+  return FIXTURE_SPECS.map((spec, idx) => {
+    const row = upsertPosting(
+      db,
+      posting({ source: spec.source, company: `${spec.kind}-${idx}`, url: `https://example.com/${spec.source}/${idx}` }),
+    )!;
+    return { id: row.id, url_key: row.url_key, kind: spec.kind };
+  });
+}
+
+function fixtureDeps(overrides: Partial<DecideDeps> = {}): DecideDeps {
+  return baseDeps({
+    classifyMetadata: p => (p.company.startsWith('meta-reject') ? { reject: true, reason: 'rules:title' } : { reject: false }),
+    scoreRelevance: async (_profile, _jd, p) => {
+      if (p.company.startsWith('llm-not-relevant')) return { relevant: false, reason: 'no fit' };
+      if (p.company.startsWith('llm-throw')) throw new Error('scoring failed');
+      return { relevant: true, reason: 'good fit' };
+    },
+    ...overrides,
+  });
+}
+
 const ORIGINAL_CAP = process.env.SEEK_LLM_CAP;
+const ORIGINAL_CONCURRENCY = process.env.SEEK_DECIDE_CONCURRENCY;
 beforeEach(() => {
   delete process.env.SEEK_LLM_CAP;
+  delete process.env.SEEK_DECIDE_CONCURRENCY;
 });
 afterEach(() => {
   if (ORIGINAL_CAP === undefined) delete process.env.SEEK_LLM_CAP;
   else process.env.SEEK_LLM_CAP = ORIGINAL_CAP;
+  if (ORIGINAL_CONCURRENCY === undefined) delete process.env.SEEK_DECIDE_CONCURRENCY;
+  else process.env.SEEK_DECIDE_CONCURRENCY = ORIGINAL_CONCURRENCY;
 });
 
 test('LLM_CAP defaults to 100 when SEEK_LLM_CAP is unset', () => {
@@ -643,4 +687,136 @@ test('every classifyMetadata call receives the exact same compiled criteria obje
 
   expect(seenCriteria.length).toBe(3);
   expect(seenCriteria.every((c) => c === sentinel)).toBe(true);
+});
+
+// --- Phase 20 plan 03: D-09 checks 1 & 2 (pooled decide loop) --------------
+
+test('D-09 check 1: concurrency forced to 1 produces a FilterCounts byte-identical to the pre-pool serial loop -- the pool restructure changed nothing but scheduling', async () => {
+  process.env.SEEK_DECIDE_CONCURRENCY = '1';
+  process.env.SEEK_LLM_CAP = '100';
+  const db = makeDb();
+  seedFixture(db);
+
+  const counts = await runFilterPromote(db, fixtureDeps());
+
+  // Hand-derived from FIXTURE_SPECS: 1 meta-reject (rules:title), 1
+  // llm-not-relevant, 3 llm-relevant (all queue -- distinct urls, no
+  // dedupe), 1 llm-throw (held). Cap (100) never binds over 6 postings.
+  const expected: FilterCounts = {
+    toDecide: 6,
+    rulesRejected: 1,
+    llmRejected: 1,
+    queued: 3,
+    held: 1,
+    deduped: 0,
+    unscored: 0,
+    byCriterion: { title: 1, location: 0, stale: 0, yoe: 0, llm: 1, grace: 0 },
+    llmBreakerTripped: false,
+  };
+  expect(counts).toEqual(expected);
+});
+
+test('D-09 check 2a: concurrency 8 never exceeds LLM_CAP -- 20 eligible postings, cap 5, exactly 5 scoreRelevance calls and 15 unscored', async () => {
+  process.env.SEEK_DECIDE_CONCURRENCY = '8';
+  process.env.SEEK_LLM_CAP = '5';
+  const db = makeDb();
+  for (let i = 0; i < 20; i++) {
+    upsertPosting(db, posting({ url: `https://boards.greenhouse.io/acme/jobs/${i}` }))!;
+  }
+  let scoreCalls = 0;
+  const deps = baseDeps({
+    scoreRelevance: async () => {
+      scoreCalls++;
+      return { relevant: true, reason: 'fit' };
+    },
+  });
+
+  const counts = await runFilterPromote(db, deps);
+
+  // Proves the claim-before-work atomicity: concurrent workers cannot
+  // overshoot LLM_CAP() no matter how they interleave.
+  expect(scoreCalls).toBe(5);
+  expect(counts.unscored).toBe(15);
+});
+
+test('D-09 check 2b: concurrency 8 isolates a single scoring failure -- held-for-retry does not abort the pool (D-08)', async () => {
+  process.env.SEEK_DECIDE_CONCURRENCY = '8';
+  process.env.SEEK_LLM_CAP = '100';
+  const db = makeDb();
+  const rows = Array.from({ length: 6 }, (_, i) => upsertPosting(db, posting({ url: `https://boards.greenhouse.io/acme/jobs/${i}` }))!);
+  const failingId = rows[3].id;
+  const deps = baseDeps({
+    scoreRelevance: async (_profile, _jd, p) => {
+      if (p.id === failingId) throw new Error('one bad posting');
+      return { relevant: true, reason: 'fit' };
+    },
+  });
+
+  // Resolves (not rejects) -- the pool is never aborted by one bad posting.
+  const counts = await runFilterPromote(db, deps);
+
+  expect(counts.held).toBe(1);
+  const decided = db.query('SELECT id, decision, decision_reason FROM postings').all() as {
+    id: number;
+    decision: string;
+    decision_reason: string;
+  }[];
+  const failingRow = decided.find(r => r.id === failingId)!;
+  expect(failingRow.decision).toBe('held');
+  expect(failingRow.decision_reason).toBe('held:llm-error');
+  const others = decided.filter(r => r.id !== failingId);
+  expect(others.every(r => r.decision !== 'held')).toBe(true);
+});
+
+test('D-09 check 2c: decision multiset is equal between a concurrency-1 run and a concurrency-8 run when the cap is not binding', async () => {
+  process.env.SEEK_LLM_CAP = '100';
+
+  process.env.SEEK_DECIDE_CONCURRENCY = '1';
+  const db1 = makeDb();
+  seedFixture(db1);
+  const counts1 = await runFilterPromote(db1, fixtureDeps());
+
+  process.env.SEEK_DECIDE_CONCURRENCY = '8';
+  const db8 = makeDb();
+  seedFixture(db8);
+  const counts8 = await runFilterPromote(db8, fixtureDeps());
+
+  const rowsOf = (db: Database) =>
+    (db.query('SELECT url_key, decision, decision_reason FROM postings').all() as { url_key: string; decision: string; decision_reason: string }[])
+      .map(r => [r.url_key, r.decision, r.decision_reason] as const)
+      .sort();
+
+  // This equality holds only because the cap is not binding (100, well
+  // above the 6-row fixture). When the cap binds, WHICH postings win the
+  // last slots depends on completion order (D-08's accepted consequence) --
+  // only checks 2a and 2b above are guaranteed under a binding cap.
+  expect(rowsOf(db8)).toEqual(rowsOf(db1));
+  expect(counts8).toEqual(counts1);
+});
+
+test('D-09 check 2d: concurrency 8 is genuinely concurrent -- max in-flight scoreRelevance calls is bounded by 8 but greater than 1', async () => {
+  process.env.SEEK_DECIDE_CONCURRENCY = '8';
+  process.env.SEEK_LLM_CAP = '100';
+  const db = makeDb();
+  for (let i = 0; i < 20; i++) {
+    upsertPosting(db, posting({ url: `https://boards.greenhouse.io/acme/jobs/${i}` }))!;
+  }
+  let inFlight = 0;
+  let maxInFlight = 0;
+  const deps = baseDeps({
+    scoreRelevance: async () => {
+      inFlight++;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise(resolve => setTimeout(resolve, 5));
+      inFlight--;
+      return { relevant: true, reason: 'fit' };
+    },
+  });
+
+  await runFilterPromote(db, deps);
+
+  expect(maxInFlight).toBeLessThanOrEqual(8);
+  // The lower bound proves the pool is actually concurrent, not
+  // accidentally serial.
+  expect(maxInFlight).toBeGreaterThan(1);
 });

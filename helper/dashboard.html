@@ -101,7 +101,15 @@
   --jf-row-min: 2.125rem;
   --jf-stroke: 1.25;
   --jf-sigil: 0.875rem;
-  --jf-gridmin: 12rem;
+  /* Floor for a flex-filling grid. 12rem was ~4 rows, which is unusable on the
+     seek grid: it shares its section with the sweeps and batch grids, and those
+     size to their full content, so seek is the only flexible box and collapses
+     straight onto this floor. Viewport-relative so it adapts to the window
+     rather than guessing, capped so it never dominates a tall monitor. The
+     section scrolls, so a taller floor pushes content down rather than
+     clipping it. Queue and applications also flex-fill but each owns its
+     section, so their allocation already exceeds this and nothing changes. */
+  --jf-gridmin: min(58vh, 40rem);
   --jf-snapmax: 14rem;
   --jf-field-max: 42rem;
   /* the decision column carries the signature move, so it is the one column

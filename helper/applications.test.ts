@@ -209,3 +209,32 @@ test('the partial unique index exists after createApplicationsTable', () => {
     .get() as { c: number };
   expect(idx.c).toBe(1);
 });
+
+// CR-02 (review 2): company and role were the two upserted columns WITHOUT the
+// never-replace-a-real-value-with-a-placeholder guard the others had. That was
+// destructive: extension/background.js sends `role: mapping.role || ''` and a
+// missing company defaults to 'unknown' in insertApplication, so a re-fill that
+// could not read them off the page overwrote good stored values.
+
+test('a re-fill missing company/role does not overwrite the stored ones', () => {
+  const db = makeDb();
+  insertApplication(db, { company: 'Acme Corp', role: 'Senior SWE', url: URL }, noQueue);
+  const refilled = insertApplication(db, { url: URL }, noQueue);
+  expect(refilled.company).toBe('Acme Corp');
+  expect(refilled.role).toBe('Senior SWE');
+});
+
+test("the 'unknown' company placeholder never replaces a real company", () => {
+  const db = makeDb();
+  insertApplication(db, { company: 'Acme Corp', url: URL }, noQueue);
+  const refilled = insertApplication(db, { company: 'unknown', url: URL }, noQueue);
+  expect(refilled.company).toBe('Acme Corp');
+});
+
+test('a re-fill WITH better company/role still updates them', () => {
+  const db = makeDb();
+  insertApplication(db, { company: 'unknown', role: '', url: URL }, noQueue);
+  const refilled = insertApplication(db, { company: 'Acme Corp', role: 'Senior SWE', url: URL }, noQueue);
+  expect(refilled.company).toBe('Acme Corp');
+  expect(refilled.role).toBe('Senior SWE');
+});

@@ -485,6 +485,24 @@ ${body.jd}`;
   if (tex.length < baseTexSrc.length * 0.5) {
     throw new Error(`Tailoring returned a suspiciously short .tex (${tex.length} chars vs base ${baseTexSrc.length}) — refusing to write it.`);
   }
+  // CR-02 (review 2): the checks above only prove the .tex is well-FORMED; they
+  // say nothing about its body. This file is model-authored from a prompt that
+  // inlines an untrusted scraped JD, and pdflatex then renders it into a PDF
+  // that gets base64'd back and attached to a real employer's application.
+  //
+  // \input and \include read an arbitrary file INTO that PDF and need no shell
+  // escape at all, so -no-shell-escape on the compile (added alongside this) is
+  // necessary but NOT sufficient. This TeX install also runs restricted shell
+  // escape — `kpsewhich -var-value shell_escape` returns `p`, and the 14-command
+  // whitelist carries known \write18 vectors (l3sys-query, latexminted,
+  // memoize-extract.py, texosquery-jre8).
+  //
+  // Verified before choosing this list: the base resume contains ZERO of these
+  // primitives, so rejecting them cannot break a legitimate tailoring.
+  const forbidden = tex.match(/\\(input|include|write18|openin|openout|immediate)\b/);
+  if (forbidden) {
+    throw new Error(`Tailoring returned a .tex containing ${forbidden[0]}, which can read or write arbitrary files during compile — refusing to write it.`);
+  }
   // Trailing newline normalised: the model omits it and POSIX tools expect it.
   await Bun.write(texPath, tex.endsWith('\n') ? tex : `${tex}\n`);
   await Bun.write(summaryPath, JSON.stringify(
@@ -494,7 +512,7 @@ ${body.jd}`;
 
   for (let pass = 0; pass < 2; pass++) {
     const latex = Bun.spawn(
-      [PDFLATEX, '-interaction=nonstopmode', `-output-directory=${outDir}`, texPath],
+      [PDFLATEX, '-interaction=nonstopmode', '-no-shell-escape', `-output-directory=${outDir}`, texPath],
       { cwd: outDir, stdout: 'pipe', stderr: 'pipe' },
     );
     const latexTimeout = setTimeout(() => latex.kill(), 60 * 1000);
@@ -577,7 +595,7 @@ async function runClaudeGen(prompt: string, expectPath: string, timeoutMs = 6 * 
 async function compilePdf(texPath: string, outDir: string): Promise<string> {
   for (let pass = 0; pass < 2; pass++) {
     const latex = Bun.spawn(
-      [PDFLATEX, '-interaction=nonstopmode', `-output-directory=${outDir}`, texPath],
+      [PDFLATEX, '-interaction=nonstopmode', '-no-shell-escape', `-output-directory=${outDir}`, texPath],
       { cwd: outDir, stdout: 'pipe', stderr: 'pipe' },
     );
     const latexTimeout = setTimeout(() => latex.kill(), 60 * 1000);

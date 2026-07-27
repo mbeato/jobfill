@@ -172,8 +172,16 @@ export function insertApplication(
       `INSERT INTO applications (company, role, url, status, resume_path, cost_usd, summary, tailor_state, tailor_message, jd, status_changed_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
        ON CONFLICT(url) WHERE url <> '' DO UPDATE SET
-         company        = excluded.company,
-         role           = excluded.role,
+         -- CR-02: these two carry the same never-replace-a-real-value-with-a-
+         -- placeholder guard as the columns below. Unguarded they were
+         -- DESTRUCTIVE: extension/background.js sends role: mapping.role || '',
+         -- and a missing company defaults to 'unknown' at the top of this
+         -- function, so a re-fill that could not read them off the page
+         -- overwrote a good "Acme Corp"/"Senior SWE" with "unknown"/"".
+         -- 'unknown' is compared literally because it is this function's own
+         -- default, not a value any caller means.
+         company        = CASE WHEN excluded.company NOT IN ('', 'unknown') THEN excluded.company ELSE applications.company END,
+         role           = CASE WHEN excluded.role           <> '' THEN excluded.role           ELSE applications.role           END,
          resume_path    = CASE WHEN excluded.resume_path    <> '' THEN excluded.resume_path    ELSE applications.resume_path    END,
          summary        = CASE WHEN excluded.summary        <> '' THEN excluded.summary        ELSE applications.summary        END,
          tailor_state   = CASE WHEN excluded.tailor_state   <> '' THEN excluded.tailor_state   ELSE applications.tailor_state   END,

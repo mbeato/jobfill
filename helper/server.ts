@@ -33,6 +33,7 @@ import {
   saveRelevanceProfile,
   MAX_PROFILE_CHARS,
 } from './seek/criteria';
+import { readVocabulary, VOCABULARY_FIELDS } from './seek/vocabulary';
 import { fetchSimplify } from './seek/simplify';
 import { fetchGetro } from './seek/getro';
 import { harvestYcDirectory } from './seek/ycdir';
@@ -1116,6 +1117,18 @@ Bun.serve({
         saveCriteria(db, result.criteria);
         // Re-read so the client re-renders from what was actually stored.
         return json(readCriteria(db));
+      }
+      // GET /settings/vocabulary?field=title|location — the observed values
+      // behind the criteria editor's term inputs. Read-only and advisory: the
+      // term lists remain free text, so an unknown field or an empty database
+      // returns an empty list rather than an error, and the input degrades to
+      // plain typing.
+      if (pathname === '/settings/vocabulary' && req.method === 'GET') {
+        const field = new URL(req.url).searchParams.get('field') ?? '';
+        if (!VOCABULARY_FIELDS.has(field)) {
+          return json({ error: `unknown field — expected one of ${[...VOCABULARY_FIELDS].join(', ')}` }, 400);
+        }
+        return json({ field, values: readVocabulary(db, field) });
       }
       // GET /settings/profile — the fallback means a fresh install opens the
       // editor pre-filled with the generic template instead of an empty box

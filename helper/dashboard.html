@@ -167,7 +167,8 @@
   }
 }
 @media (forced-colors:active){
-  .jf-scope .jf-chip,.jf-scope .jf-btn,.jf-scope .jf-input,.jf-scope .jf-select,.jf-scope .jf-check,.jf-scope .jf-tag,.jf-scope .jf-state{border:var(--jf-hair) solid ButtonText}
+  .jf-scope .jf-chip,.jf-scope .jf-btn,.jf-scope .jf-input,.jf-scope .jf-select,.jf-scope .jf-check,.jf-scope .jf-tag,.jf-scope .jf-state,.jf-scope .jf-tokens,.jf-scope .jf-token,.jf-scope .jf-sugg{border:var(--jf-hair) solid ButtonText}
+  .jf-scope .jf-sugg-opt[aria-selected="true"]{background:Highlight;color:HighlightText;forced-color-adjust:none}
   .jf-scope .jf-grid tbody td,.jf-scope .jf-grid thead th{border-color:CanvasText}
   .jf-scope .jf-chip[aria-pressed="true"],.jf-scope .jf-btn.is-armed{background:Highlight;color:HighlightText;forced-color-adjust:none}
   .jf-scope .jf-verdict--attn{border:var(--jf-hair) solid CanvasText}
@@ -399,6 +400,103 @@
    rule), never a color — this system owns no error hue and the accent's
    reserved-for list does not include field-level validation. */
 .jf-scope .jf-input--invalid{border-style:dashed;border-color:var(--jf-rule-strong)}
+
+/* ── jf: token input — the criteria term lists' control. A box that LOOKS like
+   .jf-input and contains one .jf-token per term plus a bare entry field, so
+   the four term lists read as sets of discrete values rather than as prose.
+   Free text stays first-class: the entry is a plain text input and the
+   suggestion list is optional, because these lists are the user's own
+   vocabulary and not a closed enum. ──────────────────────────────────────── */
+.jf-scope .jf-tokens{
+  display:flex;flex-wrap:wrap;align-items:center;gap:var(--jf-s2);
+  width:100%;min-height:var(--jf-row-min);
+  padding:var(--jf-s2) var(--jf-s3);
+  background:var(--jf-paper-cell);
+  border:var(--jf-hair) solid var(--jf-rule-2);border-radius:var(--jf-r2);
+  cursor:text;
+  transition:border-color var(--jf-dur-fast) var(--jf-ease-out);
+}
+.jf-scope .jf-tokens:hover{border-color:var(--jf-rule-strong)}
+.jf-scope .jf-tokens:focus-within{outline:var(--jf-hair-2) solid var(--jf-focus);outline-offset:var(--jf-hair)}
+.jf-scope .jf-token{
+  display:inline-flex;align-items:center;gap:var(--jf-s2);
+  padding:var(--jf-s1) var(--jf-s2);
+  background:var(--jf-paper-sunk);color:var(--jf-ink);
+  border:var(--jf-hair) solid var(--jf-rule-2);border-radius:var(--jf-r2);
+  font-family:var(--jf-mono);font-size:var(--jf-t-xs);line-height:var(--jf-lh-data);
+  white-space:pre;
+}
+.jf-scope .jf-token-x{
+  appearance:none;cursor:pointer;flex:none;
+  padding:0;width:var(--jf-t-sm);height:var(--jf-t-sm);
+  display:grid;place-content:center;
+  background:none;color:var(--jf-ink-3);
+  border:0;border-radius:var(--jf-r2);
+  font-family:var(--jf-mono);font-size:var(--jf-t-xs);line-height:1;
+}
+.jf-scope .jf-token-x:hover{color:var(--jf-ink);background:var(--jf-paper-cell)}
+.jf-scope .jf-token-x:focus-visible{outline:var(--jf-hair-2) solid var(--jf-focus);outline-offset:var(--jf-hair)}
+.jf-scope .jf-tokens-entry{
+  flex:1 1 8rem;min-width:6rem;
+  padding:var(--jf-s1) 0;margin:0;
+  background:none;color:var(--jf-ink);
+  border:0;outline:0;
+  font-family:var(--jf-mono);font-size:var(--jf-t-sm);line-height:var(--jf-lh-data);
+}
+.jf-scope .jf-tokens-entry::placeholder{color:var(--jf-ink-4)}
+
+/* The suggestion list. Anchored under the box; ink-only like everything else,
+   with the active option using the same inverted paper as a pressed chip. */
+.jf-scope .jf-sugg-wrap{position:relative}
+.jf-scope .jf-sugg{
+  position:absolute;z-index:20;inset-inline:0;top:calc(100% + var(--jf-hair));
+  margin:0;padding:0;list-style:none;
+  max-height:14rem;overflow-y:auto;
+  background:var(--jf-paper-cell);
+  border:var(--jf-hair) solid var(--jf-rule-strong);border-radius:var(--jf-r2);
+}
+.jf-scope .jf-sugg[hidden]{display:none}
+.jf-scope .jf-sugg li{margin:0}
+.jf-scope .jf-sugg-opt{
+  appearance:none;cursor:pointer;
+  display:flex;align-items:center;justify-content:space-between;gap:var(--jf-s4);
+  width:100%;text-align:left;
+  padding:var(--jf-s2) var(--jf-s3);
+  background:none;color:var(--jf-ink-2);
+  border:0;border-bottom:var(--jf-hair) solid var(--jf-rule);
+  font-family:var(--jf-mono);font-size:var(--jf-t-xs);line-height:var(--jf-lh-data);
+}
+.jf-scope .jf-sugg li:last-child .jf-sugg-opt{border-bottom:0}
+.jf-scope .jf-sugg-opt:hover{color:var(--jf-ink);background:var(--jf-paper-sunk)}
+.jf-scope .jf-sugg-opt[aria-selected="true"]{background:var(--jf-paper-inv);color:var(--jf-ink-inv)}
+.jf-scope .jf-sugg-n{flex:none;color:var(--jf-ink-4);font-variant-numeric:tabular-nums}
+.jf-scope .jf-sugg-opt[aria-selected="true"] .jf-sugg-n{color:var(--jf-ink-inv)}
+
+/* ── jf: range — the yoe cap's coarse control, paired with the number box and
+   the no-cap toggle. Custom-styled because the system owns no native control
+   appearance; radii stay <=3px and the track is a hairline. ─────────────── */
+.jf-scope .jf-range{
+  appearance:none;flex:1 1 8rem;min-width:6rem;max-width:16rem;
+  height:var(--jf-t-lg);margin:0;padding:0;background:none;cursor:pointer;
+}
+.jf-scope .jf-range:disabled{cursor:not-allowed}
+.jf-scope .jf-range::-webkit-slider-runnable-track{height:var(--jf-hair-2);background:var(--jf-rule-strong);border-radius:var(--jf-r0)}
+.jf-scope .jf-range::-moz-range-track{height:var(--jf-hair-2);background:var(--jf-rule-strong);border-radius:var(--jf-r0)}
+.jf-scope .jf-range:disabled::-webkit-slider-runnable-track{background:var(--jf-rule)}
+.jf-scope .jf-range:disabled::-moz-range-track{background:var(--jf-rule)}
+.jf-scope .jf-range::-webkit-slider-thumb{
+  appearance:none;width:var(--jf-s4);height:var(--jf-t-lg);
+  margin-top:calc((var(--jf-hair-2) - var(--jf-t-lg)) / 2);
+  background:var(--jf-paper-inv);border:var(--jf-hair) solid var(--jf-paper-inv);border-radius:var(--jf-r2);
+}
+.jf-scope .jf-range::-moz-range-thumb{
+  width:var(--jf-s4);height:var(--jf-t-lg);
+  background:var(--jf-paper-inv);border:var(--jf-hair) solid var(--jf-paper-inv);border-radius:var(--jf-r2);
+}
+.jf-scope .jf-range:disabled::-webkit-slider-thumb{background:var(--jf-paper-sunk);border-color:var(--jf-rule-strong);border-style:dashed}
+.jf-scope .jf-range:disabled::-moz-range-thumb{background:var(--jf-paper-sunk);border-color:var(--jf-rule-strong);border-style:dashed}
+.jf-scope .jf-range:focus-visible{outline:var(--jf-hair-2) solid var(--jf-focus);outline-offset:var(--jf-hair)}
+.jf-scope .jf-yoe{display:flex;flex-wrap:wrap;align-items:center;gap:var(--jf-s3) var(--jf-s5)}
 
 /* ── jf: chip group (plan 04 — shared by queue's lifecycle filter, and by
    the filter chips the applications/seek surfaces add in later plans).
@@ -2740,8 +2838,233 @@ const TERM_FIELDS = [
     on: 'these exact values are ignored as locations' },
 ];
 
+// -----------------------------------------------------------------------
+// Token input — the control the four term lists use instead of a textarea.
+//
+// The load-bearing decision: the HIDDEN INPUT REMAINS THE SOURCE OF TRUTH.
+// Each widget writes its terms back to a hidden `.jf-term` field as the same
+// newline-joined string the textarea held, so termsOf(), readCriteriaForm(),
+// validateCriteriaForm() and — critically — isNarrowing() are untouched by
+// this change and keep receiving exactly the before/after term sets they got
+// before (19-REVIEW WR-01's directional set difference depends on that).
+// The chips are a rendering of that string, never a second source of truth.
+//
+// Free text stays first-class. Suggestions come from GET /settings/vocabulary,
+// which is advisory only: if it fails, or the database is empty, the entry is
+// still a plain text input and every rule still works. These lists are the
+// user's own vocabulary, not a closed enum.
+//
+// Semantics are NOT changed by picking from the list. A selected suggestion is
+// inserted as the same free-text term typing it would have produced, so the
+// per-rule matching (word-boundary for the three title/location rules,
+// whole-field equality for work-mode) is decided by the rule as before, never
+// by where the term came from.
+// -----------------------------------------------------------------------
+
+// Which vocabulary feeds each term input's suggestions.
+const TOKEN_VOCAB = {
+  'crit-seniority': 'title',
+  'crit-nonEng': 'title',
+  'crit-location': 'location',
+  'crit-workmode': 'location',
+};
+const MAX_SUGGESTIONS = 8;
+
+// One fetch per field per page load, shared by the two inputs that use it.
+// A rejected promise is cached as [] so a dead endpoint is not re-requested on
+// every keystroke.
+const vocabCache = {};
+function loadVocabulary(field) {
+  if (!vocabCache[field]) {
+    vocabCache[field] = fetch(`/settings/vocabulary?field=${encodeURIComponent(field)}`)
+      .then((r) => (r.ok ? r.json() : { values: [] }))
+      .then((d) => (Array.isArray(d.values) ? d.values : []))
+      .catch(() => []);
+  }
+  return vocabCache[field];
+}
+
+function tokenInputMarkup(id, rule, stateId, placeholder) {
+  return `
+    <div class="jf-sugg-wrap">
+      <div class="jf-tokens" data-jf-tokens="${esc(id)}" data-rule="${esc(rule)}">
+        <span class="jf-token-list"></span>
+        <input class="jf-tokens-entry" type="text" id="${esc(id)}-entry" role="combobox"
+               autocomplete="off" spellcheck="false" placeholder="${esc(placeholder)}"
+               aria-expanded="false" aria-autocomplete="list" aria-controls="${esc(id)}-sugg"
+               aria-describedby="${esc(stateId)}">
+      </div>
+      <ul class="jf-sugg" id="${esc(id)}-sugg" role="listbox" hidden></ul>
+      <input type="hidden" class="jf-term" id="${esc(id)}" data-rule="${esc(rule)}">
+    </div>`;
+}
+
 function termsOf(id) {
   return document.getElementById(id).value.split('\n').map((s) => s.trim()).filter(Boolean);
+}
+
+// The single write path into a term list. Everything else (add, remove,
+// initial load) goes through here, so the hidden field, the chips and the
+// live-state row can never disagree. `silent` skips the input event on the
+// first render, where refreshCriteriaHints runs once for the whole form
+// anyway.
+function setTerms(id, terms, silent) {
+  const seen = new Set();
+  const clean = [];
+  for (const t of terms) {
+    const trimmed = String(t ?? '').trim();
+    // Case-insensitive dedupe, because compileTerms compiles with the `i`
+    // flag — two casings of one term are one rule, and showing both as
+    // separate chips would misrepresent the rule to the person auditing it.
+    const key = trimmed.toLowerCase();
+    if (!trimmed || seen.has(key)) continue;
+    seen.add(key);
+    clean.push(trimmed);
+  }
+  const hidden = document.getElementById(id);
+  hidden.value = clean.join('\n');
+  renderTokenChips(id);
+  if (!silent) hidden.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+function renderTokenChips(id) {
+  const box = document.querySelector(`[data-jf-tokens="${id}"]`);
+  if (!box) return;
+  const list = box.querySelector('.jf-token-list');
+  const terms = termsOf(id);
+  list.innerHTML = terms
+    .map(
+      (t, i) =>
+        `<span class="jf-token">${esc(t)}<button type="button" class="jf-token-x" data-jf-token-rm="${i}" ` +
+        `aria-label="remove ${esc(t)}" tabindex="-1">&times;</button></span>`,
+    )
+    .join('');
+}
+
+function addTerm(id, value) {
+  const v = String(value ?? '').trim();
+  if (!v) return;
+  setTerms(id, [...termsOf(id), v]);
+}
+
+function removeTermAt(id, index) {
+  const terms = termsOf(id);
+  terms.splice(index, 1);
+  setTerms(id, terms);
+}
+
+// ---- suggestions ------------------------------------------------------
+
+function suggBox(id) {
+  return document.getElementById(`${id}-sugg`);
+}
+
+function closeSuggestions(id) {
+  const box = suggBox(id);
+  if (!box) return;
+  box.hidden = true;
+  box.innerHTML = '';
+  const entry = document.getElementById(`${id}-entry`);
+  if (entry) entry.setAttribute('aria-expanded', 'false');
+}
+
+async function openSuggestions(id) {
+  const entry = document.getElementById(`${id}-entry`);
+  const box = suggBox(id);
+  if (!entry || !box) return;
+  const typed = entry.value.trim().toLowerCase();
+  const values = await loadVocabulary(TOKEN_VOCAB[id]);
+  // A term already on the list is not offered again — the chip is right there.
+  const chosen = new Set(termsOf(id).map((t) => t.toLowerCase()));
+  const matches = values
+    .filter((v) => !chosen.has(v.value.toLowerCase()))
+    .filter((v) => (typed ? v.value.toLowerCase().includes(typed) : true))
+    .slice(0, MAX_SUGGESTIONS);
+  // The entry may have changed while the vocabulary was in flight.
+  if (entry.value.trim().toLowerCase() !== typed) return;
+  if (!matches.length) return closeSuggestions(id);
+  // NOTHING is highlighted until the user arrows to it. Auto-highlighting the
+  // first match would make Enter silently swap typed text for a suggestion —
+  // type "senior", get "Senior Software Engineer". On a surface where a wrong
+  // term permanently rejects postings (Phase 9 D-14), explicit selection has
+  // to beat implicit.
+  box.innerHTML = matches
+    .map(
+      (m) =>
+        `<li><button type="button" class="jf-sugg-opt" role="option" aria-selected="false" ` +
+        `data-jf-sugg="${esc(m.value)}" tabindex="-1">` +
+        `<span>${esc(m.value)}</span><span class="jf-sugg-n">${Number(m.count)}</span></button></li>`,
+    )
+    .join('');
+  box.hidden = false;
+  entry.setAttribute('aria-expanded', 'true');
+}
+
+function moveSuggestion(id, delta) {
+  const box = suggBox(id);
+  if (!box || box.hidden) return;
+  const opts = [...box.querySelectorAll('.jf-sugg-opt')];
+  if (!opts.length) return;
+  const at = opts.findIndex((o) => o.getAttribute('aria-selected') === 'true');
+  // From "nothing selected", down goes to the first option and up to the last.
+  const next = at === -1 ? (delta > 0 ? 0 : opts.length - 1) : (at + delta + opts.length) % opts.length;
+  opts.forEach((o, i) => o.setAttribute('aria-selected', String(i === next)));
+  opts[next].scrollIntoView({ block: 'nearest' });
+}
+
+function selectedSuggestion(id) {
+  const box = suggBox(id);
+  if (!box || box.hidden) return null;
+  const opt = box.querySelector('.jf-sugg-opt[aria-selected="true"]');
+  return opt ? opt.dataset.jfSugg : null;
+}
+
+// ---- yoe cap: slider + number + explicit no-cap ------------------------
+//
+// HARD CONSTRAINT (todo 2026-07-25, and criteria.ts's yoeThreshold: number|null):
+// blank means the rule is OFF, and a bare <input type="range"> ALWAYS has a
+// value, so a slider on its own would silently convert "yoe filtering is off"
+// into "capped at wherever the handle sits". Combined with Phase 9 D-14 — a
+// rejected posting is never revived by re-discovery — that would permanently
+// reject postings the user never meant to filter.
+//
+// So #cap-yoe stays the single value read by readCriteriaForm, unchanged, and
+// '' still means null. The slider and the checkbox only ever write THROUGH it.
+// The checkbox is the explicit no-cap control the constraint demands.
+const YOE_DEFAULT_ON_ENABLE = 6;
+
+function syncYoeControls(source) {
+  const nocap = document.getElementById('cap-yoe-nocap');
+  const range = document.getElementById('cap-yoe-range');
+  const num = document.getElementById('cap-yoe');
+  if (!nocap || !range || !num) return;
+
+  if (source === 'nocap') {
+    if (nocap.checked) {
+      num.value = '';
+    } else if (num.value.trim() === '') {
+      num.value = String(range.value);
+    }
+  } else if (source === 'range') {
+    num.value = String(range.value);
+  }
+
+  // The number box remains typeable and authoritative: a value typed there
+  // unticks no-cap, and clearing it re-ticks it, so the two controls cannot
+  // disagree about whether the rule is on. It is never disabled — it is the
+  // way back from no-cap, and disabling it mid-edit would take focus away the
+  // moment the field was cleared.
+  const off = num.value.trim() === '';
+  nocap.checked = off;
+  range.disabled = off;
+  if (!off) {
+    const n = Number(num.value);
+    if (Number.isFinite(n)) range.value = String(Math.min(50, Math.max(0, n)));
+  }
+  // Called directly rather than dispatched on #cap-yoe: the delegated input
+  // listener routes that element back into this function, so dispatching here
+  // would recurse.
+  refreshCriteriaHints();
 }
 function termCount() {
   return TERM_FIELDS.reduce((n, f) => n + termsOf(f.id).length, 0);
@@ -2821,44 +3144,44 @@ function renderCriteria(c) {
     <div class="jf-form">
       <div class="jf-frow">
         <div class="jf-flabel">
-          <label for="crit-seniority">reject titles containing (seniority)</label>
-          <p class="jf-help">one term per line. matched anywhere in the title.</p>
+          <label for="crit-seniority-entry">reject titles containing (seniority)</label>
+          <p class="jf-help">matched anywhere in the title. type to add a term, or pick one of the titles already in the database.</p>
         </div>
         <div class="jf-ffield">
-          <textarea class="jf-input jf-term" id="crit-seniority" rows="6" data-rule="seniority" aria-describedby="state-seniority" spellcheck="false">${esc(c.seniorityTerms.join('\n'))}</textarea>
+          ${tokenInputMarkup('crit-seniority', 'seniority', 'state-seniority', 'add a title term')}
           <p class="jf-state" id="state-seniority" role="status"></p>
         </div>
       </div>
 
       <div class="jf-frow">
         <div class="jf-flabel">
-          <label for="crit-nonEng">reject titles containing (non-engineering)</label>
-          <p class="jf-help">one term per line. keeps the queue to engineering roles.</p>
+          <label for="crit-nonEng-entry">reject titles containing (non-engineering)</label>
+          <p class="jf-help">keeps the queue to engineering roles. type to add a term, or pick one of the titles already in the database.</p>
         </div>
         <div class="jf-ffield">
-          <textarea class="jf-input jf-term" id="crit-nonEng" rows="6" data-rule="non-engineering" aria-describedby="state-nonEng" spellcheck="false">${esc(c.nonEngineeringTerms.join('\n'))}</textarea>
+          ${tokenInputMarkup('crit-nonEng', 'non-engineering', 'state-nonEng', 'add a title term')}
           <p class="jf-state" id="state-nonEng" role="status"></p>
         </div>
       </div>
 
       <div class="jf-frow">
         <div class="jf-flabel">
-          <label for="crit-location">accept locations containing</label>
-          <p class="jf-help">a posting is rejected only when its location matches none of these.</p>
+          <label for="crit-location-entry">accept locations containing</label>
+          <p class="jf-help">a posting is rejected only when its location matches none of these. matched anywhere in the location, so "new york" also matches "new york, ny".</p>
         </div>
         <div class="jf-ffield">
-          <textarea class="jf-input jf-term" id="crit-location" rows="6" data-rule="location" aria-describedby="state-location" spellcheck="false">${esc(c.locationTerms.join('\n'))}</textarea>
+          ${tokenInputMarkup('crit-location', 'location', 'state-location', 'add a location term')}
           <p class="jf-state" id="state-location" role="status"></p>
         </div>
       </div>
 
       <div class="jf-frow">
         <div class="jf-flabel">
-          <label for="crit-workmode">ignore these exact location values</label>
-          <p class="jf-help">matched only when the ENTIRE location field is exactly one of these, so "hybrid" will not match "hybrid, nyc".</p>
+          <label for="crit-workmode-entry">ignore these exact location values</label>
+          <p class="jf-help">matched only when the ENTIRE location field is exactly one of these, so "hybrid" will not match "hybrid, nyc". a suggestion here is therefore only useful if it is the whole field.</p>
         </div>
         <div class="jf-ffield">
-          <textarea class="jf-input jf-term" id="crit-workmode" rows="5" data-rule="work-mode-neutral" aria-describedby="state-workmode" spellcheck="false">${esc(c.workModeOnlyTerms.join('\n'))}</textarea>
+          ${tokenInputMarkup('crit-workmode', 'work-mode-neutral', 'state-workmode', 'add an exact location value')}
           <p class="jf-state" id="state-workmode" role="status"></p>
         </div>
       </div>
@@ -2902,10 +3225,20 @@ function renderCriteria(c) {
       <div class="jf-frow">
         <div class="jf-flabel">
           <label for="cap-yoe">years-of-experience cap (years)</label>
-          <p class="jf-help">leave blank for no cap.</p>
+          <p class="jf-help">drag or type a cap, or tick no cap to turn the rule off. no cap is not the same as a cap of 0.</p>
         </div>
         <div class="jf-ffield">
-          <span><input class="jf-input jf-input--num" type="number" id="cap-yoe" min="0" max="50" value="${c.yoeThreshold === null ? '' : esc(String(c.yoeThreshold))}" placeholder="no cap" inputmode="numeric" aria-describedby="state-yoe"> <span class="jf-count-live" aria-hidden="true">years</span></span>
+          <div class="jf-yoe">
+            <div class="jf-checkrow">
+              <input class="jf-check" type="checkbox" id="cap-yoe-nocap" ${c.yoeThreshold === null ? 'checked' : ''}>
+              <label for="cap-yoe-nocap">no cap</label>
+            </div>
+            <input class="jf-range" type="range" id="cap-yoe-range" min="0" max="50" step="1"
+                   value="${c.yoeThreshold === null ? String(YOE_DEFAULT_ON_ENABLE) : esc(String(c.yoeThreshold))}"
+                   ${c.yoeThreshold === null ? 'disabled' : ''}
+                   aria-label="years-of-experience cap" aria-describedby="state-yoe">
+            <span><input class="jf-input jf-input--num" type="number" id="cap-yoe" min="0" max="50" value="${c.yoeThreshold === null ? '' : esc(String(c.yoeThreshold))}" placeholder="off" inputmode="numeric" aria-describedby="state-yoe"> <span class="jf-count-live" aria-hidden="true">years</span></span>
+          </div>
           <p class="jf-state" id="state-yoe" role="status"></p>
         </div>
       </div>
@@ -2921,7 +3254,21 @@ function renderCriteria(c) {
     </div>
     <div id="criteriaSaveError"></div>`;
 
+  // Terms are written in AFTER the markup, never interpolated into the hidden
+  // field's value attribute — the list is newline-joined, and a newline in an
+  // attribute value is not reliably preserved.
+  setTerms('crit-seniority', c.seniorityTerms, true);
+  setTerms('crit-nonEng', c.nonEngineeringTerms, true);
+  setTerms('crit-location', c.locationTerms, true);
+  setTerms('crit-workmode', c.workModeOnlyTerms, true);
+
   refreshCriteriaHints();
+
+  // Warm the two vocabularies so the first keystroke has suggestions ready.
+  // Advisory: a failure here is cached as an empty list and the inputs stay
+  // plain text fields.
+  loadVocabulary('title');
+  loadVocabulary('location');
 }
 
 // The single place the form is translated into the endpoint's shape, so the
@@ -3005,10 +3352,103 @@ function refreshCriteriaHints() {
 // replacing the 9 inline oninput/onchange attributes the previous markup
 // carried (4 term textareas + 4 cap/yoe number inputs + 1 checkbox).
 document.getElementById('settingsCriteriaBody').addEventListener('input', (e) => {
-  if (e.target.matches('.jf-term, #cap-yoe, #cap-stale, #cap-indexed, #cap-firstseen')) refreshCriteriaHints();
+  // #cap-yoe routes through syncYoeControls, which calls refreshCriteriaHints
+  // itself once the slider and the no-cap tick have caught up.
+  if (e.target.id === 'cap-yoe') return syncYoeControls('num');
+  if (e.target.id === 'cap-yoe-range') return syncYoeControls('range');
+  if (e.target.matches('.jf-term, #cap-stale, #cap-indexed, #cap-firstseen')) refreshCriteriaHints();
 });
 document.getElementById('settingsCriteriaBody').addEventListener('change', (e) => {
   if (e.target.id === 'crit-builtins') refreshCriteriaHints();
+  if (e.target.id === 'cap-yoe-nocap') syncYoeControls('nocap');
+});
+
+// ---- token input interaction (delegated, so a re-render needs no rebind) ----
+
+// Clicking anywhere in the box focuses the entry, which is what makes the
+// whole thing read as one field rather than as chips beside a text input.
+document.getElementById('settingsCriteriaBody').addEventListener('mousedown', (e) => {
+  const box = e.target.closest('.jf-tokens');
+  if (!box || e.target.closest('.jf-token-x') || e.target.matches('.jf-tokens-entry')) return;
+  e.preventDefault();
+  box.querySelector('.jf-tokens-entry').focus();
+});
+
+document.getElementById('settingsCriteriaBody').addEventListener('click', (e) => {
+  const rm = e.target.closest('[data-jf-token-rm]');
+  if (rm) {
+    const id = rm.closest('.jf-tokens').dataset.jfTokens;
+    removeTermAt(id, Number(rm.dataset.jfTokenRm));
+    document.getElementById(`${id}-entry`).focus();
+    return;
+  }
+  const opt = e.target.closest('.jf-sugg-opt');
+  if (opt) {
+    const id = opt.closest('.jf-sugg-wrap').querySelector('.jf-tokens').dataset.jfTokens;
+    const entry = document.getElementById(`${id}-entry`);
+    addTerm(id, opt.dataset.jfSugg);
+    entry.value = '';
+    closeSuggestions(id);
+    entry.focus();
+  }
+});
+
+document.getElementById('settingsCriteriaBody').addEventListener('input', (e) => {
+  if (!e.target.matches('.jf-tokens-entry')) return;
+  const id = e.target.closest('.jf-tokens').dataset.jfTokens;
+  // A comma commits, so pasting "remote, hybrid" produces two terms rather
+  // than one term containing a comma.
+  if (e.target.value.includes(',')) {
+    const parts = e.target.value.split(',');
+    e.target.value = parts.pop();
+    setTerms(id, [...termsOf(id), ...parts]);
+  }
+  openSuggestions(id);
+});
+
+document.getElementById('settingsCriteriaBody').addEventListener('keydown', (e) => {
+  if (!e.target.matches('.jf-tokens-entry')) return;
+  const id = e.target.closest('.jf-tokens').dataset.jfTokens;
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    if (suggBox(id).hidden) openSuggestions(id);
+    else moveSuggestion(id, e.key === 'ArrowDown' ? 1 : -1);
+    return;
+  }
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    // A highlighted suggestion wins; otherwise whatever was typed is added
+    // verbatim, which is what keeps free text first-class.
+    const picked = selectedSuggestion(id);
+    addTerm(id, picked !== null && e.target.value.trim() ? picked : e.target.value);
+    e.target.value = '';
+    closeSuggestions(id);
+    return;
+  }
+  if (e.key === 'Escape') {
+    closeSuggestions(id);
+    return;
+  }
+  if (e.key === 'Backspace' && e.target.value === '') {
+    const terms = termsOf(id);
+    if (terms.length) removeTermAt(id, terms.length - 1);
+  }
+});
+
+// Commit on blur so a typed term is not silently lost by clicking Save, and
+// close the list. The timeout lets a suggestion click land first.
+document.getElementById('settingsCriteriaBody').addEventListener('focusout', (e) => {
+  if (!e.target.matches('.jf-tokens-entry')) return;
+  const id = e.target.closest('.jf-tokens').dataset.jfTokens;
+  const entry = e.target;
+  setTimeout(() => {
+    if (document.activeElement === entry) return;
+    if (entry.value.trim()) {
+      addTerm(id, entry.value);
+      entry.value = '';
+    }
+    closeSuggestions(id);
+  }, 150);
 });
 // The save button's non-narrowing single-click path: when the button does
 // NOT carry .jf-armable, the shared delegated .jf-armable listener ignores

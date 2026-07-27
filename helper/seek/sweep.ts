@@ -56,7 +56,7 @@ export interface SweepDeps {
     db: Database,
     input: { ats: string; token: string; source_of_discovery: string },
     blocklist?: string[],
-  ) => unknown;
+  ) => { inserted: boolean } | null | undefined;
   recordBoardResult: (db: Database, ats: string, token: string, ok: boolean) => void;
   resolveEffectiveTokens: (db: Database, ats: string, configTokens: string[], blocklist?: string[]) => string[];
   // D-17/D-19: slug-only harvest, no postings. `args.db`/`args.blocklist` are
@@ -179,7 +179,11 @@ export async function runSweep(
         try {
           let boardsAdded = 0;
           for (const b of harvest(postings)) {
-            if (deps.upsertBoard(db, { ats: b.ats, token: b.token, source_of_discovery: source }, config.blocklist) != null) {
+            // Count real inserts only. `!= null` also counted the ON CONFLICT
+            // DO UPDATE path, so a board harvested by both simplify and getro in
+            // one sweep was counted twice — sweep #14 reported boardsAdded: 429
+            // against 427 actual rows.
+            if (deps.upsertBoard(db, { ats: b.ats, token: b.token, source_of_discovery: source }, config.blocklist)?.inserted) {
               boardsAdded++;
             }
           }

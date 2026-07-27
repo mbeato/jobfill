@@ -18,6 +18,12 @@ export interface BoardRow {
   updated_at: string;
 }
 
+// 16-REVIEW WR-01: the result of an upsert, distinguished from a plain read so
+// callers can count real additions. ON CONFLICT DO UPDATE ... RETURNING * hands
+// back a row on update as well as insert, which is what made `!= null` an
+// add-counter that also counted re-discoveries (todo item 5).
+export type UpsertedBoardRow = BoardRow & { inserted: boolean };
+
 export const BOARDS_ATS = new Set(['greenhouse', 'lever', 'ashby']);
 // 'consider' stays allowlisted even though no Consider.co adapter ships (D-13) so a
 // future adapter needs no schema change; 'seed' is reserved for rows promoted from
@@ -82,7 +88,7 @@ export function upsertBoard(
   db: Database,
   input: { ats: string; token: string; source_of_discovery: string },
   blocklist: string[] = [],
-): BoardRow | null {
+): UpsertedBoardRow | null {
   if (!BOARDS_ATS.has(input.ats)) return null;
   if (!BOARDS_SOURCES.has(input.source_of_discovery)) return null;
   const token = String(input.token ?? '').trim();
@@ -91,6 +97,18 @@ export function upsertBoard(
   // wants polled can never enter `boards` in the first place.
   const lowerToken = token.toLowerCase();
   if (blocklist.some(b => String(b ?? '').trim().toLowerCase() === lowerToken)) return null;
+  // 16-REVIEW WR-01: fold a differently-cased harvest onto the row that already
+  // exists, KEEPING THE STORED CASE. Do not "simplify" this by lowercasing the
+  // token on write: measured against the live APIs on 2026-07-27, greenhouse and
+  // ashby answer 200 for any case but LEVER DOES NOT —
+  // api.lever.co/v0/postings/agile-defense is 200, .../AGILE-DEFENSE is 404 — so
+  // normalizing case on write would 404 every Lever board with a capital in its
+  // slug. Without this fold, UNIQUE(ats, token) admitted both cases as separate
+  // rows while resolveEffectiveTokens' case-insensitive dedupe dropped one of
+  // them, leaving a row that was never polled and so never dead-marked.
+  const existing = db
+    .query('SELECT id, token FROM boards WHERE ats = ? AND token = ? COLLATE NOCASE')
+    .get(input.ats, token) as { id: number; token: string } | null;
   const raw = db
     .query(
       `INSERT INTO boards (ats, token, source_of_discovery)
@@ -101,8 +119,8 @@ export function upsertBoard(
        ON CONFLICT(ats, token) DO UPDATE SET updated_at = datetime('now')
        RETURNING *`,
     )
-    .get(input.ats, token, input.source_of_discovery) as Record<string, unknown>;
-  return toRow(raw);
+    .get(input.ats, existing?.token ?? token, input.source_of_discovery) as Record<string, unknown>;
+  return { ...toRow(raw), inserted: existing === null };
 }
 
 // D-10: one-time backfill giving every seek.config.json seed token a boards row
@@ -130,13 +148,19 @@ export function backfillSeedBoards(
       if (!TOKEN_RE.test(token)) continue;
       const lowerToken = token.toLowerCase();
       if (blocklist.some(b => String(b ?? '').trim().toLowerCase() === lowerToken)) continue;
+      // WR-01: same case fold as upsertBoard, for the same reason — a seed token
+      // cased differently from its already-discovered row must repair that row's
+      // freshness clock, not create a second one beside it.
+      const existing = db
+        .query('SELECT token FROM boards WHERE ats = ? AND token = ? COLLATE NOCASE')
+        .get(ats, token) as { token: string } | null;
       db.query(
         `INSERT INTO boards (ats, token, source_of_discovery, first_seen_at)
          VALUES (?, ?, 'seed', ?)
          ON CONFLICT(ats, token) DO UPDATE SET
            first_seen_at = excluded.first_seen_at,
            updated_at = datetime('now')`,
-      ).run(ats, token, SEED_BACKFILL_FIRST_SEEN);
+      ).run(ats, existing?.token ?? token, SEED_BACKFILL_FIRST_SEEN);
       written++;
     }
   }
@@ -144,9 +168,11 @@ export function backfillSeedBoards(
 }
 
 // D-04: a single parameterized UPDATE, no-op when the row doesn't exist (a genuinely
-// unknown token — one purged by the blocklist path, or a token whose case does not
-// match its stored row, the known WR-01 case-sensitivity gap, deliberately not fixed
-// in this phase; this must not throw for them). ok=true clears the failure
+// unknown token — e.g. one purged by the blocklist path; this must not throw for
+// them). The token comparison is COLLATE NOCASE (16-REVIEW WR-01): the caller polls
+// whatever case resolveEffectiveTokens handed it, which need not be the case stored
+// on the row, and a mismatch here used to mean the poll result was silently dropped
+// so the board could never be dead-marked. ok=true clears the failure
 // streak — a board that answers is alive again. ok=false increments the streak and
 // refreshes dead_since on EVERY failure past the threshold (not only the first), which
 // is what rolls the DEAD_RECHECK_DAYS window forward so a permanently-dead board is
@@ -159,7 +185,7 @@ export function recordBoardResult(db: Database, ats: string, token: string, ok: 
          last_ok_at = datetime('now'),
          dead_since = NULL,
          updated_at = datetime('now')
-       WHERE ats = ? AND token = ?`,
+       WHERE ats = ? AND token = ? COLLATE NOCASE`,
     ).run(ats, token);
   } else {
     db.query(
@@ -167,7 +193,7 @@ export function recordBoardResult(db: Database, ats: string, token: string, ok: 
          consecutive_failures = consecutive_failures + 1,
          dead_since = CASE WHEN consecutive_failures + 1 >= ${DEAD_AFTER} THEN datetime('now') ELSE dead_since END,
          updated_at = datetime('now')
-       WHERE ats = ? AND token = ?`,
+       WHERE ats = ? AND token = ? COLLATE NOCASE`,
     ).run(ats, token);
   }
 }
@@ -207,6 +233,36 @@ export function resolveEffectiveTokens(
   const blockedLower = new Set(
     blocklist.filter((b): b is string => typeof b === 'string').map(b => b.trim().toLowerCase()),
   );
+  // Dead-marking applies to config tokens too. Before this, config tokens were
+  // added unconditionally ahead of the listActiveBoards call, so D-04's self-heal
+  // was simply ignored for anything in seek.config.json. Because recordBoardResult
+  // refreshes dead_since on every failure past DEAD_AFTER, those boards re-armed
+  // their own dead clock every sweep and could never reach the DEAD_RECHECK_DAYS
+  // rest — `embed`, `Vytalize`, `checkout`, `mistral`, `morrishealthtech`,
+  // `mtesting`, `flashpoint`, `sauna` and `silnahealth` each sat at 13 consecutive
+  // failures on 2026-07-27, 404ing on every single sweep since Phase 16.
+  //
+  // The predicate is the exact complement of listActiveBoards', so a dead board
+  // still returns for one retry once DEAD_RECHECK_DAYS has elapsed and self-heals
+  // if it answers. This is the "extend dead-marking to cover seed tokens so the
+  // config self-cleans" option from the todo, chosen over hand-pruning
+  // seek.config.json: it needs no config edit and it keeps working for the next
+  // token that dies.
+  //
+  // D-06 fail-open is preserved: a config token with NO boards row is never
+  // dropped. Only a row that exists AND is currently dead is skipped.
+  const deadLower = new Set(
+    (
+      db
+        .query(
+          `SELECT token FROM boards
+           WHERE ats = ?
+             AND dead_since IS NOT NULL
+             AND dead_since > datetime('now', '-${DEAD_RECHECK_DAYS} days')`,
+        )
+        .all(ats) as { token: string }[]
+    ).map(r => r.token.toLowerCase()),
+  );
   const seen = new Set<string>();
   const result: string[] = [];
   const add = (t: unknown) => {
@@ -215,6 +271,7 @@ export function resolveEffectiveTokens(
     if (!trimmed) return;
     const lower = trimmed.toLowerCase();
     if (blockedLower.has(lower)) return; // D-06: blocklist enforced again at resolution time
+    if (deadLower.has(lower)) return;
     if (seen.has(lower)) return;
     seen.add(lower);
     result.push(trimmed);

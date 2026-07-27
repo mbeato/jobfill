@@ -226,7 +226,10 @@ export async function harvestYcDirectory(deps: {
           const ats = await probeAts(candidate, fetchImpl);
           if (ats) {
             const row = deps.upsertBoard(deps.db, { ats, token: candidate, source_of_discovery: 'ycdir' }, blocklist);
-            if (row) added++;
+            // `inserted`, not truthiness: a slug another source already harvested
+            // is a re-discovery, not an addition (same double-count as sweep.ts's
+            // boardsAdded).
+            if (row?.inserted) added++;
             break; // D-18: first confirmed ATS wins, stop probing remaining candidates
           }
         }

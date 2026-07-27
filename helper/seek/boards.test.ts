@@ -230,3 +230,119 @@ test('backfillSeedBoards rejects a malformed token, a blocklisted token, an out-
   const tokens = db.query('SELECT token FROM boards').all().map((r: any) => r.token);
   expect(tokens).toEqual(['acme']);
 });
+
+// ---------------------------------------------------------------------------
+// 16-REVIEW WR-01: boards case-sensitivity.
+//
+// UNIQUE(ats, token) is case-sensitive but resolveEffectiveTokens dedupes
+// case-insensitively, so a differently-cased harvest used to create a second
+// row that the resolver then dropped — orphaned, never polled, and therefore
+// never dead-marked ("Twitch" vs "twitch" in the live db during Phase 16).
+//
+// The fix folds the variant onto the existing row and KEEPS THE STORED CASE,
+// rather than lowercasing tokens. Measured 2026-07-27 against the real APIs:
+// greenhouse (`boards-api.greenhouse.io/v1/boards/<t>/jobs`) and ashby
+// (`api.ashbyhq.com/posting-api/job-board/<t>`) answer 200 for any case, but
+// LEVER IS CASE-SENSITIVE — `api.lever.co/v0/postings/agile-defense` is 200
+// and `.../AGILE-DEFENSE` is 404. Lowercasing on write would have broken every
+// Lever board whose slug carries a capital.
+// ---------------------------------------------------------------------------
+
+test('a differently-cased token folds onto the existing row instead of orphaning a second one', () => {
+  const db = makeDb();
+  const first = upsertBoard(db, { ats: 'lever', token: 'Agile-Defense', source_of_discovery: 'seed' });
+  const second = upsertBoard(db, { ats: 'lever', token: 'agile-defense', source_of_discovery: 'simplify' });
+  expect(db.query('SELECT count(*) AS n FROM boards').get()).toEqual({ n: 1 });
+  expect(second!.id).toBe(first!.id);
+});
+
+test('folding a case variant preserves the stored case, because lever 404s on the wrong case', () => {
+  const db = makeDb();
+  upsertBoard(db, { ats: 'lever', token: 'Agile-Defense', source_of_discovery: 'seed' });
+  const second = upsertBoard(db, { ats: 'lever', token: 'AGILE-DEFENSE', source_of_discovery: 'simplify' });
+  expect(second!.token).toBe('Agile-Defense');
+  expect(resolveEffectiveTokens(db, 'lever', [])).toEqual(['Agile-Defense']);
+});
+
+test('case folding is per-ats — the same token under two ATSes stays two rows', () => {
+  const db = makeDb();
+  upsertBoard(db, { ats: 'lever', token: 'acme', source_of_discovery: 'seed' });
+  upsertBoard(db, { ats: 'ashby', token: 'ACME', source_of_discovery: 'seed' });
+  expect(db.query('SELECT count(*) AS n FROM boards').get()).toEqual({ n: 2 });
+});
+
+test('recordBoardResult matches case-insensitively, so a variant-cased poll still dead-marks its row', () => {
+  const db = makeDb();
+  upsertBoard(db, { ats: 'ashby', token: 'KAYAK', source_of_discovery: 'seed' });
+  for (let i = 0; i < DEAD_AFTER; i++) recordBoardResult(db, 'ashby', 'kayak', false);
+  const row = db.query('SELECT * FROM boards').get() as any;
+  expect(row.consecutive_failures).toBe(DEAD_AFTER);
+  expect(row.dead_since).not.toBeNull();
+});
+
+test('backfillSeedBoards folds a case variant onto the existing row rather than adding a second', () => {
+  const db = makeDb();
+  upsertBoard(db, { ats: 'ashby', token: 'Vytalize', source_of_discovery: 'simplify' });
+  backfillSeedBoards(db, { ashby: ['vytalize'] });
+  const rows = db.query('SELECT token, first_seen_at FROM boards').all() as any[];
+  expect(rows.length).toBe(1);
+  expect(rows[0].token).toBe('Vytalize');
+  expect(rows[0].first_seen_at).toBe(SEED_BACKFILL_FIRST_SEEN);
+});
+
+// ---------------------------------------------------------------------------
+// Todo item 3: dead tokens in the curated seed 404 forever.
+//
+// The live db shows these ARE dead-marked (embed/Vytalize/checkout/mistral/
+// morrishealthtech/mtesting each sat at 13 consecutive failures on 2026-07-27)
+// — the todo's "never dead-marked" reading was wrong. The real defect is that
+// resolveEffectiveTokens added every config token unconditionally, ahead of the
+// listActiveBoards call, so dead-marking was simply ignored for them. Each
+// failure then refreshed dead_since, so DEAD_RECHECK_DAYS never elapsed and
+// they were polled every single sweep, forever.
+// ---------------------------------------------------------------------------
+
+test('a config token whose board is dead is dropped from the effective list', () => {
+  const db = makeDb();
+  upsertBoard(db, { ats: 'ashby', token: 'mistral', source_of_discovery: 'seed' });
+  for (let i = 0; i < DEAD_AFTER; i++) recordBoardResult(db, 'ashby', 'mistral', false);
+  expect(resolveEffectiveTokens(db, 'ashby', ['mistral', 'alive'])).toEqual(['alive']);
+});
+
+test('a dead config token comes back for one retry once DEAD_RECHECK_DAYS has elapsed', () => {
+  const db = makeDb();
+  upsertBoard(db, { ats: 'ashby', token: 'mistral', source_of_discovery: 'seed' });
+  for (let i = 0; i < DEAD_AFTER; i++) recordBoardResult(db, 'ashby', 'mistral', false);
+  db.query(`UPDATE boards SET dead_since = datetime('now', '-${DEAD_RECHECK_DAYS + 1} days')`).run();
+  expect(resolveEffectiveTokens(db, 'ashby', ['mistral'])).toEqual(['mistral']);
+});
+
+test('D-06 fail-open: a config token with no boards row at all is still polled', () => {
+  const db = makeDb();
+  expect(resolveEffectiveTokens(db, 'greenhouse', ['brand-new'])).toEqual(['brand-new']);
+});
+
+test('the dead-config-token drop is case-insensitive and per-ats', () => {
+  const db = makeDb();
+  upsertBoard(db, { ats: 'ashby', token: 'Vytalize', source_of_discovery: 'seed' });
+  for (let i = 0; i < DEAD_AFTER; i++) recordBoardResult(db, 'ashby', 'Vytalize', false);
+  expect(resolveEffectiveTokens(db, 'ashby', ['vytalize'])).toEqual([]);
+  // A live greenhouse board of the same name is unaffected.
+  expect(resolveEffectiveTokens(db, 'greenhouse', ['vytalize'])).toEqual(['vytalize']);
+});
+
+// ---------------------------------------------------------------------------
+// Todo item 5: boardsAdded double-counts.
+//
+// upsertBoard's ON CONFLICT DO UPDATE ... RETURNING * returns a row on update
+// as well as on insert, so `!= null` counted re-discoveries as additions. Sweep
+// #14 reported boardsAdded: 429 against 427 real rows — two boards harvested by
+// both simplify and getro in the same sweep, counted once each way.
+// ---------------------------------------------------------------------------
+
+test('upsertBoard reports inserted=true only on a real insert', () => {
+  const db = makeDb();
+  expect(upsertBoard(db, { ats: 'greenhouse', token: 'acme', source_of_discovery: 'simplify' })!.inserted).toBe(true);
+  expect(upsertBoard(db, { ats: 'greenhouse', token: 'acme', source_of_discovery: 'getro' })!.inserted).toBe(false);
+  expect(upsertBoard(db, { ats: 'greenhouse', token: 'ACME', source_of_discovery: 'getro' })!.inserted).toBe(false);
+});

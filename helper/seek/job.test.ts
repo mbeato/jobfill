@@ -240,9 +240,11 @@ test('headline.boardsAdded sums slug-harvest results across simplify and getro (
       errors: [],
     }),
     // Real upsertBoard behavior is boards.test.ts's concern — this stub only
-    // needs to signal "a board was added" (non-null) so runSweep's harvest
-    // loop increments boardsAdded per candidate.
-    upsertBoard: () => ({}) as any,
+    // needs to signal "a board was genuinely inserted" so runSweep's harvest
+    // loop increments boardsAdded per candidate. `inserted` rather than mere
+    // non-nullness is the point: the real upsert returns a row on the ON
+    // CONFLICT path too, which is what used to double-count re-discoveries.
+    upsertBoard: () => ({ inserted: true }) as any,
   });
   await runSweepJob(db, config, deps, runId);
   const row = getSweepById(db, runId);

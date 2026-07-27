@@ -2,4 +2,10 @@ node_modules/
 extension/content.bundle.js
 profile.local.json
 helper/jobfill.db
+# Timestamped safety copies taken before destructive migrations. The bare name
+# above did not cover them, and one 20 MB backup was committed by accident on
+# 2026-07-27 as a result.
+helper/jobfill.db.*
+# Stray 0-byte file at the repo root, predating the helper/ layout.
+/jobfill.db
 .runner-profile/

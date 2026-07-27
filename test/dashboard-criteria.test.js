@@ -118,6 +118,11 @@ const checked = (sel) => page.locator(sel).isChecked();
 const disabled = (sel) => page.locator(sel).isDisabled();
 const text = (sel) => page.locator(sel).textContent();
 const classes = (sel) => page.locator(sel).getAttribute('class');
+// Every expect.poll below waits on a real browser plus a routed fetch. The
+// 1s default is tight when the whole suite runs at once, and a timing-only
+// failure here would say nothing about the code.
+const POLL = { timeout: 8000, interval: 50 };
+
 const armable = () => classes('#criteriaSaveBtn').then((c) => c.includes('jf-armable'));
 
 // ---------------------------------------------------------------------------
@@ -203,7 +208,7 @@ test("a duplicate is not added twice, matching the filter's case-insensitive rul
 test('a term typed but not committed is not lost when focus leaves', async () => {
   await entry('crit-nonEng').fill('sales');
   await page.locator('#cap-stale').click();
-  await expect.poll(() => terms('crit-nonEng')).toEqual(['recruiter', 'sales']);
+  await expect.poll(() => terms('crit-nonEng'), POLL).toEqual(['recruiter', 'sales']);
 });
 
 // ---------------------------------------------------------------------------
@@ -212,7 +217,7 @@ test('a term typed but not committed is not lost when focus leaves', async () =>
 
 test('typing offers matching values from the observed vocabulary', async () => {
   await entry('crit-nonEng').fill('sales');
-  await expect.poll(() => page.locator('#crit-nonEng-sugg .jf-sugg-opt').count()).toBe(1);
+  await expect.poll(() => page.locator('#crit-nonEng-sugg .jf-sugg-opt', POLL).count()).toBe(1);
   const list = await text('#crit-nonEng-sugg');
   expect(list).toContain('Sales Development Representative');
   expect(list).toContain('101');
@@ -220,9 +225,9 @@ test('typing offers matching values from the observed vocabulary', async () => {
 
 test('the title inputs draw on titles and the location inputs on locations', async () => {
   await entry('crit-seniority').fill('engineer');
-  await expect.poll(() => text('#crit-seniority-sugg')).toContain('Software Engineer');
+  await expect.poll(() => text('#crit-seniority-sugg'), POLL).toContain('Software Engineer');
   await entry('crit-location').fill('san');
-  await expect.poll(() => text('#crit-location-sugg')).toContain('San Francisco');
+  await expect.poll(() => text('#crit-location-sugg'), POLL).toContain('San Francisco');
 });
 
 test('clicking a suggestion adds it as an ordinary term', async () => {
@@ -233,13 +238,13 @@ test('clicking a suggestion adds it as an ordinary term', async () => {
 
 test('nothing is highlighted until the user arrows to it, so Enter commits what was typed', async () => {
   await entry('crit-seniority').fill('SENIOR');
-  await expect.poll(() => page.locator('#crit-seniority-sugg').isVisible()).toBe(true);
+  await expect.poll(() => page.locator('#crit-seniority-sugg', POLL).isVisible()).toBe(true);
   expect(await page.locator('#crit-seniority-sugg .jf-sugg-opt[aria-selected="true"]').count()).toBe(0);
 });
 
 test('Enter takes the highlighted suggestion once the user arrows to one', async () => {
   await entry('crit-seniority').fill('e');
-  await expect.poll(() => page.locator('#crit-seniority-sugg .jf-sugg-opt').count()).toBeGreaterThan(1);
+  await expect.poll(() => page.locator('#crit-seniority-sugg .jf-sugg-opt', POLL).count()).toBeGreaterThan(1);
   await entry('crit-seniority').press('ArrowDown');
   await entry('crit-seniority').press('ArrowDown');
   await entry('crit-seniority').press('Enter');
@@ -248,7 +253,7 @@ test('Enter takes the highlighted suggestion once the user arrows to one', async
 
 test('Escape closes the list without adding anything', async () => {
   await entry('crit-nonEng').fill('product');
-  await expect.poll(() => page.locator('#crit-nonEng-sugg').isVisible()).toBe(true);
+  await expect.poll(() => page.locator('#crit-nonEng-sugg', POLL).isVisible()).toBe(true);
   await entry('crit-nonEng').press('Escape');
   expect(await page.locator('#crit-nonEng-sugg').isVisible()).toBe(false);
   expect(await terms('crit-nonEng')).toEqual(['recruiter']);
@@ -257,7 +262,7 @@ test('Escape closes the list without adding anything', async () => {
 test('a term already on the list is not offered again', async () => {
   await entry('crit-location').fill('remote');
   // "Remote" is in LOCATION_VOCAB but already a chip.
-  await expect.poll(() => page.locator('#crit-location-sugg').isVisible()).toBe(false);
+  await expect.poll(() => page.locator('#crit-location-sugg', POLL).isVisible()).toBe(false);
 });
 
 test('the editor still works when the vocabulary endpoint fails', async () => {
@@ -299,7 +304,7 @@ test('a narrowing save takes two clicks and the first sends nothing', async () =
   expect(patches).toEqual([]);
   expect(await text('#criteriaSaveBtn')).toBe('confirm?');
   await page.locator('#criteriaSaveBtn').click();
-  await expect.poll(() => patches.length).toBe(1);
+  await expect.poll(() => patches.length, POLL).toBe(1);
   expect(patches[0].seniorityTerms).toEqual(['senior', 'principal', 'staff']);
 });
 
@@ -371,10 +376,10 @@ test('null round-trips through the PATCH body and back into the form', async () 
   await page.locator('#cap-yoe-nocap').check();
   // Turning a cap OFF is widening, so it saves on one click.
   await page.locator('#criteriaSaveBtn').click();
-  await expect.poll(() => patches.length).toBe(1);
+  await expect.poll(() => patches.length, POLL).toBe(1);
   expect(patches[0].yoeThreshold).toBeNull();
   await page.waitForSelector('[data-jf-tokens="crit-seniority"] .jf-token');
-  await expect.poll(() => checked('#cap-yoe-nocap')).toBe(true);
+  await expect.poll(() => checked('#cap-yoe-nocap'), POLL).toBe(true);
   expect((await form()).yoeThreshold).toBeNull();
 });
 

@@ -114,6 +114,20 @@ export function createApplicationsTable(db: Database) {
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
   )`);
+  // Dedupe at the write boundary via schema-level uniqueness, not in callers —
+  // the same rule queue/postings already follow, which this table was the one
+  // exception to. insertApplication's ON CONFLICT target resolves against THIS
+  // index, so the two must stay in step: without it the upsert is a syntax
+  // error, and without the upsert the index turns a re-fill into a throw.
+  //
+  // PARTIAL on url <> '': applications logged without a url are legitimate and
+  // plural (34 live), and a plain unique index would let only one of them exist.
+  //
+  // IF NOT EXISTS makes this the migration too — an existing db picks the index
+  // up at boot. That only succeeds once duplicates are gone, which is deliberate:
+  // it fails loudly rather than silently leaving the table unconstrained.
+  db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_applications_url
+          ON applications(url) WHERE url <> ''`);
 }
 
 export function insertApplication(
@@ -135,8 +149,39 @@ export function insertApplication(
       // WR-02: seed status_changed_at at insert (same instant the row is created) so a
       // direct status:'applied' POST starts an honest ghost clock instead of NULL —
       // consistent with the D-20 boot seed. Pre-submit rows never ghost regardless.
+      // Upsert on url, against the partial unique index idx_applications_url
+      // (see createApplicationsTable). Before this, a plain INSERT forked a NEW
+      // application row on every fill of the same posting, and since
+      // queue.application_id links exactly ONE of them, marking the queue row
+      // submitted flipped only that one — the siblings sat at the pre-submit
+      // token forever and read as "awaiting submit" for postings already
+      // submitted. It also inflated the applied count. Observed live: 8 urls
+      // with 2-3 rows each, 11 rows collapsed.
+      //
+      // Two things deliberately NOT overwritten on conflict:
+      //  - status, because a re-fill must never un-submit an applied row. This
+      //    is the whole correctness point; excluded.status would regress it to
+      //    the pre-submit default on every refill.
+      //  - notes, which are hand-written and are not the fill's to clobber.
+      // cost_usd ACCUMULATES: each attempt really did spend, so summing is the
+      // honest total rather than the last attempt's alone.
+      //
+      // The WHERE matches the index predicate, which SQLite requires to resolve
+      // a partial-index conflict target. Rows with an empty url are outside the
+      // index and still insert freely, as they always did.
       `INSERT INTO applications (company, role, url, status, resume_path, cost_usd, summary, tailor_state, tailor_message, jd, status_changed_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now')) RETURNING *`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+       ON CONFLICT(url) WHERE url <> '' DO UPDATE SET
+         company        = excluded.company,
+         role           = excluded.role,
+         resume_path    = CASE WHEN excluded.resume_path    <> '' THEN excluded.resume_path    ELSE applications.resume_path    END,
+         summary        = CASE WHEN excluded.summary        <> '' THEN excluded.summary        ELSE applications.summary        END,
+         tailor_state   = CASE WHEN excluded.tailor_state   <> '' THEN excluded.tailor_state   ELSE applications.tailor_state   END,
+         tailor_message = CASE WHEN excluded.tailor_message <> '' THEN excluded.tailor_message ELSE applications.tailor_message END,
+         jd             = CASE WHEN excluded.jd             <> '' THEN excluded.jd             ELSE applications.jd             END,
+         cost_usd       = applications.cost_usd + excluded.cost_usd,
+         updated_at     = datetime('now')
+       RETURNING *`,
     )
     .get(
       String(input.company ?? 'unknown').slice(0, MAX_TEXT),

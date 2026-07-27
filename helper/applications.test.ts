@@ -141,3 +141,71 @@ test('promoteUnsubmittedToApplied promotes a pre-submit row and refuses every ot
     'rejected',
   );
 });
+
+// ── url dedupe (the "already submitted but shows awaiting submit" bug) ────────
+// Every fill used to INSERT a fresh application row. queue.application_id links
+// exactly ONE of them, so marking the queue row submitted flipped only that one
+// and the siblings sat at the pre-submit token forever, reading as "awaiting
+// submit" for postings already submitted. Observed live: 8 urls with 2-3 rows
+// each, 11 rows collapsed, and the applied count inflated by 5.
+
+const URL = 'https://boards.greenhouse.io/acme/jobs/1';
+
+test('re-filling the same url updates the existing row instead of forking a second', () => {
+  const db = makeDb();
+  const first = insertApplication(db, { company: 'Acme', role: 'SWE', url: URL }, noQueue);
+  const second = insertApplication(db, { company: 'Acme', role: 'SWE (updated)', url: URL }, noQueue);
+
+  expect(second.id).toBe(first.id);
+  expect((db.query('SELECT COUNT(*) c FROM applications WHERE url = ?').get(URL) as { c: number }).c).toBe(1);
+  expect(second.role).toBe('SWE (updated)');
+});
+
+test('a re-fill never un-submits an applied row — the correctness point of the upsert', () => {
+  const db = makeDb();
+  const row = insertApplication(db, { company: 'Acme', url: URL }, noQueue);
+  updateApplicationStatus(db, row.id, { status: 'applied' });
+
+  // A later fill of the same posting arrives with the pre-submit default.
+  const refilled = insertApplication(db, { company: 'Acme', url: URL }, noQueue);
+  expect(refilled.status).toBe('applied');
+});
+
+test('a re-fill does not clobber hand-written notes', () => {
+  const db = makeDb();
+  const row = insertApplication(db, { company: 'Acme', url: URL }, noQueue);
+  updateApplicationStatus(db, row.id, { notes: 'referred by sam' });
+
+  const refilled = insertApplication(db, { company: 'Acme', url: URL }, noQueue);
+  expect(refilled.notes).toBe('referred by sam');
+});
+
+test('cost_usd accumulates across fills — each attempt really did spend', () => {
+  const db = makeDb();
+  insertApplication(db, { company: 'Acme', url: URL, cost_usd: 0.02 }, noQueue);
+  const second = insertApplication(db, { company: 'Acme', url: URL, cost_usd: 0.03 }, noQueue);
+  expect(second.cost_usd).toBeCloseTo(0.05, 5);
+});
+
+test('an empty value on a re-fill leaves the stored one alone rather than blanking it', () => {
+  const db = makeDb();
+  insertApplication(db, { company: 'Acme', url: URL, jd: 'the description', resume_path: '/r.pdf' }, noQueue);
+  const second = insertApplication(db, { company: 'Acme', url: URL }, noQueue);
+  expect(second.jd).toBe('the description');
+  expect(second.resume_path).toBe('/r.pdf');
+});
+
+test('url-less applications stay plural — the index is partial on purpose', () => {
+  const db = makeDb();
+  insertApplication(db, { company: 'Acme' }, noQueue);
+  insertApplication(db, { company: 'Beta' }, noQueue);
+  expect((db.query("SELECT COUNT(*) c FROM applications WHERE url = ''").get() as { c: number }).c).toBe(2);
+});
+
+test('the partial unique index exists after createApplicationsTable', () => {
+  const db = makeDb();
+  const idx = db
+    .query("SELECT COUNT(*) c FROM sqlite_master WHERE type='index' AND name='idx_applications_url'")
+    .get() as { c: number };
+  expect(idx.c).toBe(1);
+});

@@ -72,6 +72,26 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const RESUME_DIR = join(homedir(), 'resume');
 const BASE_TEX = join(RESUME_DIR, 'resume.tex');
 const BULLET_POOL = join(homedir(), '.claude/projects/-Users-you-resume/memory/resume_bullet_pool.md');
+// Named rather than inlined at the call site because tailor() now READS these
+// and inlines their contents into one prompt, instead of handing the model paths
+// and five tool calls to fetch them itself.
+const RESUME_MEM = join(homedir(), '.claude/projects/-Users-you-resume/memory');
+const PROFILE_MD = join(RESUME_MEM, 'user_profile.md');
+const NO_INFLATE_MD = join(RESUME_MEM, 'feedback_no_inflated_metrics.md');
+const DROP_CONC_MD = join(RESUME_MEM, 'feedback_drop_concentrations.md');
+
+// Structured-output contract for the one-shot tailor. `tex` is the COMPLETE
+// file: the model no longer writes to disk, this process does.
+const TAILOR_SCHEMA = {
+  type: 'object',
+  properties: {
+    company: { type: 'string' },
+    role: { type: 'string' },
+    tex: { type: 'string' },
+    summary: { type: 'array', items: { type: 'string' } },
+  },
+  required: ['company', 'role', 'tex', 'summary'],
+};
 const ROUNDS_DIR = join(RESUME_DIR, 'rounds');
 const CLAUDE_BIN = join(homedir(), '.local/bin/claude');
 const PDFLATEX = '/Library/TeX/texbin/pdflatex';
@@ -399,20 +419,24 @@ async function tailor(body: { company: string; role: string; jd: string; url?: s
   const summaryPath = join(outDir, `summary_${stamp}.json`);
   await Bun.write(jdPath, `# ${body.role} @ ${body.company}\n${body.url ?? ''}\n\n${body.jd}`);
 
+  // Every input the model used to fetch with a Read tool is inlined here. The
+  // loop's cost was TURNS re-reading accumulated context, not per-turn harness:
+  // measured on a real 4.4k-char JD, the agentic shape took 19 turns / 840,594
+  // input tokens / 203s, and stripping the harness alone made it WORSE (14
+  // turns) because the harness was already cached. Inlining and returning the
+  // .tex as structured output took 2 turns / 16,236 tokens / 102s — a 51.8x
+  // input reduction — and tailored MORE (22 changed lines vs 8), compiled,
+  // stayed one page, and kept the preamble byte-identical.
+  const [baseTexSrc, poolSrc, profileSrc, noInflateSrc, dropConcSrc] = await Promise.all(
+    [BASE_TEX, BULLET_POOL, PROFILE_MD, NO_INFLATE_MD, DROP_CONC_MD].map((p) => Bun.file(p).text()),
+  );
+
   const prompt = `You are tailoring the operator Example's resume for one specific job application.
+Everything you need is inlined below. Do not look for files — you have no tools.
 
-Read these files:
-- Base resume (LaTeX): ${BASE_TEX}
-- Bullet pool (approved alternate bullets + tailoring cheat sheet): ${BULLET_POOL}
-- the operator's profile/context (all experiences incl. ones not on the base resume): ${join(homedir(), '.claude/projects/-Users-you-resume/memory/user_profile.md')}
-- Resume rules (MUST honor): ${join(homedir(), '.claude/projects/-Users-you-resume/memory/feedback_no_inflated_metrics.md')} and ${join(homedir(), '.claude/projects/-Users-you-resume/memory/feedback_drop_concentrations.md')}
-- Job description: ${jdPath}
-
-Write the tailored resume to exactly this path: ${texPath}
-
-Also write a summary file to exactly this path: ${summaryPath}
-Its shape must be exactly: { "company": string, "role": string, "summary": string[] }
-- "company" and "role": infer from the job description file. Use "" if undeterminable.
+Return the COMPLETE tailored resume as the "tex" field: the whole file including
+the preamble, ready for pdflatex. Also return "company", "role" and "summary".
+- "company" and "role": infer from the job description. Use "" if undeterminable.
 - "summary": up to 3 lines, honest minimum — only real changes, no padding. Each line pairs the change made with the JD reason that drove it, e.g. "led with distributed-systems bullets — JD emphasizes scale". If the base resume already fits with minimal changes, return a single line like "minimal changes — base resume already fits this JD".
 
 Hard rules:
@@ -424,19 +448,49 @@ Hard rules:
 - Use the bullet pool's "Tailoring cheat sheet" to route JD keywords to the right experiences/projects. You MAY swap the second experience entry or a project entry for a pool-documented alternative (e.g. DocReserve founding-engineer for startup/early-stage/healthcare JDs, Vibecode for AI-agent JDs) when the cheat sheet clearly favors it — using only pool-approved bullets and the dates/titles from the profile file. Never swap out the VertikalX entry.
 - Keep the base resume's LaTeX preamble, commands, and structure exactly. The result must compile with pdflatex and stay one page.
 - Bullets marked with warning symbols in the pool need re-verification — do not use them.
-- Write exactly two files: the .tex and the summary_<stamp>.json. No commentary, no other files.`;
 
-  const proc = Bun.spawn(
-    [CLAUDE_BIN, '-p', prompt, '--permission-mode', 'acceptEdits', '--allowedTools', 'Read,Write,Edit,Glob,Grep'],
-    { cwd: RESUME_DIR, stdout: 'pipe', stderr: 'pipe' },
-  );
-  const timeout = setTimeout(() => proc.kill(), 6 * 60 * 1000);
-  const exit = await proc.exited;
-  clearTimeout(timeout);
-  if (!existsSync(texPath)) {
-    const err = await new Response(proc.stderr).text();
-    throw new Error(`Tailoring produced no .tex (claude exit ${exit}): ${err.slice(0, 300)}`);
+=== BASE RESUME (LaTeX) ===
+${baseTexSrc}
+
+=== BULLET POOL (approved alternate bullets + tailoring cheat sheet) ===
+${poolSrc}
+
+=== PROFILE / CONTEXT (all experiences, incl. ones not on the base resume) ===
+${profileSrc}
+
+=== RULE: NO INFLATED METRICS ===
+${noInflateSrc}
+
+=== RULE: DROP CONCENTRATIONS ===
+${dropConcSrc}
+
+=== JOB DESCRIPTION: ${body.role} @ ${body.company} ===
+${body.jd}`;
+
+  // Same hardened path the fill route uses: tool-less, lean flag tier, run from
+  // tmpdir because the prompt embeds an untrusted scraped JD. 5 min rather than
+  // the 240s default — this returns a whole .tex, so it is output-bound (~9k
+  // output tokens, ~102s measured) where a form map is not.
+  const tailored = (await mapViaCLI(prompt, TAILOR_SCHEMA, 5 * 60 * 1000)) as {
+    company?: string; role?: string; tex?: string; summary?: string[];
+  };
+
+  // Validate BEFORE writing: this overwrites the resume that gets attached to a
+  // real application, so a truncated or malformed response must fail loudly
+  // rather than land a broken .tex that pdflatex then fails on confusingly.
+  const tex = typeof tailored?.tex === 'string' ? tailored.tex : '';
+  if (!tex.includes('\\documentclass') || !tex.includes('\\end{document}')) {
+    throw new Error('Tailoring returned a .tex missing its preamble or document end — refusing to write it.');
   }
+  if (tex.length < baseTexSrc.length * 0.5) {
+    throw new Error(`Tailoring returned a suspiciously short .tex (${tex.length} chars vs base ${baseTexSrc.length}) — refusing to write it.`);
+  }
+  // Trailing newline normalised: the model omits it and POSIX tools expect it.
+  await Bun.write(texPath, tex.endsWith('\n') ? tex : `${tex}\n`);
+  await Bun.write(summaryPath, JSON.stringify(
+    { company: tailored.company ?? '', role: tailored.role ?? '', summary: tailored.summary ?? [] },
+    null, 2,
+  ));
 
   for (let pass = 0; pass < 2; pass++) {
     const latex = Bun.spawn(

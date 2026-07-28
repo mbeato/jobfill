@@ -24,6 +24,7 @@ import { chromium } from 'playwright';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseJobrightCard } from './lib/jobright-parse.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const HELPER = 'http://127.0.0.1:7877';
@@ -193,40 +194,32 @@ async function scrapeJobright(page) {
     return [];
   }
   await page.waitForTimeout(6000);
-  const raw = await page.evaluate(() => {
-    const NOISE = [
-      /\bago$/i,
-      /alumni/i,
-      /early applicant/i,
-      /^good match$/i,
-      /^\d+%$/,
-      /^\/$/,
-      /^why this job/i,
-      /^no h1b$/i,
-      /^growth opportunities$/i,
-    ];
+  // The browser side returns RAW LINES only — every field decision lives in
+  // scripts/lib/jobright-parse.mjs, which is importable and therefore testable.
+  // It was inline here before, untested, and a noise pattern that missed the
+  // singular "alumnus" shifted title/company by one on 14 of 77 rows.
+  const cards = await page.evaluate(() => {
     const seen = new Set();
     const out = [];
     for (const a of document.querySelectorAll('a[href*="/jobs/info"]')) {
       if (!a.href || seen.has(a.href)) continue;
       seen.add(a.href);
       const card = a.closest('[class*="job-card"]') || a.parentElement || a;
-      const allLines = (card.innerText || '').split('\n').map((s) => s.trim()).filter(Boolean);
-      const agoLine = allLines.find((l) => /\bago$/i.test(l)) || '';
-      const lines = allLines.filter((l) => !NOISE.some((re) => re.test(l)));
       out.push({
         url: a.href,
-        title: lines[0] || '',
-        company: lines[1] || '',
-        location:
-          lines.find((l) => /,\s*[A-Z]{2}\b/.test(l)) ||
-          lines.find((l) => /\b(remote|united states)\b/i.test(l)) ||
-          '',
-        agoLine,
+        allLines: (card.innerText || '').split('\n').map((s) => s.trim()).filter(Boolean),
       });
     }
     return out;
   });
+  const raw = [];
+  let dropped = 0;
+  for (const c of cards) {
+    const parsed = parseJobrightCard(c);
+    if (parsed) raw.push(parsed);
+    else dropped++;
+  }
+  if (dropped) console.log(`[seek-sidecar] jobright: dropped ${dropped} unparsable card(s)`);
   const now = Date.now();
   const postings = [];
   for (const r of raw) {

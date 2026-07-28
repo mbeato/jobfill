@@ -349,3 +349,85 @@ describe('applyMapping failureRecords (D-05/D-07/D-08)', () => {
     expect(failureRecords[0].outerHTML.endsWith('… (truncated)')).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Combobox typing (2026-07-28). Greenhouse's React comboboxes never opened
+// their option list for a programmatic .value assignment, so 153 of 168
+// captured failures were comboboxes left at 'verify' with nothing selected —
+// including the required Country and Location (City) fields. Probed live:
+// setNativeValue yielded 0 options where real keystrokes yielded 1-3, and a
+// synthetic per-character key sequence matched real keystrokes exactly.
+// ---------------------------------------------------------------------------
+
+describe('combobox typing', () => {
+  function comboFixture() {
+    mount(`<input type="text" role="combobox" aria-label="Country">`);
+    const [f] = collectFields(document);
+    return { field: f, el: document.querySelector('[role="combobox"]') };
+  }
+
+  it('dispatches per-character key events, which is what opens the list', async () => {
+    const { field, el } = comboFixture();
+    const keydowns = [], keyups = [], inputs = [];
+    el.addEventListener('keydown', e => keydowns.push(e.key));
+    el.addEventListener('keyup', e => keyups.push(e.key));
+    el.addEventListener('input', e => inputs.push(e.data));
+    await applyMapping([{ id: field.id, value: 'Chad', kind: 'profile', confidence: 1 }], {});
+    expect(keydowns).toEqual(['C', 'h', 'a', 'd']);
+    expect(keyups).toEqual(['C', 'h', 'a', 'd']);
+    // one clearing input plus one per character
+    expect(inputs).toEqual([null, 'C', 'h', 'a', 'd']);
+  });
+
+  it('opens with a pointer gesture before typing — some widgets mount the list on click', async () => {
+    const { field, el } = comboFixture();
+    const seen = [];
+    for (const t of ['mousedown', 'mouseup', 'click']) el.addEventListener(t, () => seen.push(t));
+    await applyMapping([{ id: field.id, value: 'Chad', kind: 'profile', confidence: 1 }], {});
+    expect(seen).toEqual(['mousedown', 'mouseup', 'click']);
+  });
+
+  it('leaves the full typed value in the field', async () => {
+    const { field, el } = comboFixture();
+    await applyMapping([{ id: field.id, value: 'United States', kind: 'profile', confidence: 1 }], {});
+    expect(el.value).toBe('United States');
+  });
+
+  it('overtypes an existing value rather than appending to it', async () => {
+    const { field, el } = comboFixture();
+    el.value = 'Canada';
+    await applyMapping([{ id: field.id, value: 'Chad', kind: 'profile', confidence: 1 }], {});
+    expect(el.value).toBe('Chad');
+  });
+
+  it('selects a matching option and reports filled', async () => {
+    mount(`<input type="text" role="combobox" aria-label="Country">`);
+    const [f] = collectFields(document);
+    const el = document.querySelector('[role="combobox"]');
+    // A widget that mounts its list once typing starts, like the real ones.
+    el.addEventListener('input', () => {
+      if (document.getElementById('lb')) return;
+      const lb = document.createElement('div');
+      lb.id = 'lb';
+      lb.setAttribute('role', 'listbox');
+      lb.innerHTML = `<div role="option">Chad</div><div role="option">Chile</div>`;
+      document.body.appendChild(lb);
+    });
+    let clicked = '';
+    document.body.addEventListener('click', e => {
+      if (e.target.getAttribute?.('role') === 'option') clicked = e.target.textContent;
+    });
+    const { results } = await applyMapping([{ id: f.id, value: 'Chad', kind: 'profile', confidence: 1 }], {});
+    expect(clicked).toBe('Chad');
+    expect(results[0].status).toBe('filled');
+  });
+
+  it('still fires change on the no-match fallthrough, as setNativeValue used to', async () => {
+    const { field, el } = comboFixture();
+    let changes = 0;
+    el.addEventListener('change', () => { changes++; });
+    const { results } = await applyMapping([{ id: field.id, value: 'Nowhere', kind: 'profile', confidence: 1 }], {});
+    expect(results[0].status).toBe('verify');
+    expect(changes).toBe(1);
+  });
+});

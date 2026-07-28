@@ -184,12 +184,55 @@ function fillSelect(el, value) {
   return 'filled';
 }
 
+// Type a value the way a person does, one character at a time, with the key
+// events a JS-driven combobox listens for.
+//
+// setNativeValue is not enough for these widgets and the live evidence is
+// unambiguous. Probed against a real Greenhouse application form (2026-07-28),
+// typing into Country / School / Degree:
+//
+//   setNativeValue (.value setter + input + change) ->  0,  0,  0 options
+//   real keystrokes                                 ->  1,  3,  1 options
+//   this synthetic sequence                         ->  1,  3,  1 options
+//
+// Greenhouse's React comboboxes never open their list for a programmatic value
+// assignment, so no option is ever clickable and every one of them fell through
+// to 'verify' with the text sitting in the box and nothing actually selected —
+// 153 of the 168 captured failures, including the required Country and
+// Location fields. It is not a timing problem: options render in 1-407ms, well
+// inside the existing 700ms wait.
+//
+// Deliberately scoped to comboboxes. Plain text inputs are filled correctly by
+// setNativeValue today, and per-character typing there would be slower for no
+// gain on a form with 50+ fields.
+async function typeLikeUser(el, value) {
+  const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value')?.set;
+  const write = v => (setter ? setter.call(el, v) : (el.value = v));
+
+  el.focus();
+  // The open gesture. Some widgets only mount their listbox on pointer/click.
+  el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+  el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+  el.click();
+
+  // Clear whatever is there, as a user selecting-all and overtyping would.
+  write('');
+  el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward' }));
+
+  for (const ch of String(value)) {
+    el.dispatchEvent(new KeyboardEvent('keydown', { key: ch, bubbles: true }));
+    write(el.value + ch);
+    el.dispatchEvent(new InputEvent('input', { bubbles: true, data: ch, inputType: 'insertText' }));
+    el.dispatchEvent(new KeyboardEvent('keyup', { key: ch, bubbles: true }));
+    await sleep(15);
+  }
+}
+
 async function fillCombobox(el, value, capture) {
   const doc = el.ownerDocument;
   // snapshot pre-existing options so the fallback can't click some unrelated widget
   const before = new Set([...doc.querySelectorAll('[role="option"]')]);
-  el.focus();
-  setNativeValue(el, value);
+  await typeLikeUser(el, value);
   await sleep(700); // let the widget fetch/filter options
   const listId = el.getAttribute('aria-controls') || el.getAttribute('aria-owns');
   let opts = listId ? [...(doc.getElementById(listId)?.querySelectorAll('[role="option"]') ?? [])] : [];
@@ -206,6 +249,10 @@ async function fillCombobox(el, value, capture) {
     target.click();
     return 'filled';
   }
+  // No option matched. Fire the change event typeLikeUser deliberately withholds
+  // during typing (it can close a list mid-search) so the fallthrough still
+  // commits the typed text exactly as setNativeValue used to.
+  el.dispatchEvent(new Event('change', { bubbles: true }));
   return 'verify'; // typed text left in place; user confirms
 }
 

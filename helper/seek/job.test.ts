@@ -265,9 +265,55 @@ test('a clean sweep reports tokenErrors: 0 and boardsAdded: 0 explicitly, never 
   // D-21: a clean sweep reports llmBreakerTripped strictly false, not
   // merely falsy — the field must never be undefined.
   expect(detail.headline.llmBreakerTripped).toBe(false);
+  expect(detail.headline.errored).toBe(0);
   expect(Object.keys(detail.headline).sort()).toEqual(
-    ['at', 'boardsAdded', 'byCriterion', 'deduped', 'fetched', 'held', 'llmBreakerTripped', 'queued', 'rejected', 'tokenErrors'].sort(),
+    ['at', 'boardsAdded', 'byCriterion', 'deduped', 'errored', 'fetched', 'held', 'llmBreakerTripped', 'queued', 'rejected', 'tokenErrors'].sort(),
   );
+});
+
+// WR-02: counts.errored existed since review 1's CR-01 but stopped at
+// FilterCounts — buildHeadline never read it, so the only surface that
+// showed it was scripts/seek.mjs, which the scheduled sweep never runs.
+// Under the breaker threshold a sweep where postings are silently failing
+// therefore finished 'ok' with a headline indistinguishable from a clean
+// one. That is precisely the blind spot CR-01 was opened to expose, so the
+// count has to reach the dashboard's surface to be worth having.
+test('WR-02: a sweep with errored postings surfaces headline.errored instead of reporting a clean ok', async () => {
+  const prevConcurrency = process.env.SEEK_DECIDE_CONCURRENCY;
+  process.env.SEEK_DECIDE_CONCURRENCY = '1';
+  try {
+    const db = makeDb();
+    const { runId } = beginSweep(db, 'manual');
+    const config = baseConfig({ greenhouse: { enabled: true, tokens: ['acme'] } });
+    // Mirrors decide.test.ts's CR-01 setup: the failing write also fails the
+    // inner catch's own recordDecision(held), so the throw reaches the outer
+    // catch and lands in counts.errored rather than counts.held.
+    // Keyed on the id, not a call counter: the inner catch retries the same
+    // posting as `held`, so a counter that throws once would be absorbed
+    // there and never reach the outer catch.
+    let throwingId: number | null = null;
+    const deps = baseDeps({
+      fetchGreenhouse: async () =>
+        Array.from({ length: 3 }, (_, i) => posting({ url: `https://boards.greenhouse.io/acme/jobs/${i}` })),
+      recordDecision: (db2, id, decision, reason) => {
+        if (throwingId === null) throwingId = id;
+        if (id === throwingId) throw new Error('SQLITE_BUSY');
+        return recordDecision(db2, id, decision, reason);
+      },
+    });
+
+    const result = await runSweepJob(db, config, deps, runId);
+
+    // Still 'ok' — one posting failing is not a sweep-level failure, which
+    // is exactly why the count, not the status, has to carry the signal.
+    expect(result.status).toBe('ok');
+    const detail = JSON.parse(getSweepById(db, runId)!.detail!);
+    expect(detail.headline.errored).toBe(1);
+    expect(detail.filter.errored).toBe(1);
+  } finally {
+    if (prevConcurrency === undefined) delete process.env.SEEK_DECIDE_CONCURRENCY;
+    else process.env.SEEK_DECIDE_CONCURRENCY = prevConcurrency;
+  }
 });
 
 test('a breaker-tripped sweep (D-21) still finishes with status ok and headline.llmBreakerTripped: true', async () => {

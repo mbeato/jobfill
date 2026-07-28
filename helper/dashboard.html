@@ -2248,7 +2248,11 @@ function renderSeekStats(ls) {
   // ls.rejected being non-zero and could hide the label in exactly the
   // scenario it exists for. Stays .textContent (not .innerHTML) —
   // deliberate, so no escaping is needed here.
-  stats.textContent = `${ls.fetched} fetched · ${ls.rejected} rejected · ${ls.held} held · ${ls.queued} queued${ls.llmBreakerTripped === true ? ' · llm breaker tripped' : ''}`;
+  // WR-02: errored follows the same append-only-when-non-zero rule as the
+  // breaker literal above it, and for the same reason — a sweep where
+  // postings silently failed must not read identically to a clean one. Not
+  // folded into `rejected`: those postings got a verdict, these got none.
+  stats.textContent = `${ls.fetched} fetched · ${ls.rejected} rejected · ${ls.held} held · ${ls.queued} queued${Number(ls.errored) ? ` · ${Number(ls.errored)} errored` : ''}${ls.llmBreakerTripped === true ? ' · llm breaker tripped' : ''}`;
   // Only rendered when ls.rejected is non-zero (item 26) — the toggle button
   // itself is hidden, not just its panel, when there is nothing to break down.
   tools.hidden = !ls.rejected;
@@ -2589,7 +2593,7 @@ function renderSweeps(rows) {
     // appended text is a fixed literal and no value from detail is ever
     // interpolated raw.
     const extra = h
-      ? `${Number(h.tokenErrors) ? ` · ${Number(h.tokenErrors)} token errors` : ''}${Number(h.boardsAdded) ? ` · ${Number(h.boardsAdded)} boards added` : ''}${h.llmBreakerTripped === true ? ' · llm breaker tripped' : ''}`
+      ? `${Number(h.errored) ? ` · ${Number(h.errored)} errored` : ''}${Number(h.tokenErrors) ? ` · ${Number(h.tokenErrors)} token errors` : ''}${Number(h.boardsAdded) ? ` · ${Number(h.boardsAdded)} boards added` : ''}${h.llmBreakerTripped === true ? ' · llm breaker tripped' : ''}`
       : '';
     const headline = h ? `${Number(h.fetched) || 0} fetched · ${Number(h.rejected) || 0} rejected · ${Number(h.deduped) || 0} deduped · ${Number(h.held) || 0} held · ${Number(h.queued) || 0} queued${extra}` : '—';
     // D-21: a breaker trip also gets the row's attention treatment, reusing
@@ -2600,7 +2604,7 @@ function renderSweeps(rows) {
     // nobody reads (Phase 16 closeout: a signal rendered only as a smaller
     // number trains the eye to ignore it).
     const main = `
-      <tr class="jf-row${status === 'failed' || h?.llmBreakerTripped === true ? ' jf-row--attn' : ''}">
+      <tr class="jf-row${status === 'failed' || h?.llmBreakerTripped === true || Number(h?.errored) > 0 ? ' jf-row--attn' : ''}">
         <td class="jf-gut">${i + 1}</td>
         <td>${esc((r.started_at || '').replace('T', ' ').slice(0, 19))}</td>
         <td class="jf-dim">${esc(r.trigger)}</td>

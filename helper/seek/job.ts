@@ -122,6 +122,14 @@ function buildHeadline(fetchedTotal: number, filterCounts: FilterCounts, fetchRe
     deduped: filterCounts.deduped,
     held: filterCounts.held,
     queued: filterCounts.queued,
+    // WR-02: CR-01's errored bucket stopped at FilterCounts — the only
+    // reader was scripts/seek.mjs, which the scheduled sweep never runs, so
+    // a sweep where every posting threw looked identical to a clean one on
+    // the dashboard. It is deliberately NOT folded into `rejected`: those
+    // are verdicts, this is the absence of one (decision stays NULL and the
+    // posting returns next sweep). Same always-present rule as
+    // tokenErrors/boardsAdded — a clean sweep reports 0, never undefined.
+    errored: filterCounts.errored,
     byCriterion: filterCounts.byCriterion,
     tokenErrors: fetchResults.reduce((sum, r) => sum + (r.tokenErrors ?? 0), 0),
     boardsAdded: fetchResults.reduce((sum, r) => sum + (r.boardsAdded ?? 0), 0),

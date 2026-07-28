@@ -207,3 +207,146 @@ describe('deleteQueueEntry', () => {
     expect(deleteQueueEntry(db, 9999)).toEqual({ deleted: false, reason: 'not found' });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Removal is a decision and has to outlive the row (2026-07-28).
+//
+// deleteQueueEntry was a bare DELETE: the posting kept decision = 'queued' and
+// nothing recorded that the operator had removed it — 37 live postings were in that
+// state. Nothing re-promoted them only because the decide loop skips decided
+// rows; the day the same job arrives under a different dedup key it returns,
+// and the live db already holds 399 posting pairs that are one job under two
+// keys.
+// ---------------------------------------------------------------------------
+
+describe('removal tombstone', () => {
+  function dbWithPosting(overrides = {}) {
+    const db = new Database(':memory:');
+    createQueueTable(db);
+    createPostingsTable(db);
+    const p = upsertPosting(db, posting(overrides))!;
+    const q = insertQueueEntryFromPosting(db, p)!;
+    return { db, p, q };
+  }
+  const decisionOf = (db: Database, id: number) =>
+    db.query('SELECT decision, decision_reason FROM postings WHERE id = ?').get(id) as
+      | { decision: string | null; decision_reason: string | null }
+      | null;
+
+  test('removing a queued row records a user rejection on its posting', () => {
+    const { db, p, q } = dbWithPosting();
+    db.query("UPDATE postings SET decision='queued' WHERE id=?").run(p.id);
+    expect(deleteQueueEntry(db, q.id).deleted).toBe(true);
+    expect(decisionOf(db, p.id)).toEqual({
+      decision: 'rejected',
+      decision_reason: 'user:removed-from-queue',
+    });
+  });
+
+  test('the tombstone keeps the decide loop from ever reconsidering it', () => {
+    const { db, p, q } = dbWithPosting();
+    db.query("UPDATE postings SET decision='queued' WHERE id=?").run(p.id);
+    deleteQueueEntry(db, q.id);
+    // listPostingsToDecide's predicate, verbatim.
+    const again = db
+      .query("SELECT count(*) AS n FROM postings WHERE decision IS NULL OR decision = 'held'")
+      .get() as { n: number };
+    expect(again.n).toBe(0);
+  });
+
+  test('an undecided posting is tombstoned too', () => {
+    const { db, p, q } = dbWithPosting();
+    expect(decisionOf(db, p.id)!.decision).toBeNull();
+    deleteQueueEntry(db, q.id);
+    expect(decisionOf(db, p.id)!.decision).toBe('rejected');
+  });
+
+  test('an existing rejection keeps its original reason', () => {
+    const { db, p, q } = dbWithPosting();
+    db.query("UPDATE postings SET decision='rejected', decision_reason='rules:location' WHERE id=?").run(p.id);
+    deleteQueueEntry(db, q.id);
+    expect(decisionOf(db, p.id)!.decision_reason).toBe('rules:location');
+  });
+
+  test('a refused delete writes no tombstone', () => {
+    const { db, p, q } = dbWithPosting();
+    db.query("UPDATE queue SET status='filling' WHERE id=?").run(q.id);
+    expect(deleteQueueEntry(db, q.id).deleted).toBe(false);
+    expect(decisionOf(db, p.id)!.decision).toBeNull();
+  });
+
+  test('a row with no url_key still tombstones, via the derived key', () => {
+    const db = new Database(':memory:');
+    createQueueTable(db);
+    createPostingsTable(db);
+    const p = upsertPosting(db, posting())!;
+    db.query("UPDATE postings SET decision='queued' WHERE id=?").run(p.id);
+    // A legacy / D-11 collision-duplicate row: same url, url_key left NULL.
+    const legacy = db
+      .query('INSERT INTO queue (url) VALUES (?) RETURNING *')
+      .get('https://boards.greenhouse.io/acme/jobs/1') as { id: number };
+    deleteQueueEntry(db, legacy.id);
+    expect(decisionOf(db, p.id)!.decision_reason).toBe('user:removed-from-queue');
+  });
+
+  test('removing a queue row with no posting behind it does not throw', () => {
+    const db = new Database(':memory:');
+    createQueueTable(db);
+    createPostingsTable(db);
+    const row = insertQueueEntry(db, 'https://example.com/manual-add');
+    expect(() => deleteQueueEntry(db, row.id)).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Manual adds carried no dedup key until the next restart's D-11 backfill.
+// ---------------------------------------------------------------------------
+
+describe('manual add keys itself', () => {
+  function freshDb() {
+    const db = new Database(':memory:');
+    createQueueTable(db);
+    return db;
+  }
+
+  test('insertQueueEntry sets url_key immediately', () => {
+    const db = freshDb();
+    const row = insertQueueEntry(db, 'https://boards.greenhouse.io/acme/jobs/1?src=email');
+    expect(row.url_key).toBe('boards.greenhouse.io/acme/jobs/1');
+  });
+
+  test('re-adding the same job is idempotent rather than duplicating', () => {
+    const db = freshDb();
+    const first = insertQueueEntry(db, 'https://boards.greenhouse.io/acme/jobs/1');
+    // Same job, different query string — normalizeUrl drops it.
+    const second = insertQueueEntry(db, 'https://boards.greenhouse.io/acme/jobs/1?utm=x');
+    expect(second.id).toBe(first.id);
+    expect((db.query('SELECT count(*) AS n FROM queue').get() as { n: number }).n).toBe(1);
+  });
+
+  test('a re-add never regresses a status already set by hand', () => {
+    const db = freshDb();
+    const first = insertQueueEntry(db, 'https://boards.greenhouse.io/acme/jobs/1');
+    updateQueueStatus(db, first.id, { status: 'submitted' });
+    const again = insertQueueEntry(db, 'https://boards.greenhouse.io/acme/jobs/1');
+    expect(again.status).toBe('submitted');
+  });
+
+  // normalizeUrl falls back to the raw string rather than '' when URL parsing
+  // throws, so even an unparseable url gets a stable key and still dedupes.
+  // (POST /queue rejects non-http(s) before reaching here anyway.)
+  test('an unparseable url still gets a stable key and still dedupes', () => {
+    const db = freshDb();
+    const row = insertQueueEntry(db, 'not a url');
+    expect(row.id).toBeGreaterThan(0);
+    expect(row.url_key).toBe('not a url');
+    expect(insertQueueEntry(db, 'not a url').id).toBe(row.id);
+  });
+
+  test('the tombstone never breaks the delete, even with no postings table', () => {
+    const db = freshDb(); // queue only — no postings table
+    const row = insertQueueEntry(db, 'https://boards.greenhouse.io/acme/jobs/9');
+    expect(deleteQueueEntry(db, row.id)).toEqual({ deleted: true });
+    expect((db.query('SELECT count(*) AS n FROM queue').get() as { n: number }).n).toBe(0);
+  });
+});

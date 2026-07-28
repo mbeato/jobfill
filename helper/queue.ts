@@ -110,10 +110,25 @@ export function createQueueTable(db: Database) {
   )`);
 }
 
+// Manual add (POST /queue, the extension's "queue this page" path). This used
+// to insert `url` alone, leaving url_key NULL — so a hand-added row carried no
+// dedup key at all until the next helper restart ran the D-11 backfill, and in
+// that window nothing could match it. Setting the key here closes the window
+// and makes a re-add idempotent instead of duplicating.
 export function insertQueueEntry(db: Database, url: string): QueueRow {
-  return db
-    .query(`INSERT INTO queue (url) VALUES (?) RETURNING *`)
-    .get(String(url ?? '').slice(0, MAX_TEXT)) as QueueRow;
+  const trimmed = String(url ?? '').slice(0, MAX_TEXT);
+  const key = normalizeUrl(trimmed);
+  // No derivable key (normalizeUrl failed on a malformed url): fall back to the
+  // old NULL-key insert rather than letting several unkeyed rows collide on ''.
+  if (!key) {
+    return db.query(`INSERT INTO queue (url) VALUES (?) RETURNING *`).get(trimmed) as QueueRow;
+  }
+  const row = db
+    .query(`INSERT INTO queue (url, url_key) VALUES (?, ?) ON CONFLICT(url_key) DO NOTHING RETURNING *`)
+    .get(trimmed, key) as QueueRow | null;
+  // Already queued under this key — hand back the existing row. Idempotent, and
+  // it never regresses a human-set status, matching insertQueueEntryFromPosting.
+  return row ?? (db.query(`SELECT * FROM queue WHERE url_key = ?`).get(key) as QueueRow);
 }
 
 // D-09/D-10/D-11: promotion insert from a scored `postings` row. Schema-level
@@ -194,11 +209,48 @@ export function updateQueueStatus(db: Database, id: number, patch: QueueUpdatePa
 // Refuses while a fill is in flight — the runner is actively writing to the row
 // and a mid-fill delete would strand its PATCHes. Postings-table decisions are
 // untouched, so a removed swept posting is not re-promoted (decided stays decided).
+// Removing a row from the queue is a DECISION, and it has to outlive the row.
+//
+// This used to be a bare DELETE. The posting it came from kept
+// decision = 'queued' with nothing anywhere recording that the operator had removed it —
+// 37 postings are in exactly that state. Nothing re-promoted them only because
+// the decide loop skips anything already decided; the moment the same job
+// arrives under a different dedup key it comes back, and the live db already
+// holds 399 posting pairs that are one job under two keys. So the removal is
+// written down as a user rejection, which the decide loop will not revisit and
+// which the documented safe-re-decide rule already excludes from any future
+// re-open sweep (only `rules:*` rejections may ever be reconsidered).
 export function deleteQueueEntry(db: Database, id: number): { deleted: boolean; reason?: string } {
-  const row = db.query('SELECT id, status FROM queue WHERE id = ?').get(id) as { id: number; status: string } | null;
+  const row = db.query('SELECT id, status, url, url_key FROM queue WHERE id = ?').get(id) as
+    | { id: number; status: string; url: string; url_key: string | null }
+    | null;
   if (!row) return { deleted: false, reason: 'not found' };
   if (row.status === 'filling') return { deleted: false, reason: 'fill in progress' };
   db.query('DELETE FROM queue WHERE id = ?').run(id);
+  // url_key can be NULL on a legacy row or a D-11 collision-duplicate, so derive
+  // it when absent rather than skipping the tombstone.
+  const key = row.url_key || normalizeUrl(String(row.url ?? ''));
+  if (key) {
+    // Best-effort, and deliberately AFTER the delete: the row is already gone,
+    // so a throw here would fail the request for work that actually succeeded.
+    // Mirrors captureFailure's "never let a bookkeeping bug regress the real
+    // operation" posture. Logged rather than swallowed silently — a tombstone
+    // that stops being written is how the reappearing-jobs bug comes back.
+    try {
+      // Only over an undecided/queued/held posting — an existing rejection keeps
+      // its original reason, and nothing here can revive a decided row.
+      db.query(
+        `UPDATE postings
+            SET decision = 'rejected',
+                decision_reason = 'user:removed-from-queue',
+                decided_at = datetime('now')
+          WHERE url_key = ?
+            AND (decision IS NULL OR decision IN ('queued', 'held'))`,
+      ).run(key);
+    } catch (e) {
+      console.error('[queue] removal tombstone failed for', key, e);
+    }
+  }
   return { deleted: true };
 }
 

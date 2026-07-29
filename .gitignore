@@ -9,3 +9,6 @@ helper/jobfill.db.*
 # Stray 0-byte file at the repo root, predating the helper/ layout.
 /jobfill.db
 .runner-profile/
+
+# Personal watchlist + source toggles. Copy seek.config.example.json to start.
+seek.config.json

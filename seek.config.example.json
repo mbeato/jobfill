@@ -1,0 +1,57 @@
+{
+  "_note": [
+    "Copy this file to seek.config.json and edit it. seek.config.json is gitignored,",
+    "so your watchlist and credentials-adjacent settings stay out of version control.",
+    "",
+    "If seek.config.json is missing or malformed, every source defaults to DISABLED",
+    "(helper/seek/config.ts defaultConfig) — the sweep does nothing rather than",
+    "guessing. That is intentional: nothing here runs until you turn it on.",
+    "",
+    "SOURCES THAT NEED NO ACCOUNT (public, documented endpoints):",
+    "  greenhouse / lever / ashby - public board APIs, meant to be consumed.",
+    "  hn                         - Hacker News 'who is hiring' threads.",
+    "  simplify                   - the public SimplifyJobs/New-Grad-Positions",
+    "                               listings.json on GitHub. Not a scrape of",
+    "                               simplify.jobs. Credit to SimplifyJobs; the feed",
+    "                               is ~12 MB, so please do not poll it aggressively.",
+    "  ycdir                      - api.ycombinator.com public companies endpoint.",
+    "                               Yields board slugs only, never postings.",
+    "  getro                      - public VC-portfolio board JSON.",
+    "",
+    "SOURCES THAT REQUIRE YOUR OWN LOGGED-IN ACCOUNT — off by default:",
+    "  yc        - Work at a Startup.",
+    "  jobright  - jobright.ai personalised recommendations.",
+    "",
+    "  These drive a real browser session through scripts/seek-sidecar.mjs using",
+    "  YOUR account, stored in .runner-profile/ (gitignored — no credentials ship",
+    "  with this repo). Automated access to a logged-in area may conflict with",
+    "  those sites' terms of service. Enabling them is your call and your",
+    "  responsibility. They fetch listing metadata only (company, title, link) —",
+    "  never job descriptions, which are read from the employer's own page — and",
+    "  referral parameters such as ?utm_source=&jr_id= are preserved on click",
+    "  through so the originating site keeps its attribution.",
+    "",
+    "batch.enabled is false here on purpose: it fills real employer application",
+    "forms unattended. Read scripts/batch-runner.mjs and set hostAllowlist before",
+    "you ever turn it on."
+  ],
+
+  "greenhouse": { "enabled": true, "tokens": ["affirm", "airbnb", "betterment"] },
+  "lever": { "enabled": true, "tokens": ["palantir", "spotify"] },
+  "ashby": { "enabled": true, "tokens": ["Acorns", "Crusoe", "abridge"] },
+
+  "hn": { "enabled": true },
+  "simplify": { "enabled": true },
+  "ycdir": { "enabled": true },
+  "getro": {
+    "enabled": false,
+    "networks": [{ "name": "craftventures", "id": "340", "host": "jobs.craftventures.com" }]
+  },
+
+  "yc": { "enabled": false },
+  "jobright": { "enabled": false },
+
+  "blocklist": [],
+  "schedule": { "enabled": false, "targetHour": 7 },
+  "batch": { "enabled": false, "cap": 10, "hostAllowlist": ["greenhouse.io", "lever.co", "ashbyhq.com"] }
+}

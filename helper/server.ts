@@ -112,7 +112,10 @@ const USER_PROFILE = join(homedir(), '.claude/projects/-Users-you-resume/memory/
 const INTERVIEW_GAPS = join(homedir(), '.claude/projects/-Users-you-resume/memory/interview_gaps.md');
 const NO_INFLATED_METRICS = join(homedir(), '.claude/projects/-Users-you-resume/memory/feedback_no_inflated_metrics.md');
 
-const db = new Database(join(HERE, 'jobfill.db'));
+// JOBFILL_DB exists so the boot smoke test can evaluate this whole module
+// against a throwaway db instead of the live one. Unset everywhere else — the
+// launchd agent, scripts/ and the dashboard all get the default below.
+const db = new Database(process.env.JOBFILL_DB || join(HERE, 'jobfill.db'));
 // Fresh-create DDL lives in applications.ts so the module and its :memory: tests
 // own the full column set (incl. status_changed_at); the live jobfill.db predates
 // several columns and gets them via the ALTER guards below (dual pattern, same as

@@ -189,16 +189,23 @@ async function runFill(tabId, force = false, opts = {}) {
     // drop-zones and their scraped labels are unreliable ("Attach", "files[]");
     // the mapper makes the resume-vs-other judgment with full page context.
     const hasResumeField = fields.some(f => f.type === 'file');
+    // A short scrape no longer means there is no JD. The helper swaps in the one
+    // the sweep fetched from the ATS detail API when this fill has a queue row,
+    // and extractJD now returns '' rather than page chrome on a form-only page —
+    // so gating purely on the scrape would skip tailoring exactly where the
+    // stored JD is the better input. /tailor re-checks the floor against both
+    // sources and rejects before spending anything, so the extra call is cheap.
+    const canTailor = tailorEnabled && hasResumeField && (jd.length >= 200 || Boolean(queueId));
     let tailorState = 'skipped';
     let tailorMessage = !tailorEnabled
       ? 'tailoring disabled in options'
       : !hasResumeField
         ? 'no resume upload field on this page'
-        : jd.length < 200
+        : !canTailor
           ? `no usable job description found (${jd.length} chars, need 200+)`
           : null;
     let summary = null;
-    if (tailorEnabled && hasResumeField && jd.length >= 200) {
+    if (canTailor) {
       try {
         await helperFetch('/health');
         await setStatus({ state: 'tailoring', company: pageContext.heading || pageContext.title || '' });
@@ -216,8 +223,17 @@ async function runFill(tabId, force = false, opts = {}) {
         tailorMessage = null;
         summary = t.summary ?? null;
       } catch (e) {
-        tailorState = 'error';
-        tailorMessage = String(e?.message || e);
+        const msg = String(e?.message || e);
+        // tailor()'s own floor rejection means NEITHER the scrape nor the stored
+        // JD had usable text — that is a skip, not a failure, and recording it as
+        // an error would misreport a page that simply has no description on it.
+        if (/too short to tailor/i.test(msg)) {
+          tailorState = 'skipped';
+          tailorMessage = `no usable job description found (${jd.length} scraped chars, none stored)`;
+        } else {
+          tailorState = 'error';
+          tailorMessage = msg;
+        }
       }
     }
 

@@ -180,6 +180,45 @@ export function extractJD(doc = document) {
       if (text.length >= 200) return text.slice(0, 8000);
     }
   }
-  const el = doc.querySelector('main, article, [class*="description"], [id*="description"]') || doc.body;
-  return (el.innerText || el.textContent || '').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim().slice(0, 8000);
+  for (const selector of JD_CONTAINERS) {
+    // Longest match within a tier, not the first: pages carry both a short
+    // "description" teaser and the full posting, and document order does not
+    // say which is which.
+    let best = '';
+    for (const el of doc.querySelectorAll(selector)) {
+      const text = readableText(el);
+      if (text.length > best.length) best = text;
+    }
+    if (best.length >= 200) return best.slice(0, 8000);
+  }
+  return readableText(doc.body).slice(0, 8000);
+}
+
+// Tried in THIS order, most-likely-to-be-the-JD first, one selector at a time.
+// It used to be a single comma-joined querySelector, which returns the first
+// match in DOCUMENT ORDER regardless of which selector matched — so a <main>
+// wrapping the form, the nav and the description always beat the description
+// itself, and the JD came back as page furniture. Measured on the live corpus:
+// 5 of 63 stored JDs were chrome, one of them 8,000 chars of Oracle form text.
+//
+// Deliberately structural rather than a content classifier. Judging JD-ness
+// from the text was tried and abandoned: on the 63-JD corpus, requiring the
+// JD vocabulary that catches all 5 chrome rows also discarded 11 real
+// descriptions, including a 4,588-char one with none of the markers at all.
+const JD_CONTAINERS = ['[class*="description"]', '[id*="description"]', 'article', 'main'];
+
+// innerText already excludes script/style, but it is falsy on an unrendered
+// container (a hidden iframe body, a display:none panel) and the textContent
+// fallback swallows inline source — which is how an iCIMS postMessage shim was
+// stored as a 3,091-char "job description". Strip the non-content nodes off a
+// clone so the fallback cannot.
+function readableText(el) {
+  if (!el) return '';
+  let raw = el.innerText;
+  if (!raw) {
+    const clone = el.cloneNode(true);
+    for (const node of clone.querySelectorAll('script, style, noscript, template')) node.remove();
+    raw = clone.textContent || '';
+  }
+  return raw.replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
 }

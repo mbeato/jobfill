@@ -132,4 +132,57 @@ describe('extractJD', () => {
     expect(extractJD(document)).toContain('Full posting text');
     ld.remove();
   });
+
+  // The selector list read like a priority order but was passed to a single
+  // querySelector call, which returns the first match in DOCUMENT ORDER
+  // regardless of which selector matched. So a <main> wrapping both the form
+  // and the description won every time, and the JD came back as page chrome
+  // with the real description buried inside it. Live consequence: 5 of 63
+  // stored JDs were furniture, one of them 8,000 chars of Oracle form text.
+  it('prefers a description-named container over an outer <main> that wraps the whole page', () => {
+    document.body.innerHTML = `
+      <main>
+        <nav>Job application form Import your profile Exit to job board</nav>
+        <form><label>First Name</label><input></form>
+        <div class="job-description">About the role: ${longDesc}</div>
+      </main>`;
+    const jd = extractJD(document);
+    expect(jd).toContain('About the role');
+    expect(jd).not.toContain('Import your profile');
+  });
+
+  it('skips a description-named container too short to be the JD and keeps looking', () => {
+    document.body.innerHTML = `
+      <div id="description-header">Software Engineer</div>
+      <article>About the role: ${longDesc}</article>`;
+    expect(extractJD(document)).toContain('About the role');
+  });
+
+  // textContent swallows <script> text, and innerText is falsy on an unrendered
+  // container — which is how an iCIMS postMessage shim ended up stored as a
+  // 3,091-char "job description" (application 100, live).
+  it('never returns inline <script> source as the description', () => {
+    document.body.innerHTML = `
+      <main>
+        <script>var useAutoScrolling = false; if (window.addEventListener) { window.addEventListener('message', icims_handlePostMessage, false); }</script>
+        <p>About the role: ${longDesc}</p>
+      </main>`;
+    const jd = extractJD(document);
+    expect(jd).not.toContain('useAutoScrolling');
+    expect(jd).not.toContain('addEventListener');
+    expect(jd).toContain('About the role');
+  });
+
+  it('falls back to body text when no candidate container exists', () => {
+    document.body.innerHTML = `<div>About the role: ${longDesc}</div>`;
+    expect(extractJD(document)).toContain('About the role');
+  });
+  it('takes the longest description-named container, not the first (teaser vs full posting)', () => {
+    document.body.innerHTML = `
+      <div class="description-teaser">Software Engineer in New York. Apply now to join our growing team today.</div>
+      <div class="job-description">About the role: ${longDesc}</div>`;
+    const jd = extractJD(document);
+    expect(jd).toContain('About the role');
+    expect(jd.length).toBeGreaterThan(900);
+  });
 });

@@ -205,7 +205,10 @@ async function runFill(tabId, force = false, opts = {}) {
         const t = await helperFetch('/tailor', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ jd, url: pageContext.url, company: '', role: '' }),
+          // queue_id lets the helper swap in the JD the sweep already fetched from
+          // the ATS detail API. It cannot be resolved from the url here: this page
+          // is the apply route, which never normalizes to the posting's key.
+          body: JSON.stringify({ jd, url: pageContext.url, company: '', role: '', queue_id: queueId }),
         }, 8 * 60 * 1000);
         attachedResume = { name: t.name, mime: t.mime, b64: t.b64 };
         attachedResume.path = t.path;

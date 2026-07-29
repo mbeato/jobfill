@@ -23,6 +23,7 @@ import {
   recordDecision,
   listPostingsToDecide,
   storePostingJD,
+  resolveStoredJD,
 } from './seek/postings';
 import { loadSeekConfig } from './seek/config';
 import { fetchGreenhouse } from './seek/greenhouse';
@@ -1408,7 +1409,23 @@ Bun.serve({
         return json({ source, upserted });
       }
       if (pathname === '/tailor' && req.method === 'POST') {
-        return json(await tailor(await req.json()));
+        const b = await req.json();
+        // Prefer the JD the sweep already fetched from the ATS detail API over
+        // the extension's page scrape. The scrape's fallback is body innerText
+        // with no length floor of its own (extension/lib/scraper.js), so on a
+        // JS-rendered or login-gated apply page it happily returns page chrome
+        // that clears the 200-char gate and gets tailored against. The stored
+        // one is the employer's own description field or nothing.
+        //
+        // Falls back whenever there is nothing stored — an ad-hoc fill with no
+        // queue row, a login_gated/non-fetchable source, or a posting queued
+        // before the JD was persisted — so this can only ever improve the input.
+        const stored = Number.isInteger(Number(b.queue_id)) ? resolveStoredJD(db, Number(b.queue_id)) : '';
+        const jd = stored.length >= 200 ? stored : b.jd;
+        if (stored.length >= 200 && stored !== b.jd) {
+          console.log(`[tailor] using stored posting JD (${stored.length} chars) over scraped (${(b.jd ?? '').length})`);
+        }
+        return json(await tailor({ ...b, jd }));
       }
       if (pathname === '/map' && req.method === 'POST') {
         const b = await req.json();

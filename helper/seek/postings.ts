@@ -192,6 +192,27 @@ export function storePostingJD(db: Database, id: number, jd: string): void {
   db.query(`UPDATE postings SET jd = ? WHERE id = ?`).run(String(jd ?? ''), id);
 }
 
+// The read side of storePostingJD: the JD for the posting a queue row was
+// promoted from, or '' when there is none.
+//
+// Joined on url_key, and reached via the queue id rather than the fill url,
+// because those are the only two things that actually line up. queue.url_key is
+// set from normalizeUrl(posting.url) at promotion (promote.ts), so it equals
+// postings.url_key by construction. The url the extension fills is the APPLY
+// route — …/{id}/application, …/embed/job_app?for=…&token=… — and normalizeUrl
+// keeps the path while dropping the query, so normalizing IT lands on neither
+// the posting key (extra /application segment) nor anything unique at all
+// (every greenhouse embed collapses to job-boards.greenhouse.io/embed/job_app).
+export function resolveStoredJD(db: Database, queueId: number): string {
+  const row = db
+    .query(
+      `SELECT p.jd AS jd FROM queue q JOIN postings p ON p.url_key = q.url_key
+       WHERE q.id = ? AND q.url_key IS NOT NULL`,
+    )
+    .get(queueId) as { jd: string | null } | null;
+  return row?.jd ?? '';
+}
+
 // D-08/D-12: the sweep's scoring backlog — unscored (null) or held-for-retry
 // postings, source-interleaved per D-01/D-02 rather than drained in one flat
 // pass — a ROW_NUMBER() ranks each source's queue independently so a source that

@@ -1,6 +1,16 @@
 import { test, expect } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { createPostingsTable, upsertPosting, listPostings, recordDecision, listPostingsToDecide, DECISION_VALUES } from './postings';
+import {
+  createPostingsTable,
+  upsertPosting,
+  listPostings,
+  recordDecision,
+  listPostingsToDecide,
+  storePostingJD,
+  resolveStoredJD,
+  DECISION_VALUES,
+} from './postings';
+import { createQueueTable, insertQueueEntryFromPosting } from '../queue';
 import type { NormalizedPosting } from './types';
 
 function makeDb(): Database {
@@ -351,4 +361,28 @@ test('the new sources still hit the existing write-boundary guards: scheme allow
     }),
   )!;
   expect(stored.title.length).toBe(2000);
+});
+
+// The tailor's JD used to come only from the extension's page scrape. The sweep
+// already fetched a clean one from the ATS detail API, so prefer that when the
+// fill is working a queue row that traces back to a posting. Joined on url_key
+// rather than the fill url: applications.url is the APPLY route
+// (…/{id}/application, …/embed/job_app?…) and normalizeUrl keeps the path and
+// drops the query, so it never equals the canonical posting key.
+test('resolveStoredJD: returns the posting jd for a queue row that shares its url_key', () => {
+  const db = makeDb();
+  createQueueTable(db);
+  const row = upsertPosting(db, posting())!;
+  storePostingJD(db, row.id, 'the real description');
+  const q = insertQueueEntryFromPosting(db, { ...row, jd: '' } as never)!;
+  expect(resolveStoredJD(db, q.id)).toBe('the real description');
+});
+
+test('resolveStoredJD: returns empty for an unknown queue id, and for a queue row with no matching posting', () => {
+  const db = makeDb();
+  createQueueTable(db);
+  expect(resolveStoredJD(db, 999)).toBe('');
+  db.query(`INSERT INTO queue (url, url_key) VALUES ('https://example.com/x', 'example.com/x')`).run();
+  const orphan = db.query('SELECT id FROM queue').get() as { id: number };
+  expect(resolveStoredJD(db, orphan.id)).toBe('');
 });

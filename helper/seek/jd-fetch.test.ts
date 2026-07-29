@@ -253,3 +253,94 @@ test('JD_FETCHABLE_SOURCES: every source NOT listed throws `unsupported source`'
     await expect(fetchJD(posting)).rejects.toThrow(`fetchJD: unsupported source ${source}`);
   }
 });
+
+// --- host-routed aggregator postings ---------------------------------------
+// JD_FETCHABLE_SOURCES gates on where a posting CAME FROM, but what actually
+// determines fetchability is where its url POINTS. Measured live: 376 simplify
+// and 47 getro postings point at greenhouse/lever/ashby, and were being scored
+// on title/company/location alone while their description sat behind an API
+// the helper already calls. The board token has to come from the url — an
+// aggregator's `company` is a display name ("Magical Inc"), not a board slug.
+
+test('fetchJD (simplify -> ashby host): derives the board token from the url, not the display company', async () => {
+  const posting = makePosting({
+    source: 'simplify',
+    company: 'Magical Inc',
+    url: 'https://jobs.ashbyhq.com/magical/34413f8d-26bf-4bbc-8ade-eb309a0e2245/application',
+  });
+  let requested = '';
+  const stub = (async (u: string) => {
+    requested = u;
+    return { ok: true, status: 200, json: async () => rawAshbyBoard } as Response;
+  }) as unknown as typeof fetch;
+  const text = await fetchJD(posting, stub);
+  expect(requested).toBe('https://api.ashbyhq.com/posting-api/job-board/magical');
+  expect(text).toContain('About Ramp');
+});
+
+test('fetchJD (simplify -> lever host): routes to lever using the url slug', async () => {
+  const posting = makePosting({
+    source: 'simplify',
+    company: 'Commerce Architects LLC',
+    url: 'https://jobs.lever.co/commercearchitects/ec4bd3b5-3219-4524-805a-d9dff354c5ec/apply',
+  });
+  let requested = '';
+  const stub = (async (u: string) => {
+    requested = u;
+    return { ok: true, status: 200, json: async () => rawLeverDetail } as Response;
+  }) as unknown as typeof fetch;
+  const text = await fetchJD(posting, stub);
+  expect(requested).toContain('api.lever.co/v0/postings/commercearchitects/ec4bd3b5-3219-4524-805a-d9dff354c5ec');
+  expect(text).toContain('A World-Changing Company');
+});
+
+test('fetchJD (getro -> greenhouse host): routes to greenhouse using the url slug', async () => {
+  const posting = makePosting({
+    source: 'getro',
+    company: 'Tailscale Inc.',
+    url: 'https://boards.greenhouse.io/tailscale/jobs/4717966005',
+  });
+  let requested = '';
+  const stub = (async (u: string) => {
+    requested = u;
+    return { ok: true, status: 200, json: async () => rawGreenhouseDetail } as Response;
+  }) as unknown as typeof fetch;
+  await fetchJD(posting, stub);
+  expect(requested).toBe('https://boards-api.greenhouse.io/v1/boards/tailscale/jobs/4717966005?content=true');
+});
+
+// The SSRF posture is unchanged: an aggregator pointing anywhere else is still
+// refused outright rather than fetched. This is the case decide.ts routes to
+// metadata-only scoring, and it must stay distinguishable.
+test('fetchJD (simplify -> third-party host): still throws `unsupported source`', async () => {
+  const posting = makePosting({
+    source: 'simplify',
+    company: 'Apple',
+    url: 'https://jobs.apple.com/en-us/details/200612345',
+  });
+  let called = false;
+  const stub = (async () => {
+    called = true;
+    return {} as Response;
+  }) as unknown as typeof fetch;
+  await expect(fetchJD(posting, stub)).rejects.toThrow('unsupported source');
+  expect(called).toBe(false);
+});
+
+// Regression guard: host inference must never override a source that has its
+// own adapter. Greenhouse's company-domain proxy urls carry no recognizable
+// host at all, so posting.company is the ONLY correct board token there.
+test('fetchJD (greenhouse source, company-domain proxy url): still trusts posting.company', async () => {
+  const posting = makePosting({
+    source: 'greenhouse',
+    company: 'stripe',
+    url: 'https://stripe.com/jobs/search?gh_jid=7954688',
+  });
+  let requested = '';
+  const stub = (async (u: string) => {
+    requested = u;
+    return { ok: true, status: 200, json: async () => rawGreenhouseDetail } as Response;
+  }) as unknown as typeof fetch;
+  await fetchJD(posting, stub);
+  expect(requested).toBe('https://boards-api.greenhouse.io/v1/boards/stripe/jobs/7954688?content=true');
+});

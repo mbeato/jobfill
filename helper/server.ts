@@ -48,7 +48,7 @@ import { fetchGetro } from './seek/getro';
 import { harvestYcDirectory } from './seek/ycdir';
 import type { SourceName } from './seek/types';
 import { classifyMetadata, classifyYoe, classifyBoardGrace } from './seek/filter';
-import { fetchJD } from './seek/jd-fetch';
+import { fetchJD, resolveJDFetch } from './seek/jd-fetch';
 import { scoreRelevance, loadProfileSummary, DEFAULT_PROFILE_SUMMARY } from './seek/relevance';
 import { promotePosting } from './seek/promote';
 import {
@@ -332,6 +332,7 @@ const jobDeps: JobDeps = {
   classifyBoardGrace,
   classifyYoe,
   fetchJD,
+  resolveJDFetch,
   scoreRelevance,
   loadProfileSummary,
   promotePosting,

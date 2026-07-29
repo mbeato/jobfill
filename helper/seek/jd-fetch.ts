@@ -230,16 +230,68 @@ export const JD_FETCHABLE_SOURCES: ReadonlySet<string> = new Set([
   'hn',
 ]);
 
+// Which ATS a url POINTS at, and the board token to ask it for. The token is
+// always the first path segment except on greenhouse's embed route, which
+// carries it as `for`. Returns null for anything else — including greenhouse's
+// company-domain proxy shape (stripe.com/jobs/search?gh_jid=…), which is not
+// host-recognizable at all and is exactly why a source with its own adapter
+// must keep trusting posting.company instead of this.
+function inferAtsFromUrl(url: string): { source: string; company: string } | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  const host = parsed.hostname.toLowerCase();
+  const first = parsed.pathname.split('/').filter(Boolean)[0] ?? '';
+  if (host.endsWith('greenhouse.io')) {
+    const board = first === 'embed' ? (parsed.searchParams.get('for') ?? '') : first;
+    return board ? { source: 'greenhouse', company: board } : null;
+  }
+  if (host === 'jobs.lever.co') return first ? { source: 'lever', company: first } : null;
+  if (host === 'jobs.ashbyhq.com') return first ? { source: 'ashby', company: first } : null;
+  return null;
+}
+
+/**
+ * Which fetch branch serves a posting, and with which board token — or null if
+ * none can.
+ *
+ * JD_FETCHABLE_SOURCES gates on where a posting CAME FROM, but fetchability is
+ * really determined by where its url POINTS. Measured live: 376 simplify and 47
+ * getro postings point straight at greenhouse/lever/ashby, and were being scored
+ * on title/company/location alone while their description sat behind an API this
+ * module already calls. An aggregator's `company` is a display name, never a
+ * board slug, so the token has to come off the url.
+ *
+ * A source with its own adapter is always trusted over host inference — see
+ * inferAtsFromUrl. The SSRF posture is unchanged either way: every branch still
+ * builds its own API url and runs it through assertAllowedHost, and an
+ * aggregator pointing at a third-party host still resolves to null, which
+ * decide.ts routes to metadata-only scoring rather than a permanent held loop.
+ */
+export function resolveJDFetch(posting: PostingRow): { source: string; company: string } | null {
+  if (JD_FETCHABLE_SOURCES.has(posting.source)) return { source: posting.source, company: posting.company };
+  return inferAtsFromUrl(posting.url);
+}
+
 export async function fetchJD(posting: PostingRow, fetchImpl: typeof fetch = fetch): Promise<string> {
-  switch (posting.source) {
+  const resolved = resolveJDFetch(posting);
+  if (!resolved) throw new Error(`fetchJD: unsupported source ${posting.source}`);
+  // Carry the resolved board token through as `company` — the branches below
+  // all read posting.company for it, and for a host-routed aggregator that
+  // field holds a display name.
+  const p = resolved.company === posting.company ? posting : { ...posting, company: resolved.company };
+  switch (resolved.source) {
     case 'greenhouse':
-      return fetchGreenhouseJD(posting, fetchImpl);
+      return fetchGreenhouseJD(p, fetchImpl);
     case 'lever':
-      return fetchLeverJD(posting, fetchImpl);
+      return fetchLeverJD(p, fetchImpl);
     case 'ashby':
-      return fetchAshbyJD(posting, fetchImpl);
+      return fetchAshbyJD(p, fetchImpl);
     case 'hn':
-      return fetchHNJD(posting, fetchImpl);
+      return fetchHNJD(p, fetchImpl);
     default:
       throw new Error(`fetchJD: unsupported source ${posting.source}`);
   }

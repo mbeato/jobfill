@@ -3,7 +3,7 @@ import type { PostingRow } from './postings';
 import type { QueueRow } from '../queue';
 import type { BoardRow } from './boards';
 import type { CompiledCriteria } from './criteria';
-import { JD_FETCHABLE_SOURCES } from './jd-fetch';
+import { resolveJDFetch } from './jd-fetch';
 
 // The filter -> promote orchestrator (D-01 two-stage, D-08 held, D-12 cap,
 // D-14 finality). Walks the to-decide backlog (source-interleaved, per
@@ -105,6 +105,7 @@ export interface DecideDeps {
   classifyBoardGrace: (posting: PostingRow, board: BoardRow | null) => { reject: boolean; reason?: string };
   classifyYoe: (jdText: string, criteria: CompiledCriteria) => { reject: boolean; reason?: string };
   fetchJD: (posting: PostingRow, fetchImpl?: typeof fetch) => Promise<string>;
+  resolveJDFetch: (posting: PostingRow) => { source: string; company: string } | null;
   scoreRelevance: (
     profileSummary: string,
     jdText: string,
@@ -304,17 +305,26 @@ export async function runFilterPromote(db: Database, deps: DecideDeps): Promise<
         // Two disjoint reasons a JD is unreachable, both structural (never
         // transient), so neither may be left to the held-for-retry path below:
         //   1. login_gated (YC/Jobright) — fetching would fail every sweep.
-        //   2. the source has no fetchJD branch at all (simplify/getro): their
-        //      apply URLs point at arbitrary third-party hosts that ALLOWED_HOSTS
-        //      refuses as an SSRF control, so fetchJD throws `unsupported source`
-        //      forever. Observed live: 73 of 81 drained simplify postings were
-        //      stranded in held:jd-fetch-error before this branch existed.
+        //   2. no fetch branch can serve the posting: an aggregator (simplify/
+        //      getro) whose apply URL points at an arbitrary third-party host
+        //      that ALLOWED_HOSTS refuses as an SSRF control, so fetchJD throws
+        //      `unsupported source` forever. Observed live: 73 of 81 drained
+        //      simplify postings were stranded in held:jd-fetch-error before
+        //      this branch existed.
         //
-        // Deliberately source-structural rather than error-based: a greenhouse
-        // JD fetch that 404s IS transient and must keep its D-08 held-for-retry
+        // resolveJDFetch, not JD_FETCHABLE_SOURCES: the gate is now whether the
+        // posting's URL reaches a servable ATS, not what fed it to us. 376
+        // simplify + 47 getro postings point straight at greenhouse/lever/ashby
+        // and were being downgraded to metadata-only for no reason other than
+        // their source label. The give-up set narrows to aggregators pointing
+        // somewhere genuinely unreachable — reason 2 above holds verbatim for
+        // exactly those.
+        //
+        // Deliberately structural rather than error-based: a greenhouse JD fetch
+        // that 404s IS transient and must keep its D-08 held-for-retry
         // semantics, so it must not be swept into metadata-only scoring.
         let jd: string;
-        if (p.login_gated || !JD_FETCHABLE_SOURCES.has(p.source)) {
+        if (p.login_gated || !deps.resolveJDFetch(p)) {
           jd = '';
         } else {
           try {

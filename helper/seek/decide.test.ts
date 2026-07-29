@@ -3,6 +3,7 @@ import { Database } from 'bun:sqlite';
 import { createPostingsTable, upsertPosting, recordDecision, listPostingsToDecide, storePostingJD } from './postings';
 import { createQueueTable } from '../queue';
 import { promotePosting } from './promote';
+import { resolveJDFetch } from './jd-fetch';
 import { runFilterPromote, LLM_CAP, DECIDE_CONCURRENCY, type DecideDeps, type FilterCounts } from './decide';
 import { createBoardsTable, upsertBoard } from './boards';
 import { classifyBoardGrace } from './filter';
@@ -48,6 +49,7 @@ function baseDeps(overrides: Partial<DecideDeps> = {}): DecideDeps {
     classifyBoardGrace: () => ({ reject: false }),
     classifyYoe: () => ({ reject: false }),
     fetchJD: async () => 'some jd text',
+    resolveJDFetch,
     scoreRelevance: async () => ({ relevant: true, reason: 'matches profile' }),
     loadProfileSummary: async () => 'profile summary',
     promotePosting,

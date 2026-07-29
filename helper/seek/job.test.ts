@@ -3,6 +3,7 @@ import { Database } from 'bun:sqlite';
 import { createPostingsTable, upsertPosting, recordDecision, listPostingsToDecide, storePostingJD } from './postings';
 import { createQueueTable } from '../queue';
 import { promotePosting } from './promote';
+import { resolveJDFetch } from './jd-fetch';
 import { createSweepsTable, getSweepById } from './runs';
 import { createBatchRunsTable } from './batch';
 import { beginSweep, runSweepJob, spawnSidecar, SweepAlreadyRunningError, type JobDeps } from './job';
@@ -81,6 +82,7 @@ function baseDeps(overrides: Partial<JobDeps> = {}): JobDeps {
     classifyBoardGrace: () => ({ reject: false }),
     classifyYoe: () => ({ reject: false }),
     fetchJD: async () => 'some jd text',
+    resolveJDFetch,
     scoreRelevance: async () => ({ relevant: true, reason: 'matches profile' }),
     loadProfileSummary: async () => 'profile summary',
     promotePosting,

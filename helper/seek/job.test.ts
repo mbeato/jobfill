@@ -1,6 +1,6 @@
 import { test, expect } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { createPostingsTable, upsertPosting, recordDecision, listPostingsToDecide } from './postings';
+import { createPostingsTable, upsertPosting, recordDecision, listPostingsToDecide, storePostingJD } from './postings';
 import { createQueueTable } from '../queue';
 import { promotePosting } from './promote';
 import { createSweepsTable, getSweepById } from './runs';
@@ -84,6 +84,7 @@ function baseDeps(overrides: Partial<JobDeps> = {}): JobDeps {
     scoreRelevance: async () => ({ relevant: true, reason: 'matches profile' }),
     loadProfileSummary: async () => 'profile summary',
     promotePosting,
+    storePostingJD,
     recordDecision,
     listPostingsToDecide,
     listAllBoards: () => [],

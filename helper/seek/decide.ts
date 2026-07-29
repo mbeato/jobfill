@@ -113,6 +113,7 @@ export interface DecideDeps {
   ) => Promise<{ relevant: boolean; reason: string }>;
   loadProfileSummary: (db: Database) => Promise<string>;
   promotePosting: (db: Database, posting: PostingRow) => { promoted: boolean; queueRow?: QueueRow; reason?: string };
+  storePostingJD: (db: Database, id: number, jd: string) => void;
   recordDecision: (db: Database, id: number, decision: string, reason: string) => PostingRow | null;
   listPostingsToDecide: (db: Database, limit?: number) => PostingRow[];
   listAllBoards: (db: Database) => BoardRow[];
@@ -353,6 +354,11 @@ export async function runFilterPromote(db: Database, deps: DecideDeps): Promise<
             const promo = deps.promotePosting(db, p);
             if (promo.promoted) {
               deps.recordDecision(db, p.id, 'queued', `llm:relevant — ${verdict.reason}`);
+              // Keep the JD this posting already paid to fetch, now that it is
+              // headed for a fill. Deliberately after promotePosting, so a
+              // deduped posting (which never reaches the tailor) stores nothing.
+              // `jd` is '' for login_gated/non-fetchable sources — harmless.
+              deps.storePostingJD(db, p.id, jd);
               counts.queued++;
             } else {
               deps.recordDecision(db, p.id, 'rejected', promo.reason ?? 'dedupe:queue');

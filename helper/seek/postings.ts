@@ -54,6 +54,7 @@ export function createPostingsTable(db: Database) {
     decision TEXT,
     decision_reason TEXT,
     decided_at TEXT,
+    jd TEXT DEFAULT '',
     fetched_at TEXT DEFAULT (datetime('now')),
     created_at TEXT DEFAULT (datetime('now'))
   )`);
@@ -179,6 +180,16 @@ export function recordDecision(db: Database, id: number, decision: string, reaso
   );
   const raw = db.query('SELECT * FROM postings WHERE id = ?').get(id) as Record<string, unknown> | null;
   return raw ? toRow(raw) : null;
+}
+
+// Persists the JD the relevance scorer already fetched, so the tailor does not
+// have to re-derive one by scraping the apply page at fill time. Written ONLY
+// for postings that reach the queue (see decide.ts) — a rejected posting is
+// never tailored, so storing its JD would add the whole scored pool's worth of
+// ~10k-char blobs to the db every sweep for nothing. Bounded by the same
+// MAX_JD_LENGTH fetchJD already applies; MAX_TEXT would truncate a real JD.
+export function storePostingJD(db: Database, id: number, jd: string): void {
+  db.query(`UPDATE postings SET jd = ? WHERE id = ?`).run(String(jd ?? ''), id);
 }
 
 // D-08/D-12: the sweep's scoring backlog — unscored (null) or held-for-retry

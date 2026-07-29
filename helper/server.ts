@@ -16,7 +16,14 @@ export { safeDocPath };
 import { mergeProfilePatch } from './profile-merge';
 import { mapViaCLI } from './mapping';
 import { normalizeUrl } from './seek/normalize';
-import { createPostingsTable, upsertPosting, listPostings, recordDecision, listPostingsToDecide } from './seek/postings';
+import {
+  createPostingsTable,
+  upsertPosting,
+  listPostings,
+  recordDecision,
+  listPostingsToDecide,
+  storePostingJD,
+} from './seek/postings';
 import { loadSeekConfig } from './seek/config';
 import { fetchGreenhouse } from './seek/greenhouse';
 import { fetchLever } from './seek/lever';
@@ -173,6 +180,9 @@ try {
   db.run(`ALTER TABLE postings ADD COLUMN decided_at TEXT`);
 } catch {}
 try {
+  db.run(`ALTER TABLE postings ADD COLUMN jd TEXT DEFAULT ''`);
+} catch {}
+try {
   db.run(`ALTER TABLE queue ADD COLUMN url_key TEXT`);
 } catch {}
 try {
@@ -324,6 +334,7 @@ const jobDeps: JobDeps = {
   scoreRelevance,
   loadProfileSummary,
   promotePosting,
+  storePostingJD,
   recordDecision,
   listPostingsToDecide,
   listAllBoards,

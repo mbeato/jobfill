@@ -1,6 +1,6 @@
 import { test, expect, beforeEach, afterEach } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { createPostingsTable, upsertPosting, recordDecision, listPostingsToDecide } from './postings';
+import { createPostingsTable, upsertPosting, recordDecision, listPostingsToDecide, storePostingJD } from './postings';
 import { createQueueTable } from '../queue';
 import { promotePosting } from './promote';
 import { runFilterPromote, LLM_CAP, DECIDE_CONCURRENCY, type DecideDeps, type FilterCounts } from './decide';
@@ -51,6 +51,7 @@ function baseDeps(overrides: Partial<DecideDeps> = {}): DecideDeps {
     scoreRelevance: async () => ({ relevant: true, reason: 'matches profile' }),
     loadProfileSummary: async () => 'profile summary',
     promotePosting,
+    storePostingJD,
     recordDecision,
     listPostingsToDecide,
     listAllBoards: () => [],
@@ -208,6 +209,28 @@ test('happy queue: metadata survives, YOE survives, scoreRelevance relevant, pro
   expect(stored.decision_reason.startsWith('llm:relevant')).toBe(true);
   const queueRows = db.query('SELECT count(*) as c FROM queue').get() as { c: number };
   expect(queueRows.c).toBe(1);
+});
+
+// The sweep already pays to fetch a full JD for every posting it scores, and
+// used to discard it — leaving the tailor to re-derive one by scraping the page
+// at fill time. Kept ONLY for postings that actually reach the queue: rejected
+// ones are never tailored, and storing theirs would put ~10k chars x the whole
+// pool into the db every sweep for nothing.
+test('queued posting persists the JD the scorer already fetched; rejected ones do not', async () => {
+  const db = makeDb();
+  const keep = upsertPosting(db, posting({ company: 'Keep', url: 'https://boards.greenhouse.io/keep/jobs/1' }))!;
+  const drop = upsertPosting(db, posting({ company: 'Drop', url: 'https://boards.greenhouse.io/drop/jobs/2' }))!;
+  const deps = baseDeps({
+    fetchJD: async p => `full description for ${p.company}`,
+    scoreRelevance: async (_profile, _jd, p) =>
+      p.company === 'Keep' ? { relevant: true, reason: 'fit' } : { relevant: false, reason: 'no fit' },
+  });
+
+  await runFilterPromote(db, deps);
+
+  const read = (id: number) => (db.query('SELECT jd FROM postings WHERE id = ?').get(id) as { jd: string }).jd;
+  expect(read(keep.id)).toBe('full description for Keep');
+  expect(read(drop.id)).toBe('');
 });
 
 test('LLM not-relevant: scoreRelevance returns relevant:false -> rejected with llm:not-relevant reason', async () => {

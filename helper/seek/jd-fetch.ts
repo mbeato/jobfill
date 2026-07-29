@@ -76,7 +76,10 @@ function extractGreenhouseId(url: string): string {
   } catch {
     throw new Error(`fetchJD: could not parse greenhouse url ${url}`);
   }
-  const fromQuery = parsed.searchParams.get('gh_jid');
+  // `token` is the embed apply route's id param (/embed/job_app?for={board}&token={id});
+  // `gh_jid` is the company-proxy one. Neither appears in a sweep — postings.url is
+  // canonical off the board listing — but applications.url is the page actually filled.
+  const fromQuery = parsed.searchParams.get('gh_jid') ?? parsed.searchParams.get('token');
   if (fromQuery) return fromQuery;
   const match = parsed.pathname.match(/(\d+)\/?$/);
   if (match) return match[1];
@@ -144,7 +147,11 @@ function extractAshbyJobId(url: string): string {
   } catch {
     throw new Error(`fetchJD: could not parse ashby url ${url}`);
   }
+  // Apply route is /{board}/{jobId}/application — taking the last segment
+  // outright read "application" AS the job id, so every apply-route url died
+  // as "job application not found in board listing".
   const parts = parsed.pathname.split('/').filter(Boolean);
+  if (parts[parts.length - 1] === 'application') parts.pop();
   if (parts.length < 1) {
     throw new Error(`fetchJD: could not extract ashby job id from ${url}`);
   }

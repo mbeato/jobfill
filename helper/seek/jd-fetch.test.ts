@@ -72,6 +72,39 @@ test('fetchJD (greenhouse): also extracts the id from a default boards.greenhous
   expect(text).toContain('Who we are');
 });
 
+// The APPLY-route url shapes. postings.url comes off a board listing and is
+// always canonical, so these never arise during a sweep — but applications.url
+// is whatever page was actually filled, which is the apply route. Both
+// extractors silently produced the wrong id against it: greenhouse's embed
+// carries the job id as `token`, and ashby's trailing `/application` segment
+// was read AS the id ("job application not found in board listing").
+test('fetchJD (greenhouse): extracts the id from the embed apply-route url shape', async () => {
+  const posting = makePosting({
+    source: 'greenhouse',
+    company: 'doordashusa',
+    url: 'https://job-boards.greenhouse.io/embed/job_app?for=doordashusa&token=7263610&utm_source=jobright',
+  });
+  let requested = '';
+  const stub = (async (u: string) => {
+    requested = u;
+    return { ok: true, status: 200, json: async () => rawGreenhouseDetail } as Response;
+  }) as unknown as typeof fetch;
+  const text = await fetchJD(posting, stub);
+  expect(requested).toBe('https://boards-api.greenhouse.io/v1/boards/doordashusa/jobs/7263610?content=true');
+  expect(text).toContain('Who we are');
+});
+
+test('fetchJD (ashby): matches the job id on an /application apply-route url', async () => {
+  const posting = makePosting({
+    source: 'ashby',
+    company: 'ramp',
+    url: 'https://jobs.ashbyhq.com/ramp/34413f8d-26bf-4bbc-8ade-eb309a0e2245/application?embed=true',
+  });
+  const stub = fakeFetch(rawAshbyBoard);
+  const text = await fetchJD(posting, stub);
+  expect(text).toContain('About Ramp');
+});
+
 test('fetchJD (lever): returns descriptionPlain', async () => {
   const posting = makePosting({
     source: 'lever',

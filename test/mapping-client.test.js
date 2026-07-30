@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { mapFields, MAP_TIMEOUT_MS } from '../extension/lib/mapping-client.js';
+import { mapFields, MAP_TIMEOUT_MS, MAX_FALLBACK_REASON } from '../extension/lib/mapping-client.js';
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -40,7 +40,7 @@ describe('mapFields', () => {
 
     const out = await mapFields(ARGS, deps);
 
-    expect(out).toEqual({ mapping: helperMapping, cost: 0, source: 'helper' });
+    expect(out).toEqual({ mapping: helperMapping, cost: 0, source: 'helper', fallbackReason: '' });
     expect(deps.callClaude).not.toHaveBeenCalled();
 
     const [url, init] = fetchMock.mock.calls[0];
@@ -66,17 +66,45 @@ describe('mapFields', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(deps.callClaude).toHaveBeenCalledTimes(1);
-    expect(out).toEqual({ mapping: { company: 'C', role: 'R', fields: [], skipped: [] }, cost: 0.01, source: 'haiku' });
+    expect(out).toEqual({ mapping: { company: 'C', role: 'R', fields: [], skipped: [] }, cost: 0.01, source: 'haiku', fallbackReason: 'Aborted' });
   });
 
-  it('falls back to Haiku on a non-2xx helper response', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: 'down for maintenance' }), { status: 503 }));
+  it('falls back to Haiku on a non-2xx helper response and carries the JSON error body into fallbackReason', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ error: 'mapViaCLI failed (is_error=parse-error, killed=SIGKILL, bound=240000ms): boom' }),
+      { status: 503 },
+    ));
     const deps = makeDeps({ fetch: fetchMock });
 
     const out = await mapFields(ARGS, deps);
 
     expect(deps.callClaude).toHaveBeenCalledTimes(1);
     expect(out.source).toBe('haiku');
+    expect(out.fallbackReason).toContain('503');
+    expect(out.fallbackReason).toContain('mapViaCLI failed (is_error=parse-error, killed=SIGKILL, bound=240000ms): boom');
+  });
+
+  it('falls back to Haiku on a non-2xx helper response with a non-JSON body, carrying status and raw text', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('nginx 502', { status: 502 }));
+    const deps = makeDeps({ fetch: fetchMock });
+
+    const out = await mapFields(ARGS, deps);
+
+    expect(deps.callClaude).toHaveBeenCalledTimes(1);
+    expect(out.source).toBe('haiku');
+    expect(out.fallbackReason).toContain('502');
+    expect(out.fallbackReason).toContain('nginx 502');
+  });
+
+  it('falls back to Haiku on a non-2xx helper response with an empty body, unchanged bare form', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('', { status: 500 }));
+    const deps = makeDeps({ fetch: fetchMock });
+
+    const out = await mapFields(ARGS, deps);
+
+    expect(deps.callClaude).toHaveBeenCalledTimes(1);
+    expect(out.source).toBe('haiku');
+    expect(out.fallbackReason).toBe('helper /map 500');
   });
 
   it('falls back to Haiku when the helper returns 200 with a malformed mapping shape', async () => {
@@ -89,6 +117,7 @@ describe('mapFields', () => {
 
     expect(deps.callClaude).toHaveBeenCalledTimes(1);
     expect(out.source).toBe('haiku');
+    expect(out.fallbackReason).toContain('returned a malformed mapping');
   });
 
   it('falls back to Haiku when the helper fetch rejects', async () => {
@@ -99,5 +128,19 @@ describe('mapFields', () => {
 
     expect(deps.callClaude).toHaveBeenCalledTimes(1);
     expect(out.source).toBe('haiku');
+  });
+
+  it('truncates a fallbackReason longer than MAX_FALLBACK_REASON to exactly that length', async () => {
+    const longError = 'x'.repeat(MAX_FALLBACK_REASON + 200);
+    const fetchMock = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ error: longError }),
+      { status: 500 },
+    ));
+    const deps = makeDeps({ fetch: fetchMock });
+
+    const out = await mapFields(ARGS, deps);
+
+    expect(out.source).toBe('haiku');
+    expect(out.fallbackReason.length).toBe(MAX_FALLBACK_REASON);
   });
 });

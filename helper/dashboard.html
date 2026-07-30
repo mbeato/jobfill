@@ -1361,10 +1361,22 @@ function appCriterion(status) {
   return `you:${status}`;
 }
 
+// Only the 'haiku' fallback gets a criterion. '' is every row logged before
+// provenance existed and must render as it does today; 'helper' is 84% of
+// rows, so rendering it would add a line to five rows in six to say nothing
+// happened — the density thesis says show the exception, not the default.
+// Any unrecognized token follows appCriterion's own rule: never echo an
+// unknown stored value as a fact.
+function mapSourceCrit(mapSource) {
+  if (mapSource === 'haiku') return 'map:haiku-fallback';
+  return null;
+}
+
 // D-04: render every row. No slice, no cap, no pagination, no virtualisation.
 function renderAppRows(rows) {
   return rows.map((a, i) => {
     const crit = appCriterion(a.status);
+    const mapCrit = mapSourceCrit(a.map_source);
     // Safe-URL guard (mirrors the queue and failures tables): stored urls are
     // untrusted -- esc() html-escapes but does not neutralize a javascript:
     // scheme, so only emit an anchor for http(s).
@@ -1383,6 +1395,7 @@ function renderAppRows(rows) {
             </select><svg aria-hidden="true"><use href="#i-down"/></svg>
           </span>
           ${crit ? `<span class="jf-sub" title="${esc(crit)}">${esc(crit)}</span>` : ''}
+          ${mapCrit ? `<span class="jf-sub" title="${esc(a.map_fallback_reason || mapCrit)}">${esc(mapCrit)}</span>` : ''}
           ${a.ghosted ? `<span class="jf-sub"><span class="jf-tag jf-tag--attn">ghosted · ${Number(a.days_silent)}d</span></span>` : ''}
         </td>
         <td>
@@ -1394,6 +1407,7 @@ function renderAppRows(rows) {
           ${safeUrl ? `<a href="${esc(safeUrl)}" target="_blank" rel="noopener">posting</a>` : ''}
           ${a.resume_path ? `<span class="jf-sub" title="${esc(a.resume_path)}">resume: …/${esc(a.resume_path.split('/').slice(-2).join('/'))}</span>` : ''}
           ${tailorStateLine(a.tailor_state, a.tailor_message)}
+          ${a.map_fallback_reason ? `<span class="jf-sub">mapping fell back to the paid API — ${esc(a.map_fallback_reason)}</span>` : ''}
           ${a.summary ? `
             <span class="jf-sub"><button class="jf-disc" type="button" aria-expanded="false" aria-controls="summary-${a.id}"><svg aria-hidden="true"><use href="#i-chev"/></svg>resume changes</button></span>
             <div id="summary-${a.id}" hidden>${a.summary.map(line => `<span class="jf-sub">${esc(line)}</span>`).join('')}</div>
@@ -1434,6 +1448,14 @@ function render() {
   // (alongside 'rejected') from the headline active count.
   const active = apps.filter(a => !['rejected', 'unsubmitted'].includes(a.status)).length;
   const ghostedCount = apps.filter(a => a.ghosted).length;
+  // Global, not search-scoped, matching the comment above: how many rows carry
+  // map_source provenance at all (mapKnown) and how many of those fell back to
+  // the paid API (mapFellBack). Rendered only once mapKnown > 0, so today —
+  // with every historical row at '' — the sub-line stays byte-identical to
+  // what it showed before this plan.
+  const mapFellBack = apps.filter(a => a.map_source === 'haiku').length;
+  const mapKnown = apps.filter(a => a.map_source).length;
+  const mapSub = mapKnown > 0 ? ` · ${mapFellBack} of ${mapKnown} mapped paid` : '';
   // Chip counts and the sub-line count the SEARCH RESULT, so no count ever
   // describes rows the search has already excluded. The headline figure and the
   // spend/active/ghosted line stay global — they are facts about the whole
@@ -1441,8 +1463,8 @@ function render() {
   const searched = apps.filter(appSearchHit);
   document.getElementById('aCountN').textContent = String(apps.length);
   document.getElementById('aCountSub').textContent = String(appQuery).trim()
-    ? `tracked · ${searched.length} of ${apps.length} match · ${active} active · ${ghostedCount} ghosted · $${spend.toFixed(2)} api spend`
-    : `tracked · ${active} active · ${ghostedCount} ghosted · $${spend.toFixed(2)} api spend`;
+    ? `tracked · ${searched.length} of ${apps.length} match · ${active} active · ${ghostedCount} ghosted · $${spend.toFixed(2)} api spend${mapSub}`
+    : `tracked · ${active} active · ${ghostedCount} ghosted · $${spend.toFixed(2)} api spend${mapSub}`;
 
   // Synthetic 'ghosted' chip mixed with the status keys (mirrors QUEUE_CHIPS' 'all').
   document.getElementById('aChips').innerHTML = ['all', ...STATUSES, 'ghosted']

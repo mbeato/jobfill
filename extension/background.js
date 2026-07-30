@@ -246,7 +246,7 @@ async function runFill(tabId, force = false, opts = {}) {
     }
 
     await setStatus({ state: 'mapping', fieldCount: fields.length });
-    const { mapping, cost } = await mapFields({
+    const { mapping, cost, source: mapSource, fallbackReason } = await mapFields({
       apiKey,
       profile,
       fields,
@@ -305,6 +305,9 @@ async function runFill(tabId, force = false, opts = {}) {
           jd, // D-01: already-captured JD text, persisted unconditionally so the row survives a dead posting URL
           resume_path: tailorState === 'ran' ? attachedResume.path : '',
           cost_usd: cost,
+          // cost_usd records that a fallback happened; these record which path and why.
+          map_source: mapSource,
+          map_fallback_reason: fallbackReason,
           summary: tailorState === 'ran' ? summary : null,
           tailor_state: tailorState,
           tailor_message: tailorMessage ?? '',

@@ -22,6 +22,8 @@ export interface ApplicationRow {
   cover_letter_path: string;
   brief_path: string;
   email_path: string;
+  map_source: string;
+  map_fallback_reason: string;
   status_changed_at: string | null;
   created_at: string;
   updated_at: string;
@@ -38,6 +40,8 @@ export interface ApplicationInput {
   tailor_state?: string;
   tailor_message?: string;
   jd?: string;
+  map_source?: string;
+  map_fallback_reason?: string;
 }
 
 export interface ApplicationUpdatePatch {
@@ -68,6 +72,12 @@ export const APPLICATION_STATUSES = new Set([
 // D-16: the ghost threshold is a named exported constant in the helper, NOT
 // seek.config.json. A row silent this many days (or more) derives ghosted=true.
 export const GHOST_DAYS = 21;
+
+// T-999.1-01: allowlist for map_source, the diagnostic twin of APPLICATION_STATUSES
+// above. Coerced, not thrown, at the persistence boundary — status is a lifecycle
+// enum whose corruption is a correctness bug, while map_source is a diagnostic and
+// failing the whole insert over it would violate the fill path's fail-open contract.
+export const MAP_SOURCES = new Set(['helper', 'haiku']);
 
 export class InvalidApplicationStatusError extends Error {
   constructor(status: string) {
@@ -110,6 +120,8 @@ export function createApplicationsTable(db: Database) {
     cover_letter_path TEXT DEFAULT '',
     brief_path TEXT DEFAULT '',
     email_path TEXT DEFAULT '',
+    map_source TEXT DEFAULT '',
+    map_fallback_reason TEXT DEFAULT '',
     status_changed_at TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
@@ -144,6 +156,9 @@ export function insertApplication(
   // caller-supplied status before it reaches the store — never trust the string.
   const status = input.status ?? PRE_SUBMIT_STATUS; // D-06 default
   if (!APPLICATION_STATUSES.has(status)) throw new InvalidApplicationStatusError(status);
+  // T-999.1-01: coerce rather than throw (see MAP_SOURCES comment) — an application
+  // log must never be lost over a provenance typo.
+  const mapSource = MAP_SOURCES.has(input.map_source as string) ? (input.map_source as string) : '';
   return db
     .query(
       // WR-02: seed status_changed_at at insert (same instant the row is created) so a
@@ -169,8 +184,8 @@ export function insertApplication(
       // The WHERE matches the index predicate, which SQLite requires to resolve
       // a partial-index conflict target. Rows with an empty url are outside the
       // index and still insert freely, as they always did.
-      `INSERT INTO applications (company, role, url, status, resume_path, cost_usd, summary, tailor_state, tailor_message, jd, status_changed_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+      `INSERT INTO applications (company, role, url, status, resume_path, cost_usd, summary, tailor_state, tailor_message, jd, map_source, map_fallback_reason, status_changed_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
        ON CONFLICT(url) WHERE url <> '' DO UPDATE SET
          -- CR-02: these two carry the same never-replace-a-real-value-with-a-
          -- placeholder guard as the columns below. Unguarded they were
@@ -187,6 +202,16 @@ export function insertApplication(
          tailor_state   = CASE WHEN excluded.tailor_state   <> '' THEN excluded.tailor_state   ELSE applications.tailor_state   END,
          tailor_message = CASE WHEN excluded.tailor_message <> '' THEN excluded.tailor_message ELSE applications.tailor_message END,
          jd             = CASE WHEN excluded.jd             <> '' THEN excluded.jd             ELSE applications.jd             END,
+         -- map_source follows the same never-replace-a-real-value-with-a-placeholder
+         -- guard as the columns above. map_fallback_reason deliberately does NOT guard
+         -- on its own emptiness — it guards on excluded.map_source <> '' instead, so
+         -- the reason moves in lockstep with the source. Guarded on its own value, a
+         -- helper-path re-fill (which sends an empty reason) would leave the previous
+         -- haiku fill's error string on a row now reading map_source='helper', i.e. a
+         -- row that lies. Keyed to the source, a provenance-carrying re-fill always
+         -- rewrites both, and a provenance-free caller still rewrites neither.
+         map_source          = CASE WHEN excluded.map_source <> '' THEN excluded.map_source          ELSE applications.map_source          END,
+         map_fallback_reason = CASE WHEN excluded.map_source <> '' THEN excluded.map_fallback_reason ELSE applications.map_fallback_reason END,
          cost_usd       = applications.cost_usd + excluded.cost_usd,
          updated_at     = datetime('now')
        RETURNING *`,
@@ -202,6 +227,8 @@ export function insertApplication(
       String(input.tailor_state ?? '').slice(0, MAX_TEXT),
       String(input.tailor_message ?? '').slice(0, MAX_TEXT),
       String(input.jd ?? '').slice(0, MAX_JD),
+      mapSource,
+      String(input.map_fallback_reason ?? '').slice(0, MAX_TEXT),
     ) as ApplicationRow;
 }
 

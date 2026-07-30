@@ -12,6 +12,10 @@ import {
   InvalidApplicationStatusError,
 } from './applications';
 
+// MAX_TEXT is module-private; mirror its value here for the truncation test
+// rather than exporting it solely for the test (it is not part of the public API).
+const MAX_TEXT = 2000;
+
 function makeDb(): Database {
   const db = new Database(':memory:');
   createApplicationsTable(db);
@@ -237,4 +241,63 @@ test('a re-fill WITH better company/role still updates them', () => {
   const refilled = insertApplication(db, { company: 'Acme Corp', role: 'Senior SWE', url: URL }, noQueue);
   expect(refilled.company).toBe('Acme Corp');
   expect(refilled.role).toBe('Senior SWE');
+});
+
+// ── map_source / map_fallback_reason (T-999.1) ────────────────────────────────
+
+test('insertApplication with map_source: haiku and a reason round-trips both values', () => {
+  const db = makeDb();
+  const row = insertApplication(db, { company: 'Acme', map_source: 'haiku', map_fallback_reason: 'helper timed out' }, noQueue);
+  expect(row.map_source).toBe('haiku');
+  expect(row.map_fallback_reason).toBe('helper timed out');
+});
+
+test('insertApplication with map_source: helper stores it with an empty reason', () => {
+  const db = makeDb();
+  const row = insertApplication(db, { company: 'Acme', map_source: 'helper' }, noQueue);
+  expect(row.map_source).toBe('helper');
+  expect(row.map_fallback_reason).toBe('');
+});
+
+test('an out-of-allowlist map_source coerces to empty string instead of throwing', () => {
+  const db = makeDb();
+  const row = insertApplication(
+    db,
+    { company: 'Acme', map_source: 'x"><img src=x onerror=alert(1)>', map_fallback_reason: 'irrelevant' },
+    noQueue,
+  );
+  expect(row.map_source).toBe('');
+});
+
+test('insertApplication with no map_source key stores empty strings for both columns', () => {
+  const db = makeDb();
+  const row = insertApplication(db, { company: 'Acme' }, noQueue);
+  expect(row.map_source).toBe('');
+  expect(row.map_fallback_reason).toBe('');
+});
+
+test('upsert haiku-then-helper: a helper re-fill overwrites the source AND clears the stale reason', () => {
+  const db = makeDb();
+  insertApplication(db, { company: 'Acme', url: URL, map_source: 'haiku', map_fallback_reason: 'helper timed out' }, noQueue);
+  const refilled = insertApplication(db, { company: 'Acme', url: URL, map_source: 'helper' }, noQueue);
+  expect(refilled.map_source).toBe('helper');
+  expect(refilled.map_fallback_reason).toBe('');
+});
+
+test('upsert provenance-then-none: a re-fill with no map_source leaves both columns at their prior values', () => {
+  const db = makeDb();
+  insertApplication(db, { company: 'Acme', url: URL, map_source: 'haiku', map_fallback_reason: 'helper timed out' }, noQueue);
+  const refilled = insertApplication(db, { company: 'Acme', url: URL }, noQueue);
+  expect(refilled.map_source).toBe('haiku');
+  expect(refilled.map_fallback_reason).toBe('helper timed out');
+});
+
+test('a map_fallback_reason longer than MAX_TEXT is truncated to exactly MAX_TEXT characters', () => {
+  const db = makeDb();
+  const row = insertApplication(
+    db,
+    { company: 'Acme', map_source: 'haiku', map_fallback_reason: 'x'.repeat(MAX_TEXT + 100) },
+    noQueue,
+  );
+  expect(row.map_fallback_reason.length).toBe(MAX_TEXT);
 });

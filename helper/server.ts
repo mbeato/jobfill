@@ -145,6 +145,12 @@ try {
 try {
   db.run(`ALTER TABLE applications ADD COLUMN email_path TEXT DEFAULT ''`);
 } catch {}
+try {
+  db.run(`ALTER TABLE applications ADD COLUMN map_source TEXT DEFAULT ''`);
+} catch {}
+try {
+  db.run(`ALTER TABLE applications ADD COLUMN map_fallback_reason TEXT DEFAULT ''`);
+} catch {}
 
 db.run(`CREATE TABLE IF NOT EXISTS answers (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -782,7 +788,7 @@ Bun.serve({
         const rows = db
           .query(
             `SELECT id, company, role, url, status, notes, resume_path, cost_usd, summary,
-                    tailor_state, tailor_message,
+                    tailor_state, tailor_message, map_source, map_fallback_reason,
                     cover_letter_path,
                     brief_path,
                     email_path,

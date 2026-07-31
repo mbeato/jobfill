@@ -1,0 +1,73 @@
+{
+  "_note": [
+    "Copy this file to profile.local.json and replace the fictional 'Alex Rivera'",
+    "placeholder values below with your own. profile.local.json is gitignored, so",
+    "your real name, contact details, and history stay out of version control.",
+    "",
+    "jobfill never invents facts about you, so leave any field you don't have a",
+    "real answer for as an empty string, empty array, or false — it is then left",
+    "blank on a form rather than guessed.",
+    "",
+    "The eeo block is optional and holds special-category data (gender, race,",
+    "veteran status, disability). It is sent to Anthropic only as part of a",
+    "form-fill mapping prompt and never leaves your machine otherwise. Leaving",
+    "it empty is fine: a form's demographic questions are then answered with",
+    "a decline/prefer-not-to-say option where the form offers one, and skipped",
+    "otherwise (extension/lib/prompt.js).",
+    "",
+    "Once the helper is running, profile.local.json can also be edited from the",
+    "dashboard settings tab at http://127.0.0.1:7877/#settings instead of by hand."
+  ],
+
+  "contact": {
+    "firstName": "Alex",
+    "lastName": "Rivera",
+    "pronouns": "they/them",
+    "email": "alex.rivera@example.com",
+    "phone": "555-010-1234",
+    "city": "Springfield",
+    "state": "IL",
+    "country": "USA",
+    "location": "Springfield, IL"
+  },
+  "links": {
+    "linkedin": "linkedin.com/in/alex-rivera-example",
+    "github": "github.com/alex-rivera-example",
+    "portfolio": "alexrivera.example.com"
+  },
+  "workAuth": {
+    "authorizedUS": true,
+    "status": "U.S. Citizen",
+    "needsSponsorship": false,
+    "needsFutureSponsorship": false,
+    "over18": true
+  },
+  "eeo": {
+    "gender": "",
+    "race": "",
+    "veteran": "",
+    "disability": "",
+    "hispanicLatino": "",
+    "sexualOrientation": ""
+  },
+  "answers": {
+    "salaryExpectation": "",
+    "startDate": "",
+    "willingToRelocate": "",
+    "howDidYouHear": ""
+  },
+  "work": [],
+  "education": [
+    {
+      "school": "Example State University",
+      "schoolAliases": ["ESU"],
+      "degree": "B.S.",
+      "field": "Computer Science",
+      "start": "2022",
+      "end": "2026"
+    }
+  ],
+  "projects": [],
+  "skills": [],
+  "resumeText": ""
+}

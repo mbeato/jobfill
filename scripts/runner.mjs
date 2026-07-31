@@ -6,6 +6,9 @@
 // and polls the queue until the fill leaves `filling`.
 //
 // Usage: node scripts/runner.mjs <queueId> [--resume /path/to/resume.pdf]
+// With no --resume flag, the default is <resumeDir>/resume.pdf, where
+// resumeDir comes from helper/paths.mjs (jobfill.config.json's "resumeDir"
+// key, or JOBFILL_RESUME_DIR, or the portable default).
 // The browser stays open after the run so the operator can review the filled form.
 // Invariants (docs/runner-protocol.md): never submits, never types into ATS
 // fields, one fill in flight, no auto-retry.
@@ -21,6 +24,7 @@ import { existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setupRunner, fillOne, q } from './lib/runner-core.mjs';
+import { resolvePaths } from '../helper/paths.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const EXT_DIR = join(ROOT, 'extension');
@@ -31,9 +35,17 @@ const queueId = Number(args[0]);
 const resumeFlag = args.indexOf('--resume');
 const explicitResume = resumeFlag !== -1;
 if (explicitResume && !args[resumeFlag + 1]) { console.error('--resume requires a path'); process.exit(1); }
-const resumePath = explicitResume ? args[resumeFlag + 1] : '/Users/you/resume/resume.pdf';
+const resumePath = explicitResume ? args[resumeFlag + 1] : join(resolvePaths().resumeDir, 'resume.pdf');
 if (explicitResume && !existsSync(resumePath)) { console.error(`--resume file not found: ${resumePath}`); process.exit(1); }
 if (!queueId) { console.error('usage: node scripts/runner.mjs <queueId> [--resume pdf]'); process.exit(1); }
+// A silent proceed with a nonexistent default resume would surface later as
+// a confusing fill failure — same treatment as the explicit --resume check
+// above, just gated on queueId first so bare `node scripts/runner.mjs` still
+// prints usage rather than a resume-not-found error.
+if (resumeFlag === -1 && !existsSync(resumePath)) {
+  console.error(`default resume not found: ${resumePath} — pass --resume, or set the "resumeDir" key in jobfill.config.json`);
+  process.exit(1);
+}
 
 const row = await q(queueId);
 if (!row) { console.error(`queue row ${queueId} not found`); process.exit(1); }

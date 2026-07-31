@@ -69,6 +69,30 @@ hand.
   feature: jobfill cannot take an action on an employer's ATS that you did
   not explicitly and manually confirm.
 
+### Known limitation: the helper trusts local processes
+
+The helper listens on `127.0.0.1:7877` and authorises a request if it carries the
+per-install token **or** if it arrives without an `Origin` header. The second
+clause is what lets the dashboard the helper itself serves make its own
+same-origin requests, since browsers omit `Origin` on same-origin GETs.
+
+What this does and does not protect:
+
+- **A malicious website you visit cannot reach the helper.** Its requests carry
+  that site's `Origin`, which is not in the allowlist, so they are rejected.
+- **Any other process running as you can reach the whole API without the token**
+  — including `GET /profile`, which returns your profile and its `eeo` block.
+  In practice such a process can already read `profile.local.json` and the
+  SQLite database directly, so the API grants it nothing new.
+- **On a shared machine, another user account can also reach it.** This one is a
+  real gap: `.jobfill-token` is mode `0600` specifically to keep other users out,
+  and the no-`Origin` clause routes around that. **If you share a machine, do not
+  run the helper**, or bind it somewhere only you can reach.
+
+Closing this properly means the dashboard holding the token itself (as the
+extension already does) so the `Origin` fallback can be dropped. That is a
+deliberate change, not a one-line patch, and it is not done yet.
+
 ## Prerequisites
 
 - [`bun`](https://bun.sh) — runs the helper (`helper/server.ts`).
@@ -145,7 +169,7 @@ your own login. Once configured, `npm run seek` runs a sweep.
 | `extension/` | The Chrome extension: content script, background service worker, popup, and options page. |
 | `scripts/` | CLIs for discovery sweeps, batch filling, the Playwright runner, and macOS `launchd` install/uninstall. |
 | `test/` | The vitest suite. |
-| `docs/` | `docs/runner-protocol.md` — the operational runbook for driving jobfill end to end, with the hard invariants stated in full. |
+| `docs/` | `docs/runner-protocol.md` — the operational runbook for driving jobfill end to end, with the hard invariants stated in full. `docs/ats-research.md` — notes on how the major ATS platforms structure their forms. |
 
 `DESIGN.md` at the repo root has the fuller architecture story.
 

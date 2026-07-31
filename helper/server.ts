@@ -1225,9 +1225,11 @@ Bun.serve({
       // GET /queue/:id/resume — stream the PDF that was attached to this row's fill
       // so the operator can review the actual content before submitting. Resolution mirrors
       // the resume_name backfill: latest tailored application for the row's url,
-      // else the static base resume. Path containment: only .pdf files under
-      // ~/resume/ are ever served — resume_path is our own tailor output, but the
-      // guard makes traversal impossible regardless of what the DB holds.
+      // else the static base resume. Path containment: only .pdf files under the
+      // configured resume directory are ever served (RESUME_DIR, resolved via
+      // helper/paths.mjs — no longer a fixed ~/resume/) — resume_path is our own
+      // tailor output, but the guard makes traversal impossible regardless of what
+      // the DB holds.
       const queueResume = pathname.match(/^\/queue\/(\d+)\/resume$/);
       if (queueResume && req.method === 'GET') {
         const row = db.query('SELECT url FROM queue WHERE id = ?').get(Number(queueResume[1])) as { url: string } | null;

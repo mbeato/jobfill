@@ -23,7 +23,26 @@ export function resolveToken({ file = TOKEN_FILE } = {}) {
     if (existing !== '') return existing;
   }
 
+  // Exclusive create, not a plain write. resolveToken() is called at module-load
+  // time by helper/server.ts and by all seven scripts/*.mjs CLIs independently, so
+  // on a genuinely fresh install two processes can both see the file missing (e.g.
+  // the launchd helper's first boot racing an operator's first `npm run seek`).
+  // With a plain write both generate different tokens and the loser keeps its own
+  // orphaned value for its whole process lifetime, 403ing against the helper until
+  // restarted. 'wx' makes exactly one process the winner; everyone else reads it.
   const generated = randomBytes(16).toString('hex');
-  writeFileSync(file, generated, { mode: 0o600 });
-  return generated;
+  try {
+    writeFileSync(file, generated, { mode: 0o600, flag: 'wx' });
+    return generated;
+  } catch (e) {
+    if (e.code === 'EEXIST') {
+      const winner = readFileSync(file, 'utf8').trim();
+      if (winner !== '') return winner;
+      // Raced against a writer that has created but not yet filled the file.
+      // Overwrite rather than return empty — an empty token authorises nothing.
+      writeFileSync(file, generated, { mode: 0o600 });
+      return generated;
+    }
+    throw e;
+  }
 }

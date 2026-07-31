@@ -1,8 +1,8 @@
 import { Database } from 'bun:sqlite';
 import { mkdirSync, existsSync, renameSync } from 'node:fs';
-import { join, dirname, resolve } from 'node:path';
+import { join, dirname, resolve, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { homedir } from 'node:os';
+import { resolvePaths } from './paths.mjs';
 import { normalizeQuestion, matchLibrary, selectFewShot, groupByQuestion, type AnswerRow } from './answers';
 import { createFailuresTable, insertFailures, listFailures, type FailureRecordInput } from './failures';
 import { createQueueTable, insertQueueEntry, updateQueueStatus, deleteQueueEntry, listQueue, InvalidQueueStatusError } from './queue';
@@ -80,16 +80,24 @@ import { beginBatch, spawnBatchRunner, spawnFillRunner, BatchAlreadyRunningError
 
 const PORT = 7877;
 const HERE = dirname(fileURLToPath(import.meta.url));
-const RESUME_DIR = join(homedir(), 'resume');
-const BASE_TEX = join(RESUME_DIR, 'resume.tex');
-const BULLET_POOL = join(homedir(), '.claude/projects/-Users-you-resume/memory/resume_bullet_pool.md');
+// Every filesystem path below is resolved through helper/paths.mjs: env var,
+// then jobfill.config.json at the repo root, then a portable home-directory
+// default — see PATHS.warnings logged at boot for any config problem.
+const PATHS = resolvePaths();
+for (const warning of PATHS.warnings) console.warn(`[paths] ${warning}`);
+const RESUME_DIR = PATHS.resumeDir;
+const BASE_TEX = PATHS.baseTex;
+// Output filenames (tailored .tex, generated PDF attachment name) are derived
+// from the configured base resume's own filename rather than a hardcoded
+// person's name, so they stay meaningful for whoever owns this install.
+const BASE_TEX_NAME = basename(BASE_TEX, '.tex');
+const BULLET_POOL = PATHS.bulletPool;
 // Named rather than inlined at the call site because tailor() now READS these
 // and inlines their contents into one prompt, instead of handing the model paths
 // and five tool calls to fetch them itself.
-const RESUME_MEM = join(homedir(), '.claude/projects/-Users-you-resume/memory');
-const PROFILE_MD = join(RESUME_MEM, 'user_profile.md');
-const NO_INFLATE_MD = join(RESUME_MEM, 'feedback_no_inflated_metrics.md');
-const DROP_CONC_MD = join(RESUME_MEM, 'feedback_drop_concentrations.md');
+const PROFILE_MD = PATHS.profileMd;
+const NO_INFLATE_MD = PATHS.noInflateMd;
+const DROP_CONC_MD = PATHS.dropConcMd;
 
 // Structured-output contract for the one-shot tailor. `tex` is the COMPLETE
 // file: the model no longer writes to disk, this process does.
@@ -103,15 +111,15 @@ const TAILOR_SCHEMA = {
   },
   required: ['company', 'role', 'tex', 'summary'],
 };
-const ROUNDS_DIR = join(RESUME_DIR, 'rounds');
-const CLAUDE_BIN = join(homedir(), '.local/bin/claude');
-const PDFLATEX = '/Library/TeX/texbin/pdflatex';
+const ROUNDS_DIR = PATHS.roundsDir;
+const CLAUDE_BIN = PATHS.claudeBin;
+const PDFLATEX = PATHS.pdflatex;
 // Phase 15: memory-file inputs for the on-demand doc generators (cover letter,
 // interview-prep brief, follow-up email). Same construction as BULLET_POOL.
-const VOICE_PROFILE = join(homedir(), '.claude/projects/-Users-you-resume/memory/voice_profile.md');
-const USER_PROFILE = join(homedir(), '.claude/projects/-Users-you-resume/memory/user_profile.md');
-const INTERVIEW_GAPS = join(homedir(), '.claude/projects/-Users-you-resume/memory/interview_gaps.md');
-const NO_INFLATED_METRICS = join(homedir(), '.claude/projects/-Users-you-resume/memory/feedback_no_inflated_metrics.md');
+const VOICE_PROFILE = PATHS.voiceProfile;
+const USER_PROFILE = PATHS.userProfile;
+const INTERVIEW_GAPS = PATHS.interviewGaps;
+const NO_INFLATED_METRICS = PATHS.noInflatedMetrics;
 
 // JOBFILL_DB exists so the boot smoke test can evaluate this whole module
 // against a throwaway db instead of the live one. Unset everywhere else — the
@@ -441,7 +449,7 @@ async function tailor(body: { company: string; role: string; jd: string; url?: s
   const outDir = join(ROUNDS_DIR, slug);
   mkdirSync(outDir, { recursive: true });
   const stamp = new Date().toISOString().slice(0, 10);
-  const texName = `resume_${slug}_${stamp}.tex`;
+  const texName = `${BASE_TEX_NAME}_${slug}_${stamp}.tex`;
   const texPath = join(outDir, texName);
   const jdPath = join(outDir, `jd_${stamp}.md`);
   const summaryPath = join(outDir, `summary_${stamp}.json`);
@@ -455,9 +463,28 @@ async function tailor(body: { company: string; role: string; jd: string; url?: s
   // .tex as structured output took 2 turns / 16,236 tokens / 102s — a 51.8x
   // input reduction — and tailored MORE (22 changed lines vs 8), compiled,
   // stayed one page, and kept the preamble byte-identical.
-  const [baseTexSrc, poolSrc, profileSrc, noInflateSrc, dropConcSrc] = await Promise.all(
-    [BASE_TEX, BULLET_POOL, PROFILE_MD, NO_INFLATE_MD, DROP_CONC_MD].map((p) => Bun.file(p).text()),
+  // BASE_TEX is the one required input — tailoring without a base resume is
+  // meaningless, so a missing base resume fails loudly and names both the
+  // expected path and its override. The four memory inputs are optional
+  // voice/context: a per-file catch degrades to '' and the file's whole
+  // section is omitted from the prompt below rather than interpolating an
+  // empty block.
+  let baseTexSrc: string;
+  try {
+    baseTexSrc = await Bun.file(BASE_TEX).text();
+  } catch {
+    throw new Error(`Base resume not found at ${BASE_TEX} — set it via jobfill.config.json's "baseTex" key or the JOBFILL_BASE_TEX env var.`);
+  }
+  const [poolSrc, profileSrc, noInflateSrc, dropConcSrc] = await Promise.all(
+    [BULLET_POOL, PROFILE_MD, NO_INFLATE_MD, DROP_CONC_MD].map((p) => Bun.file(p).text().catch(() => '')),
   );
+
+  const optionalSections = [
+    poolSrc && `=== BULLET POOL (approved alternate bullets + tailoring cheat sheet) ===\n${poolSrc}`,
+    profileSrc && `=== PROFILE / CONTEXT (all experiences, incl. ones not on the base resume) ===\n${profileSrc}`,
+    noInflateSrc && `=== RULE: NO INFLATED METRICS ===\n${noInflateSrc}`,
+    dropConcSrc && `=== RULE: DROP CONCENTRATIONS ===\n${dropConcSrc}`,
+  ].filter(Boolean).join('\n\n');
 
   const prompt = `You are tailoring the operator Example's resume for one specific job application.
 Everything you need is inlined below. Do not look for files — you have no tools.
@@ -480,17 +507,7 @@ Hard rules:
 === BASE RESUME (LaTeX) ===
 ${baseTexSrc}
 
-=== BULLET POOL (approved alternate bullets + tailoring cheat sheet) ===
-${poolSrc}
-
-=== PROFILE / CONTEXT (all experiences, incl. ones not on the base resume) ===
-${profileSrc}
-
-=== RULE: NO INFLATED METRICS ===
-${noInflateSrc}
-
-=== RULE: DROP CONCENTRATIONS ===
-${dropConcSrc}
+${optionalSections}
 
 === JOB DESCRIPTION: ${body.role} @ ${body.company} ===
 ${body.jd}`;
@@ -564,7 +581,7 @@ ${body.jd}`;
     // and the slug is 'unknown' whenever tailoring ran before mapping resolved
     // the company. The on-disk archive path (rounds/<slug>/<name>_<date>.pdf)
     // keeps the full provenance.
-    name: 'resume.pdf',
+    name: `${BASE_TEX_NAME}.pdf`,
     path: pdfPath,
     b64: Buffer.from(pdfBytes).toString('base64'),
     mime: 'application/pdf',
@@ -588,6 +605,16 @@ interface GenAppRow {
   jd: string;
   resume_path: string;
   tailor_state: string;
+}
+
+// Same optional-input treatment as tailor()'s memory files, applied to the
+// context files the doc generators point the model at with a "Read this
+// file" instruction: listed only when present on disk, so a fresh clone
+// missing some or all of these optional voice/context inputs degrades to a
+// shorter reading list rather than sending the model after a path that
+// doesn't exist. BASE_TEX stays unconditional — it is the one required input.
+function readLine(label: string, path: string): string | null {
+  return existsSync(path) ? `- ${label}: ${path}` : null;
 }
 
 // Spawn CLAUDE_BIN exactly as tailor() does (array-form argv, never a shell
@@ -652,16 +679,20 @@ async function generateCoverLetter(app: GenAppRow): Promise<string> {
   const texPath = join(outDir, `CoverLetter_${slug}_${stamp}.tex`);
   await Bun.write(jdPath, `# ${app.role} @ ${app.company}\n${app.url ?? ''}\n\n${app.jd}`);
 
+  const coverLetterReadLines = [
+    `- Base resume (LaTeX, for the letterhead/fonts/preamble to reuse): ${BASE_TEX}`,
+    `- the operator's tailored resume for THIS application (LaTeX, the facts to draw on): ${tailoredTexPath}`,
+    readLine('Bullet pool (approved alternate bullets)', BULLET_POOL),
+    readLine("the operator's profile/context (all real experiences, incl. ones not on the resume)", USER_PROFILE),
+    readLine("voice_profile.md — the operator's real writing voice, read it fully, the letter must sound like him", VOICE_PROFILE),
+    readLine('Resume rules (MUST honor)', NO_INFLATED_METRICS),
+    `- Job description: ${jdPath}`,
+  ].filter(Boolean).join('\n');
+
   const prompt = `You are writing a cover letter for the operator Example, in his own voice, for one specific job application.
 
 Read these files:
-- Base resume (LaTeX, for the letterhead/fonts/preamble to reuse): ${BASE_TEX}
-- the operator's tailored resume for THIS application (LaTeX, the facts to draw on): ${tailoredTexPath}
-- Bullet pool (approved alternate bullets): ${BULLET_POOL}
-- the operator's profile/context (all real experiences, incl. ones not on the resume): ${USER_PROFILE}
-- voice_profile.md — the operator's real writing voice, read it fully, the letter must sound like him: ${VOICE_PROFILE}
-- Resume rules (MUST honor): ${NO_INFLATED_METRICS}
-- Job description: ${jdPath}
+${coverLetterReadLines}
 
 Write the cover letter to exactly this path: ${texPath}
 
@@ -691,14 +722,18 @@ async function generateBrief(app: GenAppRow): Promise<string> {
   const texPath = join(outDir, `Brief_${slug}_${stamp}.tex`);
   await Bun.write(jdPath, `# ${app.role} @ ${app.company}\n${app.url ?? ''}\n\n${app.jd}`);
 
+  const briefReadLines = [
+    `- Base resume (LaTeX, for the preamble/fonts to reuse): ${BASE_TEX}`,
+    `- Job description: ${jdPath}`,
+    readLine("the operator's recorded interview gaps (areas he has struggled to answer well before)", INTERVIEW_GAPS),
+    readLine("the operator's profile/context (all real experiences, incl. ones not on the resume)", USER_PROFILE),
+    readLine('Bullet pool (approved alternate bullets, for concrete talking points)', BULLET_POOL),
+  ].filter(Boolean).join('\n');
+
   const prompt = `You are preparing the operator Example for an interview at one specific company, based on a job description.
 
 Read these files:
-- Base resume (LaTeX, for the preamble/fonts to reuse): ${BASE_TEX}
-- Job description: ${jdPath}
-- the operator's recorded interview gaps (areas he has struggled to answer well before): ${INTERVIEW_GAPS}
-- the operator's profile/context (all real experiences, incl. ones not on the resume): ${USER_PROFILE}
-- Bullet pool (approved alternate bullets, for concrete talking points): ${BULLET_POOL}
+${briefReadLines}
 
 Write the brief to exactly this path: ${texPath}
 
@@ -729,13 +764,17 @@ async function generateEmail(app: GenAppRow): Promise<string> {
   const mdPath = join(outDir, `FollowUp_${slug}_${stamp}.md`);
   await Bun.write(jdPath, `# ${app.role} @ ${app.company}\n${app.url ?? ''}\n\n${app.jd}`);
 
+  const emailReadLines = [
+    readLine("voice_profile.md — the operator's real writing voice, read it fully, the email must sound like him", VOICE_PROFILE),
+    readLine("the operator's profile/context (all real experiences, incl. ones not on the resume)", USER_PROFILE),
+    readLine('Resume rules (MUST honor)', NO_INFLATED_METRICS),
+    `- Job description: ${jdPath}`,
+  ].filter(Boolean).join('\n');
+
   const prompt = `You are writing a short follow-up email for the operator Example, in his own voice, to send after applying for one specific job. This is NOT a post-interview thank-you.
 
 Read these files:
-- voice_profile.md — the operator's real writing voice, read it fully, the email must sound like him: ${VOICE_PROFILE}
-- the operator's profile/context (all real experiences, incl. ones not on the resume): ${USER_PROFILE}
-- Resume rules (MUST honor): ${NO_INFLATED_METRICS}
-- Job description: ${jdPath}
+${emailReadLines}
 
 Write the email to exactly this path: ${mdPath}, as plain text (no LaTeX, no markdown headers).
 
@@ -1196,7 +1235,7 @@ Bun.serve({
         const app = db
           .query(`SELECT resume_path FROM applications WHERE url = ? AND tailor_state = 'ran' AND resume_path != '' ORDER BY id DESC`)
           .get(row.url) as { resume_path: string } | null;
-        const candidate = app?.resume_path || join(RESUME_DIR, 'resume.pdf');
+        const candidate = app?.resume_path || join(RESUME_DIR, `${BASE_TEX_NAME}.pdf`);
         const full = resolve(candidate);
         if (!full.startsWith(resolve(RESUME_DIR) + '/') || !full.endsWith('.pdf') || !existsSync(full)) {
           return json({ error: 'resume file not found on disk' }, 404);

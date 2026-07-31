@@ -2222,7 +2222,7 @@ function critOf(code) {
   if (code === 'rules:yoe') return `${code} · requires more experience than target (incl. seniority-marker titles)`;
   if (code === 'rules:stale') return `${code} · posted more than 2 days ago`;
   if (code === 'rules:board-grace') return `${code} · new board, first poll skipped to avoid queueing its backlog`;
-  if (code === 'queued: manual') return `${code} · queued manually by the operator`;
+  if (code === 'queued: manual') return `${code} · queued manually`;
   if (code === 'held:jd-fetch-error') return `${code} · could not fetch job description · will retry next sweep`;
   if (code === 'held:llm-error') return `${code} · LLM check failed · will retry next sweep`;
   if (code.startsWith('llm:not-relevant')) return `llm:not-relevant · ${code.replace(/^llm:not-relevant\s*—\s*/, '')}`;

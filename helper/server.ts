@@ -486,7 +486,7 @@ async function tailor(body: { company: string; role: string; jd: string; url?: s
     dropConcSrc && `=== RULE: DROP CONCENTRATIONS ===\n${dropConcSrc}`,
   ].filter(Boolean).join('\n\n');
 
-  const prompt = `You are tailoring the operator Example's resume for one specific job application.
+  const prompt = `You are tailoring the operator's resume for one specific job application.
 Everything you need is inlined below. Do not look for files — you have no tools.
 
 Return the COMPLETE tailored resume as the "tex" field: the whole file including
@@ -681,15 +681,15 @@ async function generateCoverLetter(app: GenAppRow): Promise<string> {
 
   const coverLetterReadLines = [
     `- Base resume (LaTeX, for the letterhead/fonts/preamble to reuse): ${BASE_TEX}`,
-    `- the operator's tailored resume for THIS application (LaTeX, the facts to draw on): ${tailoredTexPath}`,
+    `- The operator's tailored resume for THIS application (LaTeX, the facts to draw on): ${tailoredTexPath}`,
     readLine('Bullet pool (approved alternate bullets)', BULLET_POOL),
-    readLine("the operator's profile/context (all real experiences, incl. ones not on the resume)", USER_PROFILE),
-    readLine("voice_profile.md — the operator's real writing voice, read it fully, the letter must sound like him", VOICE_PROFILE),
+    readLine("The operator's profile/context (all real experiences, incl. ones not on the resume)", USER_PROFILE),
+    readLine("voice_profile.md — the operator's real writing voice, read it fully, the letter must sound like them", VOICE_PROFILE),
     readLine('Resume rules (MUST honor)', NO_INFLATED_METRICS),
     `- Job description: ${jdPath}`,
   ].filter(Boolean).join('\n');
 
-  const prompt = `You are writing a cover letter for the operator Example, in his own voice, for one specific job application.
+  const prompt = `You are writing a cover letter for the operator, in their own voice, for one specific job application.
 
 Read these files:
 ${coverLetterReadLines}
@@ -699,7 +699,7 @@ Write the cover letter to exactly this path: ${texPath}
 Hard rules:
 - Facts come ONLY from the tailored resume, the bullet pool, and the operator's profile/context. Never invent or inflate metrics, titles, dates, or technologies — every claim must be interview-defensible.
 - Voice: lowercase by default (including "i"), short 1-2 sentence paragraphs, no corporate buzzwords ("synergy", "leverage", "circle back"), no performative enthusiasm, no em-dash, no parenthetical asides/tells, minimal end-of-sentence punctuation. Match voice_profile.md's patterns exactly.
-- Sign the letter as "max", never "the operator Example" or "Example". No "Dear Hiring Manager", no "Best regards".
+- Sign the letter with the operator's first name in lowercase, never a full formal name or honorific. No "Dear Hiring Manager", no "Best regards".
 - Reuse the base resume's LaTeX document class, preamble, and fonts (${BASE_TEX}) so the letter's letterhead matches the resume visually. Keep it to one page.
 - Write exactly one file: the .tex above. No commentary, no other files.`;
 
@@ -708,7 +708,7 @@ Hard rules:
 }
 
 // DOC-03/D-02: interview-prep brief, PDF via the same pdflatex pipeline,
-// freer-form Q&A + gap-coverage shape (the operator-facing internal prep, not outbound
+// freer-form Q&A + gap-coverage shape (operator-facing internal prep, not outbound
 // prose — voice loading is not required here per D-13's discretion).
 async function generateBrief(app: GenAppRow): Promise<string> {
   if (!app.jd || app.jd.length < 200) {
@@ -725,12 +725,12 @@ async function generateBrief(app: GenAppRow): Promise<string> {
   const briefReadLines = [
     `- Base resume (LaTeX, for the preamble/fonts to reuse): ${BASE_TEX}`,
     `- Job description: ${jdPath}`,
-    readLine("the operator's recorded interview gaps (areas he has struggled to answer well before)", INTERVIEW_GAPS),
-    readLine("the operator's profile/context (all real experiences, incl. ones not on the resume)", USER_PROFILE),
+    readLine("The operator's recorded interview gaps (areas they have struggled to answer well before)", INTERVIEW_GAPS),
+    readLine("The operator's profile/context (all real experiences, incl. ones not on the resume)", USER_PROFILE),
     readLine('Bullet pool (approved alternate bullets, for concrete talking points)', BULLET_POOL),
   ].filter(Boolean).join('\n');
 
-  const prompt = `You are preparing the operator Example for an interview at one specific company, based on a job description.
+  const prompt = `You are preparing the operator for an interview at one specific company, based on a job description.
 
 Read these files:
 ${briefReadLines}
@@ -739,7 +739,7 @@ Write the brief to exactly this path: ${texPath}
 
 The brief is for the operator's own eyes before the interview — freer-form than a resume. Include:
 1. A "likely questions" section: 5-8 questions this specific job description makes likely (tech stack, domain, seniority level), each with a short bullet-point answer outline drawn from the operator's real experience.
-2. A "gap coverage" section: for each gap recorded in the interview-gaps file, one short paragraph on how the operator could address it if it comes up in this interview, grounded in his real background.
+2. A "gap coverage" section: for each gap recorded in the interview-gaps file, one short paragraph on how the operator could address it if it comes up in this interview, grounded in their real background.
 
 Hard rules:
 - Facts come ONLY from the resume, the bullet pool, the operator's profile/context, and the recorded gaps. Never invent or inflate metrics, titles, dates, or technologies — every claim must be interview-defensible.
@@ -765,13 +765,13 @@ async function generateEmail(app: GenAppRow): Promise<string> {
   await Bun.write(jdPath, `# ${app.role} @ ${app.company}\n${app.url ?? ''}\n\n${app.jd}`);
 
   const emailReadLines = [
-    readLine("voice_profile.md — the operator's real writing voice, read it fully, the email must sound like him", VOICE_PROFILE),
-    readLine("the operator's profile/context (all real experiences, incl. ones not on the resume)", USER_PROFILE),
+    readLine("voice_profile.md — the operator's real writing voice, read it fully, the email must sound like them", VOICE_PROFILE),
+    readLine("The operator's profile/context (all real experiences, incl. ones not on the resume)", USER_PROFILE),
     readLine('Resume rules (MUST honor)', NO_INFLATED_METRICS),
     `- Job description: ${jdPath}`,
   ].filter(Boolean).join('\n');
 
-  const prompt = `You are writing a short follow-up email for the operator Example, in his own voice, to send after applying for one specific job. This is NOT a post-interview thank-you.
+  const prompt = `You are writing a short follow-up email for the operator, in their own voice, to send after applying for one specific job. This is NOT a post-interview thank-you.
 
 Read these files:
 ${emailReadLines}
@@ -786,7 +786,7 @@ Content:
 Hard rules:
 - Facts come ONLY from the operator's profile/context and the job description. Never invent or inflate metrics, titles, dates, or technologies — every claim must be interview-defensible.
 - Voice: lowercase by default (including "i"), no corporate buzzwords, no performative enthusiasm, no em-dash, no parenthetical asides/tells, minimal end-of-sentence punctuation. Match voice_profile.md's patterns exactly.
-- Sign as "max", never "the operator Example" or "Example". No "Dear Hiring Manager", no "Best regards".
+- Sign as the operator's first name in lowercase, never a full formal name or honorific. No "Dear Hiring Manager", no "Best regards".
 - Write exactly one file: the .md above. No commentary, no other files.`;
 
   await runClaudeGen(prompt, mdPath);

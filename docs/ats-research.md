@@ -59,8 +59,8 @@ for new-grad SWE applications to US startups via Greenhouse, Lever, Ashby, Workd
   read content-stream order straight across), icons/graphics-as-text, ligature/
   encoding problems without ToUnicode maps, and contact info in headers/footers
   (~25% of parsers miss it, per Jobscan). Single-column article-class templates
-  (Jake's-Resume-style — which `resume.tex` is) parse cleanly on all four
-  target platforms; pdflatex preferred over XeLaTeX/LuaLaTeX.
+  (Jake's-Resume-style, which our own resume template follows) parse cleanly on
+  all four target platforms; pdflatex preferred over XeLaTeX/LuaLaTeX.
 - **Template audit against this:** ours already passes — single column,
   `\input{glyphtounicode}` + `\pdfgentounicode=1` (ligature/ToUnicode handled),
   no header/footer contact info, no graphics. Greenhouse hard limit: 2.5MB (ours ~120KB).

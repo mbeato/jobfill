@@ -3,8 +3,8 @@
 This is the operational runbook for the **runner**: the agent that works jobfill's
 posting queue end to end — selecting a queued posting, navigating to it, triggering
 the existing fill pipeline, waiting for it to finish, and reporting the outcome back
-to the operator. It is a living document, not a dated design spec (see `docs/superpowers/specs/`
-for those) — update it in place as the protocol evolves.
+to the operator. It is a living document, not a dated design spec — update it in place
+as the protocol evolves.
 
 Two runner implementations exist; the sequence, review rules, and hard invariants
 below apply identically to both:

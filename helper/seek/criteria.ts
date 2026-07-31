@@ -175,47 +175,38 @@ export const SEED_CRITERIA: Criteria = {
   yoeThreshold: 1,
 };
 
-// D-13: the seek.profile.md text as committed, verbatim — captured here
-// because plan 05 deletes that file. Byte-for-byte: same headings, same line
-// breaks, same trailing-newline state, so the live install's next relevance
-// pass sees exactly the prose it saw before this migration.
+// This seed applies only when readSeekMeta(db, RELEVANCE_PROFILE_KEY) is
+// null (see the seed-once gate below) — i.e. only on a fresh install that
+// has never saved a relevance profile. Existing installs already have a
+// saved row and are unaffected by edits to this constant.
 export const SEED_RELEVANCE_PROFILE = `# Seek Relevance Profile
 
-Compact, the operator-editable steering summary for the LLM relevance pass (FILT-02).
+Compact, user-editable steering summary for the LLM relevance pass (FILT-02).
 Edit this file directly to change what "relevant" means — no code change needed.
 
 ## Target roles
 
-Software engineer, fullstack software engineer, AI engineer / applied AI
-engineer, member of technical staff, founding engineer at early-stage
-startups (founder-evaluated — a "Founding Engineer" title is NOT a seniority
-marker and should not be rejected for implied experience). Early-career only
-— no conventional seniority track (Senior/Staff/Principal/Lead).
+(describe the roles you are targeting, e.g. "software engineer, fullstack
+engineer, founding engineer at early-stage startups").
 
 ## Years of experience
 
-0-1 years. New-grad / junior. State University CS B.S. (May 2026), ~1 year combined
-experience as a startup cofounder/CTO and a short applied-AI contract role.
-Not a fit for anything requiring multiple years of professional experience.
+(describe your experience level and any relevant degree/background, e.g.
+"0-1 years, new-grad / junior, B.S. Computer Science").
 
 ## Core stack
 
-TypeScript, Python, React, Next.js, Node.js, NestJS, GraphQL, Bun, Hono,
-PostgreSQL, Redis, Docker, Kubernetes, AWS. AI/agents: Claude, OpenAI, MCP,
-RAG, LLM-as-judge evals.
+(list the languages, frameworks, and tools you want matched against job
+descriptions).
 
 ## Location
 
-New York City or San Francisco, or explicitly US-remote-friendly roles.
-Generic "United States" locations count as US-remote-friendly.
+(describe your accepted locations, or note if you are open to remote).
 
 ## Anti-criteria (reject)
 
-- Senior, Staff, Principal, or Lead titles (or any title implying 2+ years
-  required)
-- Postings explicitly requiring more than 1 year of experience
-- Non-engineering roles: PM, design, sales, recruiting, marketing, ops
-- On-site roles outside New York or San Francisco with no remote option
+- (describe titles, seniority levels, or requirements to reject)
+- (describe locations or role types to reject)
 `;
 
 // Read-boundary coercion, mirroring config.ts's toStringArray/toScheduleConfig

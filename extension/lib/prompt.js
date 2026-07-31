@@ -54,7 +54,7 @@ export function buildRequest(profile, fields, pageContext, summary, library) {
 }
 
 function systemPrompt(profile, summary, library) {
-  return `You fill job application forms on behalf of the operator Example. You receive a page context and a list of form fields (id, type, label, options, required, current value). Return a mapping for every field you can fill and a skipped entry with a reason for every field you cannot.
+  return `You fill job application forms on behalf of the candidate described in the profile below. You receive a page context and a list of form fields (id, type, label, options, required, current value). Return a mapping for every field you can fill and a skipped entry with a reason for every field you cannot.
 
 CANDIDATE PROFILE (the ONLY source of facts):
 ${JSON.stringify(profile, null, 1)}
@@ -68,9 +68,9 @@ RULES
 - File fields whose label mentions resume or CV: value "attach_resume". Any other file field: skip.
 - Fields with a non-empty current value: skip with reason "already filled" (unless the value is clearly a placeholder like "Select…", or a site-provided message template like "Hi! My name is … and here's a little bit about me…" — templates are prompts to overwrite, not answers).
 - Free-text questions about motivation, experience, projects, or "anything else": draft an answer, kind "essay". All other mappings are kind "profile".
-- Cover-letter TEXT fields (label mentions cover letter): kind "essay", 150-250 words unless maxLength says otherwise. Structure: why this company specifically (one concrete detail from the jd), then the 1-2 most relevant things the operator has built, then availability. Same essay voice rules apply — it should read like a short direct note, not a formal letter. No "Dear", no "Sincerely", no addresses.
+- Cover-letter TEXT fields (label mentions cover letter): kind "essay", 150-250 words unless maxLength says otherwise. Structure: why this company specifically (one concrete detail from the jd), then the 1-2 most relevant things the candidate has built, then availability. Same essay voice rules apply — it should read like a short direct note, not a formal letter. No "Dear", no "Sincerely", no addresses.
 - Cover-letter FILE upload fields: skip with reason "cover letter upload — generate from tracker" (never attach the resume there).
-- FOUNDER REACHOUT MESSAGES (Work at a Startup-style: a single "start a conversation" / "reach out to <name>" / "share something about you" box, often addressed to a named founder): kind "essay", but this is a cold DM to a founder, not an application essay. Structure: greet the founder by first name when the page names one ("hi wye,"); one line on who max is anchored to the SINGLE most relevant thing he's built for THEIR specific problem/stack (pick from the profile against the jd — e.g. their agent-infra stack, their payments domain); one or two sentences of concrete substance about that work; one line on what he's looking for and that he's available now; sign off with just "max". 60-120 words total. Lowercase voice, direct, zero flattery-padding ("i love what you're building" is banned unless followed by a specific reason). It must read like max typed it between classes, not like an application.
+- FOUNDER REACHOUT MESSAGES (Work at a Startup-style: a single "start a conversation" / "reach out to <name>" / "share something about you" box, often addressed to a named founder): kind "essay", but this is a cold DM to a founder, not an application essay. Structure: greet the founder by first name when the page names one ("hi wye,"); one line on who the candidate is anchored to the SINGLE most relevant thing the candidate has built for THEIR specific problem/stack (pick from the profile against the jd — e.g. their agent-infra stack, their payments domain); one or two sentences of concrete substance about that work; one line on what the candidate is looking for and that they're available now; sign off with just the candidate's first name from the profile. 60-120 words total. Lowercase voice, direct, zero flattery-padding ("i love what you're building" is banned unless followed by a specific reason). It must read like the candidate typed it quickly, not like an application.
 - Respect maxLength when present.
 - Field ids are prefixed with a frame number ("2:jf-5"), and pageContext.frames lists each frame's URL. Only fill fields belonging to the job application itself. If a frame's URL indicates an unrelated embed (chat/support widget, ads, analytics, surveys, cookie consent), skip ALL of its fields with reason "unrelated frame", and NEVER return "attach_resume" for file fields in such frames.
 
@@ -104,15 +104,15 @@ function libraryBlock(library) {
   const reuseSection = reuse.length
     ? `
 
-REUSE (the operator's own accepted answers to matching questions)
-These are the operator's own accepted answers to matching questions on prior applications — reuse each one, keeping its voice and substance, adapting ONLY company/role-specific references. When you reuse one, set "reused": true on that field.
+REUSE (the candidate's own accepted answers to matching questions)
+These are the candidate's own accepted answers to matching questions on prior applications — reuse each one, keeping its voice and substance, adapting ONLY company/role-specific references. When you reuse one, set "reused": true on that field.
 ${reuse.map(r => `Q: ${r.question}\nA: ${r.answer}`).join('\n\n')}`
     : '';
   const examplesSection = examples.length
     ? `
 
-EXAMPLES (the operator's approved answers to other questions)
-Examples of the operator's approved answers to other questions — borrow phrasing, anecdotes, and voice when relevant, but facts still come only from the profile and this library, never invented.
+EXAMPLES (the candidate's approved answers to other questions)
+Examples of the candidate's approved answers to other questions — borrow phrasing, anecdotes, and voice when relevant, but facts still come only from the profile and this library, never invented.
 ${examples.map(e => `Q: ${e.question}\nA: ${e.answer}`).join('\n\n')}`
     : '';
   return `

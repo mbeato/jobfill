@@ -6,8 +6,8 @@ import { mergeProfilePatch } from './profile-merge';
 function fixture() {
   return {
     contact: {
-      firstName: 'the operator',
-      lastName: 'Example',
+      firstName: 'Alex',
+      lastName: 'Rivera',
       pronouns: 'he/him',
       email: 'max@example.com',
       phone: '555-1234',
@@ -16,7 +16,7 @@ function fixture() {
       country: 'US',
       location: 'New York, NY',
     },
-    links: { linkedin: 'li.com/max', github: 'github.com/max', portfolio: 'max.dev' },
+    links: { linkedin: 'li.example/alex', github: 'github.example/alex', portfolio: 'alex.example' },
     workAuth: { authorizedUS: true, status: 'citizen', needsSponsorship: false, needsFutureSponsorship: false, over18: true },
     eeo: { gender: '', race: '', veteran: '', disability: '', hispanicLatino: '', sexualOrientation: '' },
     answers: { salaryExpectation: '', startDate: '', willingToRelocate: '', howDidYouHear: '' },

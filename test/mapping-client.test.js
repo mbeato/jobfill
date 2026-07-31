@@ -14,7 +14,7 @@ const FAKE_BODY = {
 
 const ARGS = {
   apiKey: 'sk-ant-test',
-  profile: { contact: { email: 'you@example.com' } },
+  profile: { contact: { email: 'alex.rivera@example.com' } },
   fields: [],
   pageContext: { url: 'https://boards.greenhouse.io/x' },
   summary: null,

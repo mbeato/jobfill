@@ -14,8 +14,8 @@ describe('applyMapping', () => {
     const seen = [];
     el.addEventListener('input', () => seen.push('input'));
     el.addEventListener('change', () => seen.push('change'));
-    const { results } = await applyMapping([{ id: f.id, value: 'Example', kind: 'profile', confidence: 1 }], {});
-    expect(el.value).toBe('Example');
+    const { results } = await applyMapping([{ id: f.id, value: 'Alex', kind: 'profile', confidence: 1 }], {});
+    expect(el.value).toBe('Alex');
     expect(seen).toEqual(['input', 'change']);
     expect(results[0].status).toBe('filled');
   });
@@ -93,7 +93,7 @@ describe('applyMapping', () => {
     mount(`<input type="text" aria-label="First Name">`);
     const [f] = collectFields(document);
     document.querySelector('input').remove(); // SPA re-render tore the node out
-    const { results } = await applyMapping([{ id: f.id, value: 'Example', kind: 'profile', confidence: 1 }], {});
+    const { results } = await applyMapping([{ id: f.id, value: 'Alex', kind: 'profile', confidence: 1 }], {});
     expect(results[0].status).toBe('stale');
   });
 
@@ -103,9 +103,9 @@ describe('applyMapping', () => {
     const old = document.querySelector('input');
     const clone = old.cloneNode(true); // keeps data-jobfill-id, like a DOM morph
     old.replaceWith(clone);
-    const { results } = await applyMapping([{ id: f.id, value: 'Example', kind: 'profile', confidence: 1 }], {});
+    const { results } = await applyMapping([{ id: f.id, value: 'Alex', kind: 'profile', confidence: 1 }], {});
     expect(results[0].status).toBe('filled');
-    expect(clone.value).toBe('Example');
+    expect(clone.value).toBe('Alex');
   });
 
   it('combobox fallback never clicks options that pre-existed the typing', async () => {
@@ -149,7 +149,7 @@ describe('applyMapping', () => {
     const [f] = collectFields(document);
     const el = document.querySelector('input');
     el.addEventListener('input', () => { el.value = ''; }); // simulate a controlled component resetting
-    const { results } = await applyMapping([{ id: f.id, value: 'Example', kind: 'profile', confidence: 1 }], {});
+    const { results } = await applyMapping([{ id: f.id, value: 'Alex', kind: 'profile', confidence: 1 }], {});
     expect(results[0].status).toBe('filled');
     expect(results[0].stuck).toBe(false);
     expect(el.style.outline).toContain('#d32f2f');
@@ -160,7 +160,7 @@ describe('applyMapping', () => {
     const [f] = collectFields(document);
     const el = document.querySelector('input');
     el.addEventListener('input', () => { setTimeout(() => { el.value = ''; }, 0); }); // async revert
-    const { results } = await applyMapping([{ id: f.id, value: 'Example', kind: 'profile', confidence: 1 }], {});
+    const { results } = await applyMapping([{ id: f.id, value: 'Alex', kind: 'profile', confidence: 1 }], {});
     expect(results[0].status).toBe('filled');
     expect(results[0].stuck).toBe(false);
     expect(el.style.outline).toContain('#d32f2f');
@@ -171,7 +171,7 @@ describe('applyMapping', () => {
     const [f] = collectFields(document);
     const el = document.querySelector('input');
     el.addEventListener('input', () => { setTimeout(() => { el.remove(); }, 0); });
-    const { results } = await applyMapping([{ id: f.id, value: 'Example', kind: 'profile', confidence: 1 }], {});
+    const { results } = await applyMapping([{ id: f.id, value: 'Alex', kind: 'profile', confidence: 1 }], {});
     expect(results[0].status).toBe('filled');
     expect('stuck' in results[0]).toBe(false);
   });
@@ -289,7 +289,7 @@ describe('applyMapping failureRecords (D-05/D-07/D-08)', () => {
   it('produces no record for a successful plain-text fill', async () => {
     mount(`<input type="text" aria-label="First Name">`);
     const [f] = collectFields(document);
-    const { failureRecords } = await applyMapping([{ id: f.id, value: 'Example', kind: 'profile', confidence: 1 }], {});
+    const { failureRecords } = await applyMapping([{ id: f.id, value: 'Alex', kind: 'profile', confidence: 1 }], {});
     expect(failureRecords).toHaveLength(0);
   });
 
@@ -305,7 +305,7 @@ describe('applyMapping failureRecords (D-05/D-07/D-08)', () => {
     const [f] = collectFields(document);
     const el = document.querySelector('input');
     el.dispatchEvent = () => { throw new Error('boom'); };
-    const { results, failureRecords } = await applyMapping([{ id: f.id, value: 'Example', kind: 'profile', confidence: 1 }], {});
+    const { results, failureRecords } = await applyMapping([{ id: f.id, value: 'Alex', kind: 'profile', confidence: 1 }], {});
     expect(results[0].status).toBe('error');
     expect(failureRecords).toHaveLength(0);
   });

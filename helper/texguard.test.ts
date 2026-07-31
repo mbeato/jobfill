@@ -7,7 +7,7 @@ const BASE = String.raw`\documentclass[letterpaper,11pt]{article}
 \input{glyphtounicode}
 \pdfgentounicode=1
 \begin{document}
-the operator Example
+Alex Rivera
 \end{document}`;
 
 const tailored = (body: string) => String.raw`\documentclass[letterpaper,11pt]{article}

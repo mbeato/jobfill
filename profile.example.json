@@ -8,6 +8,11 @@
     "real answer for as an empty string, empty array, or false — it is then left",
     "blank on a form rather than guessed.",
     "",
+    "The workAuth block ships blank/false on purpose. Those fields are legal",
+    "attestations on a real job application, and unlike the obviously-fictional",
+    "placeholders elsewhere in this file, a plausible value left there by mistake",
+    "would not be caught on review. Set each one deliberately to your own answer.",
+    "",
     "The eeo block is optional and holds special-category data (gender, race,",
     "veteran status, disability). It is sent to Anthropic only as part of a",
     "form-fill mapping prompt and never leaves your machine otherwise. Leaving",
@@ -36,11 +41,11 @@
     "portfolio": "alexrivera.example.com"
   },
   "workAuth": {
-    "authorizedUS": true,
-    "status": "U.S. Citizen",
+    "authorizedUS": false,
+    "status": "",
     "needsSponsorship": false,
     "needsFutureSponsorship": false,
-    "over18": true
+    "over18": false
   },
   "eeo": {
     "gender": "",

@@ -113,31 +113,33 @@ sweeps — is platform-independent.
 
 ## Setup
 
-1. `npm install`
-2. `npm run build` — bundles the content script with esbuild.
-   `extension/content.bundle.js` is gitignored and does not exist in a fresh
-   clone; the extension will not load in Chrome without this step.
-3. `cp profile.example.json profile.local.json`, then fill it in. This file
-   is gitignored and stays on your machine. It is also editable later from
-   the dashboard settings tab (`http://127.0.0.1:7877/#settings`), which is
-   the friendlier path for most fields — the copy-and-edit step above is
-   only to get a valid file in place before the helper's first run.
-4. `cp seek.config.example.json seek.config.json` and
-   `cp jobfill.config.example.json jobfill.config.json`. Both are gitignored;
-   read the `_note` block inside each before changing anything.
-5. `npm run helper` — starts the helper on `http://127.0.0.1:7877`. On first
+1. `npm install` — also builds the content script bundle automatically
+   (`postinstall` runs `npm run build`). `extension/content.bundle.js` is
+   gitignored and absent from a fresh clone; without it Chrome loads the
+   extension but nothing works, so this is wired to install rather than left
+   as a step you can forget.
+2. `npm run setup` — copies the three shipped templates to their gitignored
+   local counterparts: `profile.local.json`, `seek.config.json` and
+   `jobfill.config.json`. It never overwrites a file you already have, so
+   re-running it is safe. Then edit `profile.local.json` with your own
+   details. Anything you leave blank is left blank on a form rather than
+   guessed, and the `workAuth` block ships blank deliberately — those are
+   legal attestations, so set them yourself. You can also edit all of this
+   later from the dashboard settings tab (`http://127.0.0.1:7877/#settings`),
+   which is friendlier than hand-editing JSON.
+3. `npm run helper` — starts the helper on `http://127.0.0.1:7877`. On first
    boot it generates a per-install secret at `.jobfill-token` (gitignored,
-   file mode `0600`). Read that file's contents — you'll paste it into the
-   extension in the next step. The dashboard is now at
-   `http://127.0.0.1:7877`.
-6. Open `chrome://extensions`, enable Developer mode, and load the
+   file mode `0600`) and **prints it to your terminal** — that is the value
+   you paste in step 5. If you miss it, `cat .jobfill-token`. The dashboard
+   is now at `http://127.0.0.1:7877`.
+4. Open `chrome://extensions`, enable Developer mode, and load the
    `extension/` directory as an unpacked extension.
-7. Open the extension's options page and paste the token from `.jobfill-token`
-   (step 5) into the helper-token field, then upload your resume PDF and
-   save. Pasting an Anthropic API key here is optional: the extension calls
-   the local helper first, and only falls back to a direct API call — billed
-   to that key — if the helper is unreachable. Leave it blank to keep the
-   whole mapping path routed through your local `claude` CLI subscription.
+5. Open the extension's options page, paste the token from step 3 into the
+   helper-token field, then upload your resume PDF and save. Pasting an
+   Anthropic API key here is optional: the extension calls the local helper
+   first, and only falls back to a direct API call — billed to that key — if
+   the helper is unreachable. Leave it blank to keep the whole mapping path
+   routed through your local `claude` CLI subscription.
 
 If you drive jobfill from `scripts/runner.mjs` instead of a manually loaded
 extension, this handshake happens for you: the runner launches its own

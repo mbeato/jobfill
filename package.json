@@ -4,6 +4,8 @@
   "type": "module",
   "scripts": {
     "build": "esbuild extension/content/main.js --bundle --format=iife --outfile=extension/content.bundle.js",
+    "postinstall": "npm run build",
+    "setup": "node scripts/setup.mjs",
     "watch": "esbuild extension/content/main.js --bundle --format=iife --outfile=extension/content.bundle.js --watch",
     "test": "vitest run",
     "check:publishable": "node scripts/check-publishable.mjs",

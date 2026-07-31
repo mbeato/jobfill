@@ -46,7 +46,7 @@ if (sourceFlag !== -1) {
 
 // --login: first-time auth only. Opens both sites in the headed persistent
 // profile and waits indefinitely for the operator to log in — it never scrapes or
-// POSTs (that would run right now, logged-out, and just close on him mid-login,
+// POSTs (that would run right now, logged-out, and just close on them mid-login,
 // which is the exact bug this mode fixes). Session persists via the profile
 // dir itself; closing the context flushes it before exit.
 if (loginMode) {

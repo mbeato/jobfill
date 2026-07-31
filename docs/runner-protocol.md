@@ -3,8 +3,8 @@
 This is the operational runbook for the **runner**: the agent that works jobfill's
 posting queue end to end — selecting a queued posting, navigating to it, triggering
 the existing fill pipeline, waiting for it to finish, and reporting the outcome back
-to the operator. It is a living document, not a dated design spec (see `docs/superpowers/specs/`
-for those) — update it in place as the protocol evolves.
+to the operator. It is a living document, not a dated design spec — update it in place
+as the protocol evolves.
 
 Two runner implementations exist; the sequence, review rules, and hard invariants
 below apply identically to both:
@@ -16,7 +16,7 @@ below apply identically to both:
   self-seeds `profile`/`resume` into extension storage from `profile.local.json` and
   the resume PDF, waits for the operator to paste the API key in the options page on first run
   (the key persists in `.runner-profile/`, gitignored), then executes Steps 2–6 below
-  mechanically. The browser stays open after the run so the operator can review the filled form.
+  mechanically. The browser stays open after the run so you can review the filled form.
   First live run: queue row 4, Netic Agent Platform New Grad — 10/10 fields filled,
   all read-backs stuck, tailor ran, zero flags.
 - **Claude-in-Chrome (CiC) session** — the original design; a CiC session follows the
@@ -30,7 +30,7 @@ code additions are small: the `company`/`role` fields on the extension's filled 
 (`extension/background.js`), didn't-stick flag rendering in the dashboard queue view
 (`helper/dashboard.html`), and the Playwright runner itself (`scripts/runner.mjs`).
 This doc ties them together: the exact sequence a runner session follows to drive
-that surface safely, without the operator touching a single step himself.
+that surface safely, without the operator touching a single step themselves.
 
 ## Preconditions
 
@@ -61,8 +61,8 @@ any run.
 - **The Claude in Chrome browser extension is installed and enabled** in that same
   Chrome profile (a separate extension from jobfill itself — this is Anthropic's
   Chrome integration, the thing that gives this runner session its browser tools).
-- **This Claude Code session is authenticated with a direct plan** (Pro/the operator/Team/
-  Enterprise), not an API key. Chrome integration is disabled entirely under API-key
+- **This Claude Code session is authenticated with a paid Claude subscription plan**,
+  not an API key. Chrome integration is disabled entirely under API-key
   auth, regardless of `--chrome`. Before the first run, check `/mcp` → `claude-in-chrome`
   → "View tools" to confirm the live tool surface is actually present
   (`javascript_tool`, `navigate`, `read_page`/`get_page_text`, etc.) — the exact tool

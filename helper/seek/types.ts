@@ -40,14 +40,14 @@ export interface SourceConfig {
   tokens: string[];
 }
 
-// Daily cadence knobs (SCHED-01, D-04): the operator-editable, fresh-read like every
+// Daily cadence knobs (SCHED-01, D-04): operator-editable, fresh-read like every
 // other seek.config.json section — fail-closed defaults if malformed.
 export interface ScheduleConfig {
   enabled: boolean;
   targetHour: number;
 }
 
-// Batch-fill knobs (BATCH-03/04, D-14): the operator-editable, fresh-read like every
+// Batch-fill knobs (BATCH-03/04, D-14): operator-editable, fresh-read like every
 // other seek.config.json section — fail-closed defaults if malformed. No
 // targetHour — D-05 gates batch on sweep settlement, not a clock hour.
 export interface BatchConfig {

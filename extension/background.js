@@ -429,9 +429,9 @@ async function runFill(tabId, force = false, opts = {}) {
   }
 }
 
-// Explicit, popup-triggered capture (D-01/D-02/D-03): re-scrapes the page and banks the operator's
-// post-edit answers for this run's own essay fields plus any free-text fields he hand-filled
-// after the model skipped them. Never scrapes or banks fields outside those two label sets.
+// Explicit, popup-triggered capture (D-01/D-02/D-03): re-scrapes the page and banks the
+// operator's post-edit answers for this run's own essay fields plus any free-text fields
+// they hand-filled after the model skipped them. Never scrapes or banks fields outside those two label sets.
 // Skipped fields banked from unrelated-frame (third-party chat/support/cookie-consent) or
 // already-filled (pre-filled/autofilled PII) reasons are excluded (see the filter below).
 async function captureAnswers(tabId) {

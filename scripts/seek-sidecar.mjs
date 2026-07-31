@@ -25,10 +25,11 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseJobrightCard } from './lib/jobright-parse.mjs';
+import { resolveToken } from '../helper/token.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const HELPER = 'http://127.0.0.1:7877';
-const TOKEN = process.env.JOBFILL_TOKEN ?? 'REDACTED-TOKEN';
+const TOKEN = resolveToken();
 const PROFILE_DIR = join(ROOT, '.runner-profile');
 
 const args = process.argv.slice(2);

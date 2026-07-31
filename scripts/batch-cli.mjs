@@ -4,8 +4,10 @@
 // drives the browser): the CLI only POSTs to the helper and polls
 // /batch-runs/:id — it never launches a browser itself.
 
+import { resolveToken } from '../helper/token.mjs';
+
 const HELPER = 'http://127.0.0.1:7877';
-const TOKEN = process.env.JOBFILL_TOKEN ?? 'REDACTED-TOKEN';
+const TOKEN = resolveToken();
 
 const STOP_REASON_LABELS = {
   cap: 'hit the per-run cap',

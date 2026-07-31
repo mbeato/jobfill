@@ -15,6 +15,7 @@ import { assertSafeTex } from './texguard';
 export { safeDocPath };
 import { mergeProfilePatch } from './profile-merge';
 import { mapViaCLI } from './mapping';
+import { resolveToken } from './token.mjs';
 import { normalizeUrl } from './seek/normalize';
 import {
   createPostingsTable,
@@ -301,12 +302,15 @@ if (getFreshRunningBatch(db) === null) {
   db.run(`UPDATE queue SET status = 'failed', error = 'run interrupted' WHERE status = 'filling'`);
 }
 
-// Shared secret with the extension (must match HELPER_TOKEN in extension/background.js).
+// Shared secret with the extension, resolved by helper/token.mjs — env var
+// JOBFILL_TOKEN when set, else the trimmed contents of .jobfill-token at the
+// repo root, else generate a fresh one on first boot and persist it there.
 // No CORS headers are served: cross-origin pages can neither read responses nor pass
 // preflight, so only the extension (token) and the same-origin dashboard get through.
-// JOBFILL_TOKEN env overrides the committed fallback everywhere it appears
-// (here, scripts/seek.mjs, scripts/seek-sidecar.mjs) so rotation is one export.
-const TOKEN = process.env.JOBFILL_TOKEN ?? 'REDACTED-TOKEN';
+// Every other consumer (scripts/seek.mjs, scripts/seek-sidecar.mjs, scripts/batch-cli.mjs,
+// scripts/batch-runner.mjs, scripts/agent-status.mjs, scripts/lib/runner-core.mjs) resolves
+// the same token through the same precedence, so rotation is one file: .jobfill-token.
+const TOKEN = resolveToken();
 
 // Only the login-gated sidecar sources may POST /seek/results — the fetch
 // sources (greenhouse/lever/ashby/hn) are swept in-process via POST /seek and

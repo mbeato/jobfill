@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { setupRunner, fillOne } from './lib/runner-core.mjs';
 import { loadSeekConfig } from '../helper/seek/config';
 import { selectEligible, classifyReviewFlags } from '../helper/seek/batch-eligibility';
+import { resolveToken } from '../helper/token.mjs';
 
 // fillOne state -> detail.failed[].reason mapping (the two enums differ ONLY
 // in the 'failed'->'fill-failed' rename; a caught thrown fillOne is given
@@ -33,7 +34,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const EXT_DIR = join(ROOT, 'extension');
 const PROFILE_DIR = join(ROOT, '.runner-profile');
 const HELPER = 'http://127.0.0.1:7877';
-const TOKEN = process.env.JOBFILL_TOKEN ?? 'REDACTED-TOKEN';
+const TOKEN = resolveToken();
 const POLL_MS = 25_000;
 const BUDGET_MS = 600_000;
 const RESUME_PATH = '/Users/you/resume/resume.pdf';

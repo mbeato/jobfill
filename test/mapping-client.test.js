@@ -19,7 +19,7 @@ const ARGS = {
   pageContext: { url: 'https://boards.greenhouse.io/x' },
   summary: null,
   library: null,
-  helperToken: 'REDACTED-TOKEN',
+  helperToken: 'test-token',
 };
 
 function makeDeps(overrides = {}) {

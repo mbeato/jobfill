@@ -5,8 +5,10 @@
 // never holds a single request open for the sweep's duration; each poll is a
 // fresh short fetch.
 
+import { resolveToken } from '../helper/token.mjs';
+
 const HELPER = 'http://127.0.0.1:7877';
-const TOKEN = process.env.JOBFILL_TOKEN ?? 'REDACTED-TOKEN';
+const TOKEN = resolveToken();
 
 function printCounts(results) {
   console.log('[seek] fetch sources:');

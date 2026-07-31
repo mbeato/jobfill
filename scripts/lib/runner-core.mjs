@@ -17,9 +17,10 @@
 import { chromium } from 'playwright';
 import { readFileSync } from 'node:fs';
 import { join, basename } from 'node:path';
+import { resolveToken } from '../../helper/token.mjs';
 
 export const HELPER = 'http://127.0.0.1:7877';
-export const TOKEN = 'REDACTED-TOKEN';
+export const TOKEN = resolveToken();
 export const POLL_MS = 25_000;
 export const BUDGET_MS = 10 * 60_000;
 

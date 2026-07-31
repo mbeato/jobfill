@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { buildRequest, parseMapping, MAPPING_SCHEMA } from '../extension/lib/prompt.js';
 
-const profile = { contact: { email: 'you@example.com' } };
+const profile = { contact: { email: 'alex.rivera@example.com' } };
 const fields = [{ id: '0:jf-0', type: 'text', label: 'Email', required: true, value: '' }];
 const ctx = { url: 'https://boards.greenhouse.io/x', title: 'Apply', heading: 'Software Engineer' };
 
@@ -12,7 +12,7 @@ describe('buildRequest', () => {
     expect(req.output_config.format.type).toBe('json_schema');
     expect(req.output_config.format.schema).toBe(MAPPING_SCHEMA);
     expect(req.system[0].cache_control).toEqual({ type: 'ephemeral' });
-    expect(req.system[0].text).toContain('you@example.com');
+    expect(req.system[0].text).toContain('alex.rivera@example.com');
     const user = JSON.parse(req.messages[0].content);
     expect(user.fields[0].id).toBe('0:jf-0');
     expect(user.pageContext.heading).toBe('Software Engineer');

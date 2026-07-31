@@ -2,11 +2,11 @@ import { describe, it, expect } from 'vitest';
 import { enforceIdentity, isBankableSkip } from '../extension/lib/identity.js';
 
 const profile = {
-  contact: { email: 'you@example.edu', phone: '555-555-0100' },
+  contact: { email: 'alex.rivera@example.com', phone: '555-555-0100' },
   links: {
-    linkedin: 'https://www.linkedin.com/in/example/',
-    github: 'https://github.com/example',
-    portfolio: 'https://example.com',
+    linkedin: 'https://www.linkedin.com/in/alex-rivera/',
+    github: 'https://github.com/alexrivera',
+    portfolio: 'https://alexrivera.example',
   },
 };
 
@@ -19,15 +19,15 @@ describe('enforceIdentity', () => {
     const fields = [field({ id: '0:jf-1', type: 'email', label: 'Email' })];
     const mapping = { fields: [{ id: '0:jf-1', value: 'fake@x.com', kind: 'profile', confidence: 0.9 }], skipped: [] };
     const out = enforceIdentity(mapping, fields, profile);
-    expect(out.fields[0].value).toBe('you@example.edu');
-    expect(out.corrections).toEqual([{ id: '0:jf-1', category: 'email', from: 'fake@x.com', to: 'you@example.edu' }]);
+    expect(out.fields[0].value).toBe('alex.rivera@example.com');
+    expect(out.corrections).toEqual([{ id: '0:jf-1', category: 'email', from: 'fake@x.com', to: 'alex.rivera@example.com' }]);
   });
 
   it('leaves a correct email unchanged and records no correction', () => {
     const fields = [field({ id: '0:jf-1', type: 'email', label: 'Email' })];
-    const mapping = { fields: [{ id: '0:jf-1', value: 'you@example.edu', kind: 'profile', confidence: 1 }], skipped: [] };
+    const mapping = { fields: [{ id: '0:jf-1', value: 'alex.rivera@example.com', kind: 'profile', confidence: 1 }], skipped: [] };
     const out = enforceIdentity(mapping, fields, profile);
-    expect(out.fields[0].value).toBe('you@example.edu');
+    expect(out.fields[0].value).toBe('alex.rivera@example.com');
     expect(out.corrections).toHaveLength(0);
   });
 
@@ -65,9 +65,9 @@ describe('enforceIdentity', () => {
     const fields = [field({ id: '0:jf-7', type: 'email', label: 'Email' })];
     const mapping = { fields: [], skipped: [{ id: '0:jf-7', reason: 'already filled' }] };
     const out = enforceIdentity(mapping, fields, profile);
-    expect(out.fields).toEqual([{ id: '0:jf-7', value: 'you@example.edu', kind: 'profile', confidence: 1 }]);
+    expect(out.fields).toEqual([{ id: '0:jf-7', value: 'alex.rivera@example.com', kind: 'profile', confidence: 1 }]);
     expect(out.skipped).toHaveLength(0);
-    expect(out.corrections).toEqual([{ id: '0:jf-7', category: 'email', from: null, to: 'you@example.edu' }]);
+    expect(out.corrections).toEqual([{ id: '0:jf-7', category: 'email', from: null, to: 'alex.rivera@example.com' }]);
   });
 
   it('never overwrites an emergency-contact field', () => {
@@ -165,7 +165,7 @@ describe('enforceIdentity', () => {
     const fields = [field({ id: '0:jf-17', type: 'email', label: 'Email' })];
     const mapping = { fields: [], skipped: [{ id: '0:jf-17', reason: 'already filled' }] };
     const out = enforceIdentity(mapping, fields, profile);
-    expect(out.fields).toEqual([{ id: '0:jf-17', value: 'you@example.edu', kind: 'profile', confidence: 1 }]);
+    expect(out.fields).toEqual([{ id: '0:jf-17', value: 'alex.rivera@example.com', kind: 'profile', confidence: 1 }]);
     expect(out.skipped).toHaveLength(0);
   });
 
@@ -185,7 +185,7 @@ describe('enforceIdentity', () => {
       field({ id: '0:jf-1', type: 'text', label: 'Full name' }),
       field({ id: '4:jf-19', type: 'email', label: 'Email' }),
     ];
-    const mapping = { fields: [{ id: '0:jf-1', value: 'the operator Example', kind: 'profile', confidence: 1 }], skipped: [] };
+    const mapping = { fields: [{ id: '0:jf-1', value: 'Alex Rivera', kind: 'profile', confidence: 1 }], skipped: [] };
     const out = enforceIdentity(mapping, fields, profile);
     expect(out.fields).toHaveLength(1);
     expect(out.fields[0].id).toBe('0:jf-1');
@@ -197,10 +197,10 @@ describe('enforceIdentity', () => {
       field({ id: '0:jf-1', type: 'text', label: 'Full name' }),
       field({ id: '0:jf-20', type: 'email', label: 'Email' }),
     ];
-    const mapping = { fields: [{ id: '0:jf-1', value: 'the operator Example', kind: 'profile', confidence: 1 }], skipped: [] };
+    const mapping = { fields: [{ id: '0:jf-1', value: 'Alex Rivera', kind: 'profile', confidence: 1 }], skipped: [] };
     const out = enforceIdentity(mapping, fields, profile);
-    expect(out.fields.find(f => f.id === '0:jf-20')).toEqual({ id: '0:jf-20', value: 'you@example.edu', kind: 'profile', confidence: 1 });
-    expect(out.corrections).toEqual([{ id: '0:jf-20', category: 'email', from: null, to: 'you@example.edu' }]);
+    expect(out.fields.find(f => f.id === '0:jf-20')).toEqual({ id: '0:jf-20', value: 'alex.rivera@example.com', kind: 'profile', confidence: 1 });
+    expect(out.corrections).toEqual([{ id: '0:jf-20', category: 'email', from: null, to: 'alex.rivera@example.com' }]);
   });
 });
 

@@ -8,7 +8,6 @@
     "setup": "node scripts/setup.mjs",
     "watch": "esbuild extension/content/main.js --bundle --format=iife --outfile=extension/content.bundle.js --watch",
     "test": "vitest run",
-    "check:publishable": "node scripts/check-publishable.mjs",
     "helper": "bun helper/server.ts",
     "seek": "bun scripts/seek.mjs",
     "batch": "bun scripts/batch-cli.mjs",

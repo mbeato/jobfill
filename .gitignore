@@ -16,3 +16,6 @@ seek.config.json
 # Per-install helper secret, generated on first helper boot (helper/token.mjs).
 # JOBFILL_TOKEN env var overrides it when set.
 .jobfill-token
+
+# Personal path overrides. Copy jobfill.config.example.json to start.
+jobfill.config.json

@@ -12,12 +12,14 @@
 // importing helper/seek/*.ts directly is fine.)
 // The browser idles forever after the run so the operator can review filled tabs.
 
+import { existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setupRunner, fillOne } from './lib/runner-core.mjs';
 import { loadSeekConfig } from '../helper/seek/config';
 import { selectEligible, classifyReviewFlags } from '../helper/seek/batch-eligibility';
 import { resolveToken } from '../helper/token.mjs';
+import { resolvePaths } from '../helper/paths.mjs';
 
 // fillOne state -> detail.failed[].reason mapping (the two enums differ ONLY
 // in the 'failed'->'fill-failed' rename; a caught thrown fillOne is given
@@ -37,11 +39,18 @@ const HELPER = 'http://127.0.0.1:7877';
 const TOKEN = resolveToken();
 const POLL_MS = 25_000;
 const BUDGET_MS = 600_000;
-const RESUME_PATH = '/Users/you/resume/resume.pdf';
+const RESUME_PATH = join(resolvePaths().resumeDir, 'resume.pdf');
 
 const runId = Number(process.argv[2]);
 if (!runId) {
   console.error('usage: bun scripts/batch-runner.mjs <runId>');
+  process.exit(1);
+}
+// A silent proceed with a nonexistent resume would surface later as a
+// confusing fill failure — same reasoning as scripts/runner.mjs's default
+// resume check.
+if (!existsSync(RESUME_PATH)) {
+  console.error(`default resume not found: ${RESUME_PATH} — set the "resumeDir" key in jobfill.config.json`);
   process.exit(1);
 }
 

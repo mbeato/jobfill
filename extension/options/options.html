@@ -16,6 +16,11 @@
   <input type="password" id="key" placeholder="sk-ant-…">
   <div id="keyState" class="muted"></div>
 
+  <label for="token">Helper token</label>
+  <input type="password" id="token" placeholder="32 hex characters">
+  <div id="tokenState" class="muted"></div>
+  <div class="muted">printed by the helper on first boot and stored in <code>.jobfill-token</code> at the repo root — the Playwright runner seeds this automatically, so pasting it here is only needed if you're running the helper manually.</div>
+
   <label for="profile">Profile JSON</label>
   <textarea id="profile" spellcheck="false" placeholder='{"contact": {…}, "work": […], …}' readonly></textarea>
   <div id="profileState" class="muted"></div>

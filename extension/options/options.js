@@ -4,11 +4,15 @@ let pendingResume = null;
 init();
 
 async function init() {
-  const { apiKey, profile, resume, tailorEnabled = true } = await chrome.storage.local.get(['apiKey', 'profile', 'resume', 'tailorEnabled']);
+  const { apiKey, helperToken, profile, resume, tailorEnabled = true } = await chrome.storage.local.get(['apiKey', 'helperToken', 'profile', 'resume', 'tailorEnabled']);
   $('tailor').checked = tailorEnabled;
   if (apiKey) {
     $('key').value = apiKey;
     $('keyState').textContent = 'key saved';
+  }
+  if (helperToken) {
+    $('token').value = helperToken;
+    $('tokenState').textContent = 'token saved';
   }
   if (profile) {
     $('profile').value = JSON.stringify(profile, null, 2);
@@ -38,6 +42,9 @@ $('save').addEventListener('click', async () => {
 
   const key = $('key').value.trim();
   if (key) patch.apiKey = key;
+
+  const token = $('token').value.trim();
+  if (token) patch.helperToken = token;
 
   if (pendingResume) patch.resume = pendingResume;
   patch.tailorEnabled = $('tailor').checked;

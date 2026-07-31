@@ -3,11 +3,18 @@ import { resolveTargetTab } from './lib/trigger.js';
 import { mapFields } from './lib/mapping-client.js';
 
 const HELPER = 'http://127.0.0.1:7877';
-// Must match TOKEN in helper/server.ts — the helper rejects unauthenticated cross-origin callers.
-const HELPER_TOKEN = 'REDACTED-TOKEN';
 // Mirrors lib/identity.js — gates which skipped fields are safe to bank as free-text Q&A
 // (a skipped dropdown/radio/checkbox with a hand-picked option value must never be captured).
 const TEXT_TYPES = new Set(['text', 'email', 'tel', 'url', 'textarea']);
+
+// Per-install helper secret, stored in chrome.storage.local.helperToken. Populated by
+// scripts/lib/runner-core.mjs's automated seed, or pasted once into the options page.
+// Returns '' when unset — helperFetch does not fabricate a value, so a misconfigured
+// install fails loudly (401) rather than silently degrading.
+async function helperToken() {
+  const { helperToken: token } = await chrome.storage.local.get('helperToken');
+  return token || '';
+}
 
 async function helperFetch(path, options = {}, timeoutMs = 10000) {
   const ctrl = new AbortController();
@@ -15,7 +22,7 @@ async function helperFetch(path, options = {}, timeoutMs = 10000) {
   try {
     const res = await fetch(`${HELPER}${path}`, {
       ...options,
-      headers: { ...(options.headers || {}), 'x-jobfill-token': HELPER_TOKEN },
+      headers: { ...(options.headers || {}), 'x-jobfill-token': await helperToken() },
       signal: ctrl.signal,
     });
     if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || `helper ${res.status}`);
@@ -253,7 +260,7 @@ async function runFill(tabId, force = false, opts = {}) {
       pageContext,
       summary,
       library,
-      helperToken: HELPER_TOKEN,
+      helperToken: await helperToken(),
     });
 
     const identity = enforceIdentity(mapping, fields, profile);

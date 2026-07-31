@@ -12,3 +12,7 @@ helper/jobfill.db.*
 
 # Personal watchlist + source toggles. Copy seek.config.example.json to start.
 seek.config.json
+
+# Per-install helper secret, generated on first helper boot (helper/token.mjs).
+# JOBFILL_TOKEN env var overrides it when set.
+.jobfill-token

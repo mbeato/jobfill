@@ -65,8 +65,13 @@ console.log('     workAuth ships blank on purpose — those are legal attestatio
 console.log('     (You can also edit this later from the dashboard, which is friendlier.)\n');
 console.log('  2. npm run helper');
 console.log('     First boot mints your per-install token and prints it. Dashboard: http://127.0.0.1:7877\n');
-console.log('  3. Load extension/ as an unpacked extension at chrome://extensions');
-console.log('     (Developer mode -> Load unpacked), then paste the token from step 2 into');
-console.log('     Details -> Extension options -> Helper token, and Save.\n');
+console.log('  3. Load the extension at chrome://extensions — turn on Developer mode,');
+console.log('     click "Load unpacked", and select this exact directory:\n');
+console.log(`         ${join(ROOT, 'extension')}\n`);
+console.log('     (macOS file picker: press Cmd+Shift+G and paste that path.)');
+console.log('     Then paste the token from step 2 into Details -> Extension options ->');
+console.log('     Helper token, and Save.\n');
+console.log('     Chrome does not pin new extensions: click the puzzle-piece button right');
+console.log('     of the address bar and pin jobfill to see it in your toolbar.\n');
 console.log('Nothing runs on its own: every job board ships disabled, and jobfill never submits');
 console.log('an application for you. See README.md for the full picture.\n');

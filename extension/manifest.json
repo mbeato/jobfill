@@ -2,7 +2,13 @@
   "manifest_version": 3,
   "name": "jobfill",
   "version": "0.1.0",
-  "description": "Fill job applications from your own profile using your Anthropic API key.",
+  "description": "Fill job applications from your own profile, via a helper running on your machine. Never submits anything for you.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
   "permissions": ["storage", "webNavigation", "tabs", "scripting"],
   "host_permissions": ["https://api.anthropic.com/*", "http://127.0.0.1:7877/*", "http://*/*", "https://*/*"],
   "externally_connectable": { "matches": ["http://127.0.0.1:7877/*"] },
@@ -15,6 +21,15 @@
       "run_at": "document_idle"
     }
   ],
-  "action": { "default_popup": "popup/popup.html", "default_title": "jobfill" },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "jobfill",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
   "options_page": "options/options.html"
 }

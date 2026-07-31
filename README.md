@@ -132,8 +132,15 @@ sweeps — is platform-independent.
    file mode `0600`) and **prints it to your terminal** — that is the value
    you paste in step 5. If you miss it, `cat .jobfill-token`. The dashboard
    is now at `http://127.0.0.1:7877`.
-4. Open `chrome://extensions`, enable Developer mode, and load the
-   `extension/` directory as an unpacked extension.
+4. Open `chrome://extensions`, turn on **Developer mode** (top right), click
+   **Load unpacked**, and select this repo's `extension/` directory. `npm run
+   setup` prints its absolute path — in the macOS file picker press
+   `Cmd+Shift+G` and paste it rather than clicking through folders.
+
+   Chrome will warn that jobfill can "read and change all your data on all
+   websites". That is inherent to a tool that fills forms on arbitrary
+   employer career sites; the content script only ever writes values sourced
+   from your own profile.
 5. Open the extension's options page, paste the token from step 3 into the
    helper-token field, then upload your resume PDF and save. Pasting an
    Anthropic API key here is optional: the extension calls the local helper
@@ -153,8 +160,12 @@ extension storage automatically on first run.
   `latex` and `claude` booleans reporting whether `pdflatex` and the `claude`
   CLI were found on this machine.
 - `http://127.0.0.1:7877` in a browser — loads the dashboard.
-- The jobfill icon in Chrome's toolbar — clicking it opens the popup and
-  shows a status, confirming the extension loaded and can reach the helper.
+- The jobfill popup. Chrome does not pin new extensions to the toolbar, so
+  there will be no jobfill icon there until you add one: click the
+  puzzle-piece (Extensions) button to the right of the address bar, find
+  **jobfill**, and click the pin next to it. Then click the jobfill icon —
+  the popup opens and shows a status, confirming the extension loaded and
+  can reach the helper.
 
 ## Discovery sweeps
 

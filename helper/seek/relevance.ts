@@ -76,11 +76,11 @@ function buildPrompt(profileSummary: string, jdText: string, posting: PostingRow
 This posting comes from a login-gated source: no job description is available, and the operator reviews every queued posting by hand before applying. Judge from the title, company, and location alone — mark relevant when the title matches the target roles with no seniority markers and the location is acceptable; reject only on a visible mismatch (seniority-marked or non-engineering title, out-of-market location). Do NOT reject merely because the description is missing.
 `
     : '';
-  return `You are judging whether a job posting is worth the operator applying to, based on his profile below.
+  return `You are judging whether a job posting is worth applying to, based on the profile below.
 
 Be precision-biased: if the posting is ambiguous or you are unsure whether it fits, judge it NOT relevant. Only mark relevant when the posting clearly matches the profile.
 ${metadataGuidance}
-=== MAX'S PROFILE (steering summary) ===
+=== CANDIDATE PROFILE (steering summary) ===
 ${profileSummary}
 === END PROFILE ===
 
@@ -98,7 +98,7 @@ Return a verdict: relevant (true/false) and a one-line reason explaining the ver
 }
 
 /**
- * Scores one posting against the operator's profile via a single tool-less mapViaCLI
+ * Scores one posting against the candidate's profile via a single tool-less mapViaCLI
  * call (D-06, no batching). Rethrows on any mapImpl failure (CLI error,
  * timeout, malformed output) — the caller applies D-08's held-for-retry
  * semantics; scoreRelevance never swallows a failure into a false verdict.

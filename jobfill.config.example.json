@@ -26,8 +26,8 @@
     "on your PATH; the defaults below are probed against common install",
     "locations and fall back to the bare binary name."
   ],
-
   "resumeDir": "~/resume",
+  "resumePdf": "~/resume/resume.pdf",
   "baseTex": "~/resume/resume.tex",
   "roundsDir": "~/resume/rounds",
   "memoryDir": "~/resume/memory",

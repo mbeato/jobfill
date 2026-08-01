@@ -66,6 +66,12 @@ export function resolvePaths({ file = CONFIG_FILE } = {}) {
   }
 
   const resumeDir = pick('resumeDir', join(homedir(), 'resume'));
+  // The PDF the runners attach. Configurable as a whole path because the file is
+  // rarely named resume.pdf — it is usually the person's own name, and both
+  // scripts/runner.mjs and scripts/batch-runner.mjs hard-exit when it is missing.
+  // Hardcoding the basename made resumeDir alone insufficient to point at a real
+  // file, which silently broke every scheduled batch run.
+  const resumePdf = pick('resumePdf', join(resumeDir, 'resume.pdf'));
   const baseTex = pick('baseTex', join(resumeDir, 'resume.tex'));
   const roundsDir = pick('roundsDir', join(resumeDir, 'rounds'));
   const memoryDir = pick('memoryDir', join(resumeDir, 'memory'));
@@ -82,6 +88,7 @@ export function resolvePaths({ file = CONFIG_FILE } = {}) {
 
   return {
     resumeDir,
+    resumePdf,
     baseTex,
     roundsDir,
     memoryDir,

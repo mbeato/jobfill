@@ -6,7 +6,7 @@
 // and polls the queue until the fill leaves `filling`.
 //
 // Usage: node scripts/runner.mjs <queueId> [--resume /path/to/resume.pdf]
-// With no --resume flag, the default is <resumeDir>/resume.pdf, where
+// With no --resume flag, the default is jobfill.config.json's "resumePdf", where
 // resumeDir comes from helper/paths.mjs (jobfill.config.json's "resumeDir"
 // key, or JOBFILL_RESUME_DIR, or the portable default).
 // The browser stays open after the run so the operator can review the filled form.
@@ -35,7 +35,7 @@ const queueId = Number(args[0]);
 const resumeFlag = args.indexOf('--resume');
 const explicitResume = resumeFlag !== -1;
 if (explicitResume && !args[resumeFlag + 1]) { console.error('--resume requires a path'); process.exit(1); }
-const resumePath = explicitResume ? args[resumeFlag + 1] : join(resolvePaths().resumeDir, 'resume.pdf');
+const resumePath = explicitResume ? args[resumeFlag + 1] : resolvePaths().resumePdf;
 if (explicitResume && !existsSync(resumePath)) { console.error(`--resume file not found: ${resumePath}`); process.exit(1); }
 if (!queueId) { console.error('usage: node scripts/runner.mjs <queueId> [--resume pdf]'); process.exit(1); }
 // A silent proceed with a nonexistent default resume would surface later as
@@ -43,7 +43,7 @@ if (!queueId) { console.error('usage: node scripts/runner.mjs <queueId> [--resum
 // above, just gated on queueId first so bare `node scripts/runner.mjs` still
 // prints usage rather than a resume-not-found error.
 if (resumeFlag === -1 && !existsSync(resumePath)) {
-  console.error(`default resume not found: ${resumePath} — pass --resume, or set the "resumeDir" key in jobfill.config.json`);
+  console.error(`default resume not found: ${resumePath} — pass --resume, or set the "resumePdf" key in jobfill.config.json (it is rarely named resume.pdf)`);
   process.exit(1);
 }
 

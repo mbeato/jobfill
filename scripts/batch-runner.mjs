@@ -39,7 +39,7 @@ const HELPER = 'http://127.0.0.1:7877';
 const TOKEN = resolveToken();
 const POLL_MS = 25_000;
 const BUDGET_MS = 600_000;
-const RESUME_PATH = join(resolvePaths().resumeDir, 'resume.pdf');
+const RESUME_PATH = resolvePaths().resumePdf;
 
 const runId = Number(process.argv[2]);
 if (!runId) {
@@ -50,7 +50,7 @@ if (!runId) {
 // confusing fill failure — same reasoning as scripts/runner.mjs's default
 // resume check.
 if (!existsSync(RESUME_PATH)) {
-  console.error(`default resume not found: ${RESUME_PATH} — set the "resumeDir" key in jobfill.config.json`);
+  console.error(`default resume not found: ${RESUME_PATH} — set the "resumePdf" key in jobfill.config.json to your resume's full path (it is rarely named resume.pdf)`);
   process.exit(1);
 }
 

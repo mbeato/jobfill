@@ -60,6 +60,7 @@ import {
   getSweepById,
   getRunningSweep,
   getLastRunState,
+  getLastScheduledRunState,
 } from './seek/runs';
 import { beginSweep, runSweepJob, spawnSidecar, SweepAlreadyRunningError, type JobDeps } from './seek/job';
 import { shouldFireToday } from './seek/scheduler';
@@ -372,7 +373,10 @@ const jobDeps: JobDeps = {
 // loop, or a bad tick would crash the whole helper process.
 async function checkSchedule() {
   const cfg = await loadSeekConfig();
-  const last = getLastRunState(db);
+  // Scheduled-only: a manual sweep must not satisfy or consume the scheduler's
+  // own daily state. The batch gate below deliberately still reads any-trigger
+  // state, because a manual sweep does refresh the queue batch works from.
+  const last = getLastScheduledRunState(db);
   if (!shouldFireToday(new Date(), cfg.schedule, last)) return;
   try {
     const { runId } = beginSweep(db, 'scheduled');

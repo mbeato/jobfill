@@ -104,6 +104,14 @@ export function reconcileInterruptedSweeps(db: Database): number {
   return stuck.length;
 }
 
+// Any-trigger day state: "has discovery settled today, by whatever means?"
+//
+// This is the right question for the BATCH gate — a manual sweep refreshes the
+// queue just as a scheduled one does, so batch should not sit idle waiting for
+// the scheduler when fresh data already exists.
+//
+// It is the WRONG question for the sweep scheduler itself; use
+// getLastScheduledRunState for that. See its comment.
 export function getLastRunState(db: Database): LastRunState | null {
   const latest = db.query(`SELECT MAX(run_date) as run_date FROM sweeps`).get() as { run_date: string | null } | null;
   if (!latest?.run_date) return null;
@@ -112,6 +120,38 @@ export function getLastRunState(db: Database): LastRunState | null {
     .get(latest.run_date) as { status: SweepStatus };
   const { count } = db
     .query(`SELECT COUNT(*) as count FROM sweeps WHERE run_date = ?`)
+    .get(latest.run_date) as { count: number };
+  return { date: latest.run_date, status: status.status, attempts: count };
+}
+
+// Scheduled-only day state: "has the SCHEDULED sweep run today, and how many
+// times has the scheduler attempted it?"
+//
+// shouldFireToday consumes this to answer two questions that are about the
+// scheduler's own bookkeeping, not about discovery in general:
+//   - status 'ok' today  -> the daily job is done, skip (D-02)
+//   - attempts >= 3      -> the daily retry budget is spent, stop (D-03)
+//
+// Feeding it any-trigger state made both wrong. An operator sweeping manually
+// before targetHour set status 'ok' for the day, so the scheduled sweep was
+// silently cancelled — observed live: a 01:49 manual sweep suppressed the 07:00
+// run, and every earlier day only worked because the scheduled sweep happened
+// to be the day's first. Manual runs also consumed the retry cap, so three
+// manual sweeps could block the scheduler outright.
+//
+// MAX(run_date) is taken over scheduled rows only: the most recent day the
+// scheduler itself ran, which is what "yesterday resets" in shouldFireToday
+// means. A day with only manual sweeps correctly reports no scheduled run.
+export function getLastScheduledRunState(db: Database): LastRunState | null {
+  const latest = db.query(`SELECT MAX(run_date) as run_date FROM sweeps WHERE trigger = 'scheduled'`).get() as
+    | { run_date: string | null }
+    | null;
+  if (!latest?.run_date) return null;
+  const status = db
+    .query(`SELECT status FROM sweeps WHERE run_date = ? AND trigger = 'scheduled' ORDER BY id DESC LIMIT 1`)
+    .get(latest.run_date) as { status: SweepStatus };
+  const { count } = db
+    .query(`SELECT COUNT(*) as count FROM sweeps WHERE run_date = ? AND trigger = 'scheduled'`)
     .get(latest.run_date) as { count: number };
   return { date: latest.run_date, status: status.status, attempts: count };
 }

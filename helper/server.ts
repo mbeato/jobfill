@@ -6,6 +6,7 @@ import { resolvePaths } from './paths.mjs';
 import { normalizeQuestion, matchLibrary, selectFewShot, groupByQuestion, type AnswerRow } from './answers';
 import { createFailuresTable, insertFailures, listFailures, type FailureRecordInput } from './failures';
 import { createQueueTable, insertQueueEntry, updateQueueStatus, deleteQueueEntry, listQueue, InvalidQueueStatusError } from './queue';
+import { findApplicationIdForUrlKey } from './queue-link';
 import { createApplicationsTable, insertApplication, updateApplicationStatus, deriveGhost, promoteUnsubmittedToApplied, InvalidApplicationStatusError } from './applications';
 // safeDocPath lives in its own module (not inline here) so it stays importable
 // by a test without triggering this file's Bun.serve() side effect on import.
@@ -1108,7 +1109,27 @@ Bun.serve({
         // Persistence-boundary allowlist: this url is later rendered as an anchor and
         // passed to chrome.tabs.query/create by the trigger — never store a non-http(s) scheme.
         if (!/^https?:\/\//i.test(String(b.url))) return json({ error: 'url must be http(s)' }, 400);
-        return json(insertQueueEntry(db, b.url), 201);
+        const queued = insertQueueEntry(db, b.url);
+        // Link the other direction. The POST /applications handler links only when the
+        // queue row already exists — but a fill POSTs the application FIRST and the
+        // queue row in the same second, so resolveQueueId finds nothing and the link
+        // is never written. The row then sits at application_id NULL, the submit
+        // cascade in PATCH /queue/:id has nothing to promote, and the application stays at its
+        // pre-submit status reading "awaiting submit" for a posting the operator
+        // already submitted. The D-18 boot backfill repairs this, but only at
+        // startup, so a long-running helper accumulates unlinked rows indefinitely.
+        //
+        // Newest-wins matches the D-18 backfill and D-03 latest-fill-wins. Only ever
+        // fills a NULL link — never re-points an existing one, so a deliberate link
+        // survives. server.ts owns cross-table writes (see insertApplication's docstring).
+        if (queued && queued.application_id == null && queued.url_key) {
+          const appId = findApplicationIdForUrlKey(db, queued.url_key);
+          if (appId !== null) {
+            const linked = updateQueueStatus(db, queued.id, { application_id: appId });
+            return json(linked ?? queued, 201);
+          }
+        }
+        return json(queued, 201);
       }
       // GET /profile — serve profile.local.json (source of truth on disk) so any
       // browser's copy of the extension can self-seed instead of requiring a
@@ -1299,8 +1320,24 @@ Bun.serve({
           // constructs NO 'submitted' status (D-02) — markSubmitted() stays the sole
           // producer; promoteUnsubmittedToApplied only ever writes 'applied' onto an
           // already-'unsubmitted' row and is idempotent for a re-submitted row.
-          if (row && row.status === 'submitted' && before?.status !== 'submitted' && row.application_id) {
-            promoteUnsubmittedToApplied(db, row.application_id);
+          if (row && row.status === 'submitted' && before?.status !== 'submitted') {
+            // Resolve the link here rather than trusting it. A row submitted while
+            // application_id was NULL used to promote nothing, and could never
+            // recover: the D-18 boot backfill links it but deliberately does not
+            // touch applications.status (D-19), and this cascade only fires on the
+            // transition, which has already passed. The row stayed linked, the
+            // application stayed at its pre-submit status, and the tab read
+            // "awaiting submit" forever. Observed live on 11 postings.
+            //
+            // POST /queue now links at insert, so a NULL here should be rare — this
+            // is the belt to that braces, at the one place the operator's intent is
+            // unambiguous: they just clicked mark-submitted.
+            let appId = row.application_id;
+            if (appId == null) {
+              appId = findApplicationIdForUrlKey(db, row.url_key);
+              if (appId !== null) updateQueueStatus(db, row.id, { application_id: appId });
+            }
+            if (appId) promoteUnsubmittedToApplied(db, appId);
           }
           return json(row);
         } catch (e) {

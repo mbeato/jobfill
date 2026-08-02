@@ -89,21 +89,25 @@ test('deriveGhost table: only an applied row silent >= GHOST_DAYS ghosts (D-13/D
   const stampDaysAgo = (n: number) =>
     new Date(NOW.getTime() - n * 86400000).toISOString().replace('T', ' ').slice(0, 19);
 
+  // toMatchObject, not toEqual: deriveGhost also returns ghost_after_days and lane
+  // (per-lane thresholds, see ghost-policy.ts). These assertions are about the ghost
+  // DECISION, which is unchanged — a row with no url still uses the 21-day default.
+
   // applied at 20 days -> not ghosted, days_silent floored to 20
   const a20 = deriveGhost({ status: 'applied', status_changed_at: stampDaysAgo(20) }, NOW);
-  expect(a20).toEqual({ ghosted: false, days_silent: 20 });
+  expect(a20).toMatchObject({ ghosted: false, days_silent: 20, ghost_after_days: GHOST_DAYS });
 
   // applied at GHOST_DAYS (21) -> ghosted
   const a21 = deriveGhost({ status: 'applied', status_changed_at: stampDaysAgo(GHOST_DAYS) }, NOW);
-  expect(a21).toEqual({ ghosted: true, days_silent: 21 });
+  expect(a21).toMatchObject({ ghosted: true, days_silent: 21 });
 
   // a non-'applied' row never ghosts, even at 40 days (D-13 boundary)
   const replied40 = deriveGhost({ status: 'replied', status_changed_at: stampDaysAgo(40) }, NOW);
-  expect(replied40).toEqual({ ghosted: false, days_silent: 40 });
+  expect(replied40).toMatchObject({ ghosted: false, days_silent: 40 });
 
   // a pre-submit row never ghosts, even at 40 days
   const unsub40 = deriveGhost({ status: PRE_SUBMIT_STATUS, status_changed_at: stampDaysAgo(40) }, NOW);
-  expect(unsub40).toEqual({ ghosted: false, days_silent: 40 });
+  expect(unsub40).toMatchObject({ ghosted: false, days_silent: 40 });
 });
 
 test('insertApplication persists jd on the row (D-02/D-03)', () => {

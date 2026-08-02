@@ -1,4 +1,5 @@
 import type { Database } from 'bun:sqlite';
+import { ghostDaysFor, laneForUrl, GHOST_DAYS_DEFAULT } from './ghost-policy';
 
 // Post-submission CRM: the applications table's lifecycle + derived ghost signal.
 // Mirrors queue.ts/failures.ts — dependency-injected `Database`, self-defending at
@@ -71,7 +72,9 @@ export const APPLICATION_STATUSES = new Set([
 
 // D-16: the ghost threshold is a named exported constant in the helper, NOT
 // seek.config.json. A row silent this many days (or more) derives ghosted=true.
-export const GHOST_DAYS = 21;
+// Retained as the DEFAULT threshold — the value used for any board without an
+// explicit entry in GHOST_DAYS_BY_LANE. Per-lane overrides live in ghost-policy.ts.
+export const GHOST_DAYS = GHOST_DAYS_DEFAULT;
 
 // T-999.1-01: allowlist for map_source, the diagnostic twin of APPLICATION_STATUSES
 // above. Coerced, not thrown, at the persistence boundary — status is a lifecycle
@@ -280,11 +283,23 @@ export function updateApplicationStatus(
 // 'applied' rows ONLY — a non-'applied' or pre-submit row never ghosts, regardless
 // of how long it has sat. Nothing is stored; the badge is entirely derived.
 export function deriveGhost(
-  row: { status: string; status_changed_at: string | null },
+  row: { status: string; status_changed_at: string | null; url?: string | null },
   now: Date = new Date(),
-): { ghosted: boolean; days_silent: number } {
+): { ghosted: boolean; days_silent: number; ghost_after_days: number; lane: string } {
   const daysSilent = daysSince(row.status_changed_at, now);
-  return { ghosted: row.status === 'applied' && daysSilent >= GHOST_DAYS, days_silent: daysSilent };
+  // Per-lane threshold (see ghost-policy.ts): a workatastartup row silent for two
+  // weeks is dead, while an ATS row at the same age is merely in a queue. `url` is
+  // optional so existing callers that pass only the lifecycle fields keep the
+  // default 21 rather than silently changing behaviour.
+  const ghostAfter = ghostDaysFor(row.url);
+  return {
+    ghosted: row.status === 'applied' && daysSilent >= ghostAfter,
+    days_silent: daysSilent,
+    // Surfaced so the UI can say WHY a row is or is not ghosted, instead of the
+    // reader having to know the table of thresholds.
+    ghost_after_days: ghostAfter,
+    lane: laneForUrl(row.url),
+  };
 }
 
 // Defensive: sqlite datetime('now') stores 'YYYY-MM-DD HH:MM:SS' in UTC with no zone.

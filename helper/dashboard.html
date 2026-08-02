@@ -1396,7 +1396,7 @@ function renderAppRows(rows) {
           </span>
           ${crit ? `<span class="jf-sub" title="${esc(crit)}">${esc(crit)}</span>` : ''}
           ${mapCrit ? `<span class="jf-sub" title="${esc(a.map_fallback_reason || mapCrit)}">${esc(mapCrit)}</span>` : ''}
-          ${a.ghosted ? `<span class="jf-sub"><span class="jf-tag jf-tag--attn">ghosted · ${Number(a.days_silent)}d</span></span>` : ''}
+          ${a.ghosted ? `<span class="jf-sub"><span class="jf-tag jf-tag--attn" title="silent ${Number(a.days_silent)} days; ${esc(String(a.lane || 'other'))} rows ghost at ${Number(a.ghost_after_days)}">ghosted · ${Number(a.days_silent)}d</span></span>` : ''}
         </td>
         <td>
           <label class="jf-sr" for="anote-${a.id}">notes for ${esc(a.company)}</label>
